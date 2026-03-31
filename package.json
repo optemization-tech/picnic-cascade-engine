@@ -1,0 +1,24 @@
+{
+  "name": "picnic-cascade-engine",
+  "version": "0.1.0",
+  "description": "Date dependency cascade engine for PicnicHealth Notion workspace",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "tunnel": "npx ngrok http 3000",
+    "patch:task-date": "node scripts/patch-task-date.js",
+    "fire:date-webhook": "node scripts/fire-date-webhook.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,39 @@
+# PicnicHealth Cascade Engine
+
+You are working on a Node.js server that handles date dependency cascading for
+PicnicHealth's Notion-based clinical study management system. When PMs edit task
+dates, this server receives webhooks from Notion and propagates changes through
+dependency chains.
+
+## Architecture
+- src/engine/ = PURE FUNCTIONS. No Notion API calls. No side effects. Data in, data out.
+- src/notion/ = All Notion API interaction. Retry, rate limiting, token rotation.
+- src/routes/ = Express handlers that orchestrate engine + notion calls.
+- test/ = Vitest. Engine tests use fixture data, no mocking needed.
+
+## Business Rules
+- Business day = Mon-Fri. All date math uses src/utils/business-days.js.
+- FROZEN_STATUSES = ['Done', 'N/A']. Frozen tasks don't move in cascades but DO count in roll-ups.
+- Anti-loop: LMBS checkbox (task-level) + Import Mode checkbox (study-level).
+- Webhook payload-first: read properties from webhook body, never GET the source task.
+
+## Notion API
+- Base: https://api.notion.com/v1
+- Version header: Notion-Version: 2022-06-28
+- Rate limit: 3 req/s per token. We use token rotation for higher throughput.
+- Property names are exact strings (e.g., 'Last Modified By System', 'Reference Start Date').
+
+## Key Files
+- src/engine/cascade.js — 4 cascade modes (push-right, pull-left, pull-right, drag-right)
+- src/engine/parent-subtask.js — Case A (parent→subtask shift) + Case B (subtask→parent roll-up)
+- src/engine/classify.js — Delta classification table
+- src/utils/business-days.js — All date math utilities
+- test/fixtures/study-tasks.json — 265-task fixture for testing
+
+## When Writing Tests
+- Engine tests: import function, pass fixture data, assert output. No mocking.
+- Use Vitest (npm test). Follows Jest API conventions.
+- Every bug fix must include a regression test.
+
+## Design Spec
+Full spec at: ~/Documents/Claude/ai-consultant-experiment/clients/picnic-health/2026-03-30-cascade-engine-code-port-design.md
