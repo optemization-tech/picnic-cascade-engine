@@ -200,7 +200,7 @@ function pullLeftUpstream(sourceId, newStart, updatesMap, taskById) {
 // clamped to blocker constraints.
 // Used by: pull-left (Pass 2)
 // -----------------------------------------------------------
-function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, taskById) {
+function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, taskById, extraSeedIds = []) {
   const sourceTask = taskById[sourceId];
   if (!sourceTask) return;
 
@@ -221,15 +221,16 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
   }
   if (deltaBD >= 0) return;
 
-  // BFS downstream from source
+  // BFS downstream from source + any shifted upstream tasks
+  const seedExclusions = new Set([sourceId, ...extraSeedIds]);
   const downstream = new Set();
-  const bfsQueue = [sourceId];
+  const bfsQueue = [sourceId, ...extraSeedIds];
   while (bfsQueue.length > 0) {
     const tid = bfsQueue.shift();
     const t = taskById[tid];
     if (!t) continue;
     for (const depId of (t.blockingIds || [])) {
-      if (!downstream.has(depId) && depId !== sourceId) {
+      if (!downstream.has(depId) && !seedExclusions.has(depId)) {
         downstream.add(depId);
         bfsQueue.push(depId);
       }
@@ -368,7 +369,7 @@ function pullRightUpstream(sourceId, refStart, deltaBD, updatesMap, taskById) {
 // -----------------------------------------------------------
 function resolveCrossChainFrustrations(
   sourceId, sourceOldEnd, sourceNewEnd,
-  updatesMap, taskById, prePositions, maxRounds = 5
+  updatesMap, taskById, prePositions, maxRounds = 5, extraSeedIds = []
 ) {
   const oldEndD = parseDate(sourceOldEnd);
   const srcNewEnd = updatesMap[sourceId]
@@ -384,13 +385,14 @@ function resolveCrossChainFrustrations(
   }
   if (deltaBD >= 0) return;
 
-  // Collect downstream task IDs (BFS from source)
+  // Collect downstream task IDs (BFS from source + shifted upstream)
+  const seedExclusions = new Set([sourceId, ...extraSeedIds]);
   const downstream = new Set();
-  const q = [sourceId];
+  const q = [sourceId, ...extraSeedIds];
   while (q.length > 0) {
     const tid = q.shift();
     for (const depId of (taskById[tid]?.blockingIds || [])) {
-      if (!downstream.has(depId) && depId !== sourceId) {
+      if (!downstream.has(depId) && !seedExclusions.has(depId)) {
         downstream.add(depId);
         q.push(depId);
       }
@@ -487,8 +489,100 @@ function resolveCrossChainFrustrations(
       }
       delete updatesMap[tid];
     }
-    gapPreservingDownstream(sourceId, sourceOldEnd, sourceNewEnd, updatesMap, taskById);
+    gapPreservingDownstream(sourceId, sourceOldEnd, sourceNewEnd, updatesMap, taskById, extraSeedIds);
   }
+}
+
+// -----------------------------------------------------------
+// validateConstraints: post-cascade safety net.
+// Topological sort over ALL tasks. For each task with
+// predecessors, verify start >= nextBD(max(predecessor ends)).
+// Fixes violations only — does NOT collapse gaps.
+// -----------------------------------------------------------
+function validateConstraints(updatesMap, taskById) {
+  const allIds = Object.keys(taskById);
+  const fixedTaskIds = [];
+
+  // Topological sort (Kahn's)
+  const inDegree = {};
+  for (const id of allIds) inDegree[id] = 0;
+  for (const id of allIds) {
+    const t = taskById[id];
+    if (!t) continue;
+    for (const bid of (t.blockedByIds || [])) {
+      if (taskById[bid]) inDegree[id]++;
+    }
+  }
+  const queue = [];
+  for (const id of allIds) {
+    if (inDegree[id] === 0) queue.push(id);
+  }
+  const sorted = [];
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    sorted.push(cur);
+    for (const depId of (taskById[cur]?.blockingIds || [])) {
+      if (inDegree[depId] !== undefined) {
+        inDegree[depId]--;
+        if (inDegree[depId] === 0) queue.push(depId);
+      }
+    }
+  }
+
+  // Detect cycles: if topo sort is incomplete, some tasks are in cycles
+  const cycleDetected = sorted.length < allIds.length;
+
+  // Process in topo order: fix violations only
+  for (const taskId of sorted) {
+    const task = taskById[taskId];
+    if (!task || !task.start || !task.end) continue;
+    if (isFrozen(task)) continue;
+    if ((task.blockedByIds || []).length === 0) continue;
+
+    let earliestAllowed = null;
+    for (const blockerId of task.blockedByIds) {
+      const blocker = taskById[blockerId];
+      if (!blocker) continue;
+      if (isFrozen(blocker)) continue;
+      const blockerEnd = updatesMap[blockerId]
+        ? parseDate(updatesMap[blockerId].newEnd)
+        : blocker.end;
+      if (!blockerEnd) continue;
+      const candidate = nextBusinessDay(blockerEnd);
+      if (!earliestAllowed || candidate > earliestAllowed) earliestAllowed = candidate;
+    }
+    if (!earliestAllowed) continue;
+
+    const effectiveStart = updatesMap[taskId]
+      ? parseDate(updatesMap[taskId].newStart)
+      : task.start;
+    if (effectiveStart >= earliestAllowed) continue;
+
+    // Violation — snap forward
+    const duration = updatesMap[taskId]?.duration || task.duration || 1;
+    const newEnd = addBusinessDays(earliestAllowed, duration - 1);
+
+    updatesMap[taskId] = {
+      taskId,
+      taskName: task.name,
+      newStart: formatDate(earliestAllowed),
+      newEnd: formatDate(newEnd),
+      duration,
+    };
+    // Mutate taskById so downstream tasks in topo order see corrected position
+    taskById[taskId].start = earliestAllowed;
+    taskById[taskId].end = newEnd;
+
+    fixedTaskIds.push(taskId);
+  }
+
+  return {
+    fixedCount: fixedTaskIds.length,
+    fixedTaskIds,
+    cycleDetected,
+    sortedCount: sorted.length,
+    totalCount: allIds.length,
+  };
 }
 
 // ============================================================
@@ -554,6 +648,9 @@ export function runCascade({
       diagnostics.unresolvedResidue = upstreamDiag.unresolvedResidue;
       diagnostics.monotonicSafe = upstreamDiag.monotonicSafe;
 
+      // Collect shifted upstream task IDs for fan-out propagation
+      const shiftedUpstreamIds = Object.keys(updatesMap);
+
       // Save positions before gap-preserving pass (for cross-chain frustration detection)
       const prePositions = {};
       for (const id of Object.keys(taskById)) {
@@ -563,8 +660,8 @@ export function runCascade({
         }
       }
 
-      gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById);
-      resolveCrossChainFrustrations(sourceTaskId, refEnd, newEnd, updatesMap, taskById, prePositions);
+      gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById, shiftedUpstreamIds);
+      resolveCrossChainFrustrations(sourceTaskId, refEnd, newEnd, updatesMap, taskById, prePositions, 5, shiftedUpstreamIds);
       break;
     }
 
@@ -579,6 +676,16 @@ export function runCascade({
 
     default:
       return { updates: [], movedTaskMap: {}, movedTaskIds: [], summary: `Unknown cascadeMode: ${cascadeMode}` };
+  }
+
+  // Post-cascade constraint validation — catches pre-existing violations
+  // and any edge cases the mode-specific passes missed
+  const validationResult = validateConstraints(updatesMap, taskById);
+  diagnostics.constraintFixCount = validationResult.fixedCount;
+  diagnostics.constraintFixTaskIds = validationResult.fixedTaskIds;
+  if (validationResult.cycleDetected) {
+    diagnostics.cycleDetected = true;
+    diagnostics.cycleMissedCount = validationResult.totalCount - validationResult.sortedCount;
   }
 
   // Build output

@@ -48,6 +48,10 @@ function buildActivityDetails({ parsed, classified, patched, constrainedSource, 
         : [],
       clampedEdges: Array.isArray(diagnostics.clampedEdges) ? diagnostics.clampedEdges : [],
     },
+    validation: {
+      constraintFixCount: diagnostics.constraintFixCount || 0,
+      constraintFixTaskIds: diagnostics.constraintFixTaskIds || [],
+    },
     error: error
       ? {
         errorCode: error.code || null,
