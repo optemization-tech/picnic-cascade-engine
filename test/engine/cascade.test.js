@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runCascade } from '../../src/engine/cascade.js';
-import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain } from '../fixtures/cascade-tasks.js';
+import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream } from '../fixtures/cascade-tasks.js';
 import { twoChainSharedTask, crossChainClampedByOtherBlocker } from '../fixtures/cross-chain-tasks.js';
 
 describe('runCascade', () => {
@@ -385,6 +385,42 @@ describe('runCascade', () => {
       expect(cUpdate).toBeDefined();
       expect(cUpdate.newStart).toBe('2026-04-07'); // Tue (was Fri Apr 03, +2 BD)
       expect(cUpdate.newEnd).toBe('2026-04-08');   // Wed (was Mon Apr 06, +2 BD)
+    });
+
+    // @behavior BUG-2A2-DOUBLE-SHIFT
+    it('pull-right does not double-shift root blocker reachable via multiple paths (bug 2A.2)', () => {
+      const tasks = diamondUpstream();
+      // Source start moves +5 BD: Fri Apr 3 → Fri Apr 10
+      const result = runCascade({
+        sourceTaskId: 'source',
+        sourceTaskName: 'Source',
+        newStart: '2026-04-10',
+        newEnd: '2026-04-13',
+        refStart: '2026-04-03',
+        refEnd: '2026-04-06',
+        startDelta: 5,
+        endDelta: 5,
+        cascadeMode: 'pull-right',
+        tasks,
+      });
+
+      // Root should shift exactly +5 BD (Mon Mar 30 → Mon Apr 6)
+      // Bug: was shifting +10 BD because root was visited from both mid1 and mid2
+      const rootUpdate = result.updates.find(u => u.taskId === 'root');
+      expect(rootUpdate).toBeDefined();
+      expect(rootUpdate.newStart).toBe('2026-04-06'); // Mon (was Mon Mar 30, +5 BD)
+      expect(rootUpdate.newEnd).toBe('2026-04-07');   // Tue (was Tue Mar 31, +5 BD)
+
+      // Mid1 and Mid2 should also shift exactly +5 BD
+      const mid1 = result.updates.find(u => u.taskId === 'mid1');
+      expect(mid1).toBeDefined();
+      expect(mid1.newStart).toBe('2026-04-08'); // Wed (was Wed Apr 1, +5 BD)
+      expect(mid1.newEnd).toBe('2026-04-09');   // Thu (was Thu Apr 2, +5 BD)
+
+      const mid2 = result.updates.find(u => u.taskId === 'mid2');
+      expect(mid2).toBeDefined();
+      expect(mid2.newStart).toBe('2026-04-08');
+      expect(mid2.newEnd).toBe('2026-04-09');
     });
 
     it('drag-right shifts ALL gapped upstream blockers (not just tight)', () => {

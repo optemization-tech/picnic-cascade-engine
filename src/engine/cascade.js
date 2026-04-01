@@ -336,18 +336,13 @@ function pullRightUpstream(sourceId, refStart, deltaBD, updatesMap, taskById) {
       if (!blocker || !blocker.start || !blocker.end) continue;
       if (isFrozen(blocker)) continue;
 
-      const effStart = updatesMap[blockerId]
-        ? parseDate(updatesMap[blockerId].newStart)
-        : blocker.start;
-      const effEnd = updatesMap[blockerId]
-        ? parseDate(updatesMap[blockerId].newEnd)
-        : blocker.end;
+      // Always shift from ORIGINAL dates — deltaBD is constant for all
+      // upstream blockers. Using updatesMap dates caused double-shifting
+      // when a blocker was reachable via multiple paths (bug 2A.2).
+      const finalStart = addBusinessDays(blocker.start, deltaBD);
+      const finalEnd = addBusinessDays(blocker.end, deltaBD);
 
-      const finalStart = addBusinessDays(effStart, deltaBD);
-      const finalEnd = addBusinessDays(effEnd, deltaBD);
-
-      const existing = updatesMap[blockerId];
-      if (!existing || finalEnd > parseDate(existing.newEnd)) {
+      if (!updatesMap[blockerId]) {
         updatesMap[blockerId] = {
           taskId: blockerId,
           taskName: blocker.name,

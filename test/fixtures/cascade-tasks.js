@@ -103,3 +103,29 @@ export function gappedUpstreamChain() {
     task('a', 'Task A', '2026-04-09', '2026-04-10', { blockedByIds: ['b'] }),
   ];
 }
+
+/**
+ * Diamond upstream: root reachable via two paths from source.
+ *
+ *       Root (Mon-Tue)
+ *      /             \
+ *   Mid1 (Wed-Thu)  Mid2 (Wed-Thu)
+ *      \             /
+ *       Source (Fri-Mon)
+ *
+ * Root: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]
+ * Mid1: Apr 01 (Wed) - Apr 02 (Thu)  [2 BD]  blocked by Root
+ * Mid2: Apr 01 (Wed) - Apr 02 (Thu)  [2 BD]  blocked by Root
+ * Source: Apr 03 (Fri) - Apr 06 (Mon) [2 BD]  blocked by Mid1 & Mid2
+ *
+ * Bug 2A.2: when source shifts +5 BD, root was double-shifted to +10 BD
+ * because it was reachable from both Mid1 and Mid2.
+ */
+export function diamondUpstream() {
+  return [
+    task('root', 'Root', '2026-03-30', '2026-03-31', { blockingIds: ['mid1', 'mid2'] }),
+    task('mid1', 'Mid1', '2026-04-01', '2026-04-02', { blockedByIds: ['root'], blockingIds: ['source'] }),
+    task('mid2', 'Mid2', '2026-04-01', '2026-04-02', { blockedByIds: ['root'], blockingIds: ['source'] }),
+    task('source', 'Source', '2026-04-03', '2026-04-06', { blockedByIds: ['mid1', 'mid2'] }),
+  ];
+}
