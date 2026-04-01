@@ -26,6 +26,7 @@ function buildPayload(overrides = {}) {
 }
 
 describe('guards parseWebhookPayload', () => {
+  // @behavior BEH-GUARD-FREEZE
   it('parses core fields and deltas', () => {
     const parsed = parseWebhookPayload(buildPayload());
     expect(parsed.skip).toBe(false);
@@ -41,6 +42,7 @@ describe('guards parseWebhookPayload', () => {
     expect(parsed.skip).toBe(true);
   });
 
+  // @behavior BEH-GUARD-IMPORT-MODE
   it('extracts import mode from rollup array', () => {
     const parsed = parseWebhookPayload(buildPayload({
       properties: {
@@ -48,6 +50,27 @@ describe('guards parseWebhookPayload', () => {
       },
     }));
     expect(parsed.importMode).toBe(true);
+  });
+
+  // @behavior BEH-GUARD-IMPORT-MODE
+  it('extracts import mode from direct checkbox', () => {
+    const parsed = parseWebhookPayload(buildPayload({
+      properties: {
+        'Import Mode': { checkbox: true },
+      },
+    }));
+    expect(parsed.importMode).toBe(true);
+  });
+
+  // @behavior BEH-GUARD-FREEZE
+  it('captures frozen status from payload', () => {
+    const parsed = parseWebhookPayload(buildPayload({
+      properties: {
+        Status: { status: { name: 'Done' } },
+      },
+    }));
+    expect(parsed.status).toBe('Done');
+    expect(isFrozen(parsed)).toBe(true);
   });
 });
 

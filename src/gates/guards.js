@@ -13,6 +13,7 @@ import {
 export function parseWebhookPayload(payload) {
   const body = payload?.body || payload || {};
   const data = body?.data || body;
+  const executionId = body?.executionId || body?.details?.executionId || data?.executionId || null;
   const pageId = data?.id || null;
   const props = data?.properties || {};
 
@@ -87,6 +88,7 @@ export function parseWebhookPayload(payload) {
     hasParent: parentRel.length > 0,
     hasSubtasks: subtaskRel.length > 0,
     triggeredByUserId: data?.last_edited_by?.id || null,
+    executionId,
     rawProperties: props,
   };
 }

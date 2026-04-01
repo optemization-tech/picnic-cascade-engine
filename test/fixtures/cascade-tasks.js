@@ -83,7 +83,7 @@ export function chainWithFrozen() {
 }
 
 /**
- * v5 adjacency test: gapped upstream blocker
+ * Gapped upstream chain for pull-right tests.
  * D → [gap] → C → B → A (tight chain except D→C has a gap)
  *
  * D: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]
@@ -92,10 +92,8 @@ export function chainWithFrozen() {
  * A: Apr 09 (Thu) - Apr 10 (Fri)  [2 BD]   (tight after B)
  *
  * Deps: D blocks C, C blocks B, B blocks A
- * When A's start moves right, pullRightUpstream should:
- * - Shift B (tight with A)
- * - Shift C (tight with B)
- * - SKIP D (gap before C — pre-existing gap → don't absorb)
+ * When A's start moves right, pullRightUpstream should shift ALL
+ * upstream blockers by the same delta (gap-preserving), including D.
  */
 export function gappedUpstreamChain() {
   return [

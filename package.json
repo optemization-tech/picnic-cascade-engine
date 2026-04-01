@@ -8,6 +8,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "vitest",
+    "test:traceability": "node scripts/check-behavior-traceability.js",
+    "test:ci": "npm run test:traceability && npm run test",
     "test:watch": "vitest --watch",
     "tunnel": "npx ngrok http 3000",
     "patch:task-date": "node scripts/patch-task-date.js",

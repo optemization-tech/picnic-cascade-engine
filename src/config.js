@@ -30,6 +30,7 @@ export const config = {
     tokens: collectTokens(),
     studyTasksDbId: required('STUDY_TASKS_DB_ID'),
     studiesDbId: required('STUDIES_DB_ID'),
+    activityLogDbId: process.env.ACTIVITY_LOG_DB_ID || null,
   },
   activityLogWebhookUrl: process.env.ACTIVITY_LOG_WEBHOOK_URL || null,
 };

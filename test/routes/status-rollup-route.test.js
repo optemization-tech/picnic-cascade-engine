@@ -48,6 +48,51 @@ describe('status-rollup route error reporting', () => {
     vi.clearAllMocks();
   });
 
+  // @behavior BEH-GUARD-IMPORT-MODE
+  it('skips rollup side effects when study import mode is enabled', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'task-1',
+      taskName: 'Task One',
+      studyId: 'study-1',
+    });
+    mocks.isSystemModified.mockReturnValue(false);
+    mocks.mockClient.getPage
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        properties: {
+          'Parent Task': { relation: [{ id: 'parent-1' }] },
+          Study: { relation: [{ id: 'study-1' }] },
+          'Last Modified By System': { checkbox: false },
+          'Task Name': { title: [{ plain_text: 'Task One' }] },
+        },
+      })
+      .mockResolvedValueOnce({
+        id: 'study-1',
+        properties: { 'Import Mode': { checkbox: true } },
+      });
+    mocks.normalizeTask.mockReturnValue({
+      id: 'task-1',
+      name: 'Task One',
+      parentId: 'parent-1',
+      studyId: 'study-1',
+      lastModifiedBySystem: false,
+    });
+
+    const req = { body: { data: { id: 'task-1' } } };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handleStatusRollup(req, res);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.mockClient.queryDatabase).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
+    expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
+  });
+
+  // @behavior BEH-AUTOMATION-REPORTING
   it('reports to study Automation Reporting when async processing fails', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,

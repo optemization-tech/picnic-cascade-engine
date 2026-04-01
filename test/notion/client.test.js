@@ -198,4 +198,32 @@ describe('NotionClient', () => {
     });
     expect(page2Body.start_cursor).toBe('cursor-2');
   });
+
+  // @behavior BEH-AUTOMATION-REPORTING
+  it('reportStatus patches Automation Reporting with formatted rich text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'study-1' }),
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+    await client.reportStatus('study-1', 'success', 'Cascade complete');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0];
+    expect(call[0]).toContain('/pages/study-1');
+    const body = JSON.parse(call[1].body);
+    const rich = body.properties['Automation Reporting'].rich_text[0];
+    expect(rich.text.content).toContain('❇️');
+    expect(rich.text.content).toContain('Cascade complete');
+    expect(rich.annotations.color).toBe('green_background');
+  });
 });

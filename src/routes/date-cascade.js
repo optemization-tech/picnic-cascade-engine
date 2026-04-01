@@ -6,25 +6,93 @@ import { runParentSubtask } from '../engine/parent-subtask.js';
 import { enforceConstraints } from '../engine/constraints.js';
 import { NotionClient } from '../notion/client.js';
 import { queryStudyTasks } from '../notion/queries.js';
+import { ActivityLogService } from '../services/activity-log.js';
 
 const notionClient = new NotionClient({ tokens: config.notion.tokens });
+const activityLogService = new ActivityLogService({
+  notionClient,
+  activityLogDbId: config.notion.activityLogDbId,
+});
 const DIRECT_PARENT_WARNING = '⚠️ This task has subtasks — edit a subtask directly to shift dates and trigger cascading.';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fireActivityLog(payload) {
-  if (!config.activityLogWebhookUrl) return;
-  try {
-    await fetch(config.activityLogWebhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (error) {
-    console.warn('[date-cascade] activity log failed:', error.message);
-  }
+function summarizeFailure(error) {
+  return `Cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
+}
+
+function buildActivityDetails({ parsed, classified, patched, constrainedSource, cascadeResult, error, noActionReason }) {
+  const diagnostics = cascadeResult?.diagnostics || {};
+  return {
+    parentMode: classified?.parentMode || null,
+    movement: {
+      updatedCount: patched?.updatedCount ?? 0,
+      movedTaskIds: cascadeResult?.movedTaskIds || [],
+      startDeltaBusinessDays: classified?.startDelta ?? parsed?.startDelta ?? null,
+      endDeltaBusinessDays: classified?.endDelta ?? parsed?.endDelta ?? null,
+    },
+    sourceDates: {
+      originalStart: parsed?.refStart || null,
+      originalEnd: parsed?.refEnd || null,
+      modifiedStart: constrainedSource?.newStart || parsed?.newStart || null,
+      modifiedEnd: constrainedSource?.newEnd || parsed?.newEnd || null,
+    },
+    crossChain: {
+      capHit: Boolean(diagnostics.capReached),
+      residueCount: Array.isArray(diagnostics.unresolvedResidue) ? diagnostics.unresolvedResidue.length : 0,
+      residueExamples: Array.isArray(diagnostics.unresolvedResidue)
+        ? diagnostics.unresolvedResidue.slice(0, 5).map((taskId) => ({ taskId, reason: 'cap_unresolved' }))
+        : [],
+      clampedEdges: Array.isArray(diagnostics.clampedEdges) ? diagnostics.clampedEdges : [],
+    },
+    error: error
+      ? {
+        errorCode: error.code || null,
+        errorMessage: String(error.message || error).slice(0, 400),
+        phase: error.phase || 'date-cascade',
+      }
+      : { errorCode: null, errorMessage: null, phase: null },
+    noActionReason: noActionReason || null,
+    constrained: constrainedSource?.constrained ?? null,
+    merged: constrainedSource?.merged ?? null,
+  };
+}
+
+async function logTerminalEvent({
+  parsed,
+  classified,
+  status,
+  summary,
+  patched,
+  constrainedSource,
+  cascadeResult,
+  noActionReason,
+  error,
+}) {
+  await activityLogService.logTerminalEvent({
+    workflow: 'Date Cascade',
+    status,
+    triggerType: 'Automation',
+    executionId: parsed?.executionId || null,
+    timestamp: new Date().toISOString(),
+    cascadeMode: classified?.cascadeMode || 'N/A',
+    sourceTaskId: parsed?.taskId || null,
+    sourceTaskName: parsed?.taskName || null,
+    studyId: parsed?.studyId || null,
+    triggeredByUserId: parsed?.triggeredByUserId || null,
+    summary,
+    details: buildActivityDetails({
+      parsed,
+      classified,
+      patched,
+      constrainedSource,
+      cascadeResult,
+      noActionReason,
+      error,
+    }),
+  });
 }
 
 async function clearSourceLmbsOnSkip(taskId) {
@@ -80,10 +148,42 @@ async function processDateCascade(payload) {
     await clearSourceLmbsOnSkip(parsed.taskId);
     return;
   }
-  if (isImportMode(parsed)) return;
-  if (isFrozen(parsed)) return;
-  if (!parsed.hasDates) return;
-  if (!parsed.studyId) return;
+  if (isImportMode(parsed)) {
+    await logTerminalEvent({
+      parsed,
+      status: 'no_action',
+      summary: `No action: Import Mode enabled for ${parsed.taskName || 'task'}`,
+      noActionReason: 'import_mode_enabled',
+    });
+    return;
+  }
+  if (isFrozen(parsed)) {
+    await logTerminalEvent({
+      parsed,
+      status: 'no_action',
+      summary: `No action: ${parsed.taskName || 'task'} is in a frozen status`,
+      noActionReason: 'frozen_status',
+    });
+    return;
+  }
+  if (!parsed.hasDates) {
+    await logTerminalEvent({
+      parsed,
+      status: 'no_action',
+      summary: `No action: ${parsed.taskName || 'task'} has no dates`,
+      noActionReason: 'missing_dates',
+    });
+    return;
+  }
+  if (!parsed.studyId) {
+    await logTerminalEvent({
+      parsed,
+      status: 'no_action',
+      summary: `No action: ${parsed.taskName || 'task'} is missing Study relation`,
+      noActionReason: 'missing_study',
+    });
+    return;
+  }
 
   try {
     await notionClient.reportStatus(parsed.studyId, 'info', `Cascade started for ${parsed.taskName}...`);
@@ -96,6 +196,13 @@ async function processDateCascade(payload) {
       } else {
         await notionClient.reportStatus(parsed.studyId, 'warning', classified.reason || 'No cascade mode determined');
       }
+      await logTerminalEvent({
+        parsed,
+        classified,
+        status: 'no_action',
+        summary: `No action: ${classified.reason || 'No cascade mode determined'}`,
+        noActionReason: classified.reason || 'no_cascade_mode',
+      });
       return;
     }
 
@@ -160,6 +267,16 @@ async function processDateCascade(payload) {
     const updates = Array.from(updatesByTaskId.values());
     if (updates.length === 0) {
       await notionClient.reportStatus(parsed.studyId, 'info', `No updates needed for ${parsed.taskName}`);
+      await logTerminalEvent({
+        parsed,
+        classified,
+        status: 'no_action',
+        summary: `No action: no updates needed for ${parsed.taskName}`,
+        patched: { updatedCount: 0 },
+        constrainedSource,
+        cascadeResult,
+        noActionReason: 'zero_updates',
+      });
       return;
     }
 
@@ -187,25 +304,22 @@ async function processDateCascade(payload) {
       `Cascade complete for ${parsed.taskName}: ${classified.cascadeMode} (${patched.updatedCount} task updates)`,
     );
 
-    await fireActivityLog({
-      workflow: 'Date Cascade',
-      triggerType: 'Automation',
-      cascadeMode: classified.cascadeMode,
-      sourceTaskId: parsed.taskId,
-      sourceTaskName: parsed.taskName,
-      studyId: parsed.studyId,
-      status: 'Success',
-      summary: `${classified.cascadeMode}: ${parsed.taskName}`,
-      details: {
-        parentMode: classified.parentMode,
-        startDelta: classified.startDelta,
-        endDelta: classified.endDelta,
-        constrained: constrainedSource.constrained,
-        merged: constrainedSource.merged,
-        updatedCount: patched.updatedCount,
-      },
-      triggeredByUserId: parsed.triggeredByUserId,
-      timestamp: new Date().toISOString(),
+    const capReached = Boolean(cascadeResult?.diagnostics?.capReached);
+    const residueCount = Array.isArray(cascadeResult?.diagnostics?.unresolvedResidue)
+      ? cascadeResult.diagnostics.unresolvedResidue.length
+      : 0;
+
+    await logTerminalEvent({
+      parsed,
+      classified,
+      status: capReached ? 'failed' : 'success',
+      summary: capReached
+        ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
+        : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
+      patched,
+      constrainedSource,
+      cascadeResult,
+      noActionReason: null,
     });
   } catch (error) {
     await notionClient.reportStatus(
@@ -213,6 +327,13 @@ async function processDateCascade(payload) {
       'error',
       `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
     );
+    await logTerminalEvent({
+      parsed,
+      status: 'failed',
+      summary: summarizeFailure(error),
+      noActionReason: null,
+      error,
+    });
     throw error;
   } finally {
     try {

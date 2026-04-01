@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   runParentSubtask: vi.fn(),
   enforceConstraints: vi.fn(),
   queryStudyTasks: vi.fn(),
+  activityLogService: {
+    logTerminalEvent: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -25,6 +28,7 @@ vi.mock('../../src/config.js', () => ({
       tokens: ['token-1'],
       studyTasksDbId: 'db-study-tasks',
       studiesDbId: 'db-studies',
+      activityLogDbId: 'db-activity-log',
     },
     activityLogWebhookUrl: null,
   },
@@ -46,6 +50,9 @@ vi.mock('../../src/engine/cascade.js', () => ({ runCascade: mocks.runCascade }))
 vi.mock('../../src/engine/parent-subtask.js', () => ({ runParentSubtask: mocks.runParentSubtask }));
 vi.mock('../../src/engine/constraints.js', () => ({ enforceConstraints: mocks.enforceConstraints }));
 vi.mock('../../src/notion/queries.js', () => ({ queryStudyTasks: mocks.queryStudyTasks }));
+vi.mock('../../src/services/activity-log.js', () => ({
+  ActivityLogService: vi.fn(() => mocks.activityLogService),
+}));
 
 import { handleDateCascade } from '../../src/routes/date-cascade.js';
 
@@ -62,8 +69,10 @@ describe('date-cascade route safety', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true, pageId: 'page-1' });
   });
 
+  // @behavior BEH-LMBS-LIFECYCLE
   it('clears LMBS on anti-loop skip', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
@@ -84,8 +93,71 @@ describe('date-cascade route safety', () => {
     expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('task-1', {
       'Last Modified By System': { checkbox: false },
     });
+    expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
+  // @behavior BEH-GUARD-IMPORT-MODE
+  it('exits early with no side effects when import mode is enabled', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 0,
+      endDelta: 1,
+    });
+    mocks.isSystemModified.mockReturnValue(false);
+    mocks.isImportMode.mockReturnValue(true);
+    mocks.isFrozen.mockReturnValue(false);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
+    expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchBatch).not.toHaveBeenCalled();
+    expect(mocks.mockClient.clearStudyLmbsFlags).not.toHaveBeenCalled();
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      details: expect.objectContaining({ noActionReason: 'import_mode_enabled' }),
+    }));
+  });
+
+  // @behavior BEH-GUARD-FREEZE
+  it('exits early with no side effects when task status is frozen', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 0,
+      endDelta: 1,
+    });
+    mocks.isSystemModified.mockReturnValue(false);
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(true);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
+    expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchBatch).not.toHaveBeenCalled();
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      details: expect.objectContaining({ noActionReason: 'frozen_status' }),
+    }));
+  });
+
+  // @behavior BEH-PARENT-DIRECT-EDIT-BLOCK
   it('applies Error 1 side effects with exact warning text', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
@@ -127,9 +199,15 @@ describe('date-cascade route safety', () => {
         },
       },
     });
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      summary: expect.stringContaining('No action'),
+    }));
   });
 
-  it('skips roll-up tasks in immediate unlock and always runs study-wide cleanup', async () => {
+  // @behavior BEH-LMBS-LIFECYCLE
+  // @behavior BEH-AUTOMATION-REPORTING
+  it('skips roll-up tasks, reports start/success, and always runs study-wide cleanup', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
       taskId: 'source',
@@ -197,6 +275,25 @@ describe('date-cascade route safety', () => {
       studyTasksDbId: 'db-study-tasks',
       studyId: 'study-1',
     });
+    expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
+      1,
+      'study-1',
+      'info',
+      'Cascade started for Source...',
+    );
+    expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
+      2,
+      'study-1',
+      'success',
+      'Cascade complete for Source: push-right (3 task updates)',
+    );
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'success',
+      summary: 'push-right: Source (3 updates)',
+      details: expect.objectContaining({
+        movement: expect.objectContaining({ updatedCount: 3 }),
+      }),
+    }));
   });
 
   it('runs study-wide cleanup in finally when processing throws', async () => {
@@ -226,5 +323,9 @@ describe('date-cascade route safety', () => {
       studyTasksDbId: 'db-study-tasks',
       studyId: 'study-1',
     });
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      summary: expect.stringContaining('Cascade failed'),
+    }));
   });
 });

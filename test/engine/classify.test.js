@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { classify } from '../../src/engine/classify.js';
 
 describe('classify', () => {
+  // @behavior BEH-MODE-PUSH-RIGHT
   it('maps push-right deltas correctly', () => {
     const result = classify(
       {
@@ -22,6 +23,8 @@ describe('classify', () => {
     expect(result.cascadeMode).toBe('push-right');
   });
 
+  // @behavior BEH-MODE-PULL-LEFT
+  // @behavior BEH-MODE-DRAG-RIGHT
   it('maps pull-left and drag-right deltas correctly', () => {
     const pullLeft = classify(
       {
@@ -54,6 +57,27 @@ describe('classify', () => {
       1,
     );
     expect(dragRight.cascadeMode).toBe('drag-right');
+  });
+
+  // @behavior BEH-MODE-PULL-RIGHT
+  it('maps pull-right deltas correctly', () => {
+    const result = classify(
+      {
+        taskId: 't1',
+        taskName: 'Task 1',
+        newStart: '2026-04-02',
+        newEnd: '2026-04-02',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-02',
+        hasParent: false,
+      },
+      [],
+      1,
+      0,
+    );
+
+    expect(result.skip).toBe(false);
+    expect(result.cascadeMode).toBe('pull-right');
   });
 
   it('sets case-a when source has subtasks in graph', () => {
@@ -98,6 +122,7 @@ describe('classify', () => {
     expect(result.parentMode).toBe('case-b');
   });
 
+  // @behavior BEH-PARENT-DIRECT-EDIT-BLOCK
   it('blocks direct right-shift edits on top-level parent tasks', () => {
     const result = classify(
       {
