@@ -43,13 +43,14 @@ export class NotionClient {
     this.tokenUsage.set(token, updated);
   }
 
-  async request(method, path, body) {
+  async request(method, path, body, { tracer } = {}) {
     const maxAttempts = this.retry.maxAttempts || 5;
     const baseMs = this.retry.baseMs || 500;
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const token = this._nextToken();
+      const tokenIndex = (this.tokenIndex + this.tokens.length - 1) % this.tokens.length;
       await this._throttleToken(token);
 
       try {
@@ -79,12 +80,16 @@ export class NotionClient {
         if (!retryable || attempt === maxAttempts) throw error;
         const jitter = Math.floor(Math.random() * 100);
         const backoff = retryAfterMs ?? (baseMs * (2 ** (attempt - 1)) + jitter);
+        if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: response.status, tokenIndex });
+        console.log(JSON.stringify({ event: 'notion_retry', attempt, backoff, status: response.status, tokenIndex }));
         await sleep(backoff);
       } catch (err) {
         lastError = err;
         if (attempt === maxAttempts) break;
         const jitter = Math.floor(Math.random() * 100);
         const backoff = baseMs * (2 ** (attempt - 1)) + jitter;
+        if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: err.status || 0, tokenIndex });
+        console.log(JSON.stringify({ event: 'notion_retry', attempt, backoff, status: err.status || 0, tokenIndex }));
         await sleep(backoff);
       }
     }
@@ -96,15 +101,15 @@ export class NotionClient {
     return this.request('GET', `/pages/${pageId}`);
   }
 
-  async patchPage(pageId, properties) {
+  async patchPage(pageId, properties, { tracer } = {}) {
     const payloadProperties = { ...properties };
     if (!Object.prototype.hasOwnProperty.call(payloadProperties, 'Last Modified By System')) {
       payloadProperties['Last Modified By System'] = { checkbox: true };
     }
-    return this.request('PATCH', `/pages/${pageId}`, { properties: payloadProperties });
+    return this.request('PATCH', `/pages/${pageId}`, { properties: payloadProperties }, { tracer });
   }
 
-  async queryDatabase(dbId, filter, pageSize = 100) {
+  async queryDatabase(dbId, filter, pageSize = 100, { tracer } = {}) {
     let hasMore = true;
     let cursor = undefined;
     const results = [];
@@ -113,7 +118,7 @@ export class NotionClient {
       const body = { filter, page_size: pageSize };
       if (cursor) body.start_cursor = cursor;
 
-      const data = await this.request('POST', `/databases/${dbId}/query`, body);
+      const data = await this.request('POST', `/databases/${dbId}/query`, body, { tracer });
       results.push(...(data.results || []));
       hasMore = Boolean(data.has_more);
       cursor = data.next_cursor || undefined;
@@ -125,13 +130,13 @@ export class NotionClient {
   /**
    * updates: [{ taskId, properties }]
    */
-  async patchBatch(updates, { batchSize = 3, interval = 1000 } = {}) {
+  async patchBatch(updates, { batchSize = 3, interval = 1000, tracer } = {}) {
     const applied = [];
     for (let i = 0; i < updates.length; i += batchSize) {
       const batch = updates.slice(i, i + batchSize);
       const batchResults = await Promise.all(
         batch.map(async (u) => {
-          const res = await this.patchPage(u.taskId, u.properties);
+          const res = await this.patchPage(u.taskId, u.properties, { tracer });
           applied.push(u.taskId);
           return res;
         }),
@@ -142,19 +147,19 @@ export class NotionClient {
     return { updatedCount: applied.length, taskIds: applied };
   }
 
-  async reportStatus(studyId, level, message) {
+  async reportStatus(studyId, level, message, { tracer } = {}) {
     const richText = buildReportingText(level, message);
     return this.request('PATCH', `/pages/${studyId}`, {
       properties: {
         'Automation Reporting': { rich_text: richText },
       },
-    });
+    }, { tracer });
   }
 
   /**
    * Clears LMBS=true for all tasks in a study (safety-net cleanup).
    */
-  async clearStudyLmbsFlags({ studyTasksDbId, studyId, batchSize = 3, interval = 1000 } = {}) {
+  async clearStudyLmbsFlags({ studyTasksDbId, studyId, batchSize = 3, interval = 1000, tracer } = {}) {
     if (!studyTasksDbId || !studyId) return { updatedCount: 0, taskIds: [] };
 
     const lmdbTasks = await this.queryDatabase(studyTasksDbId, {
@@ -162,7 +167,7 @@ export class NotionClient {
         { property: 'Study', relation: { contains: studyId } },
         { property: 'Last Modified By System', checkbox: { equals: true } },
       ],
-    });
+    }, 100, { tracer });
     if (lmdbTasks.length === 0) return { updatedCount: 0, taskIds: [] };
 
     const updates = lmdbTasks.map((page) => ({
@@ -171,6 +176,6 @@ export class NotionClient {
         'Last Modified By System': { checkbox: false },
       },
     }));
-    return this.patchBatch(updates, { batchSize, interval });
+    return this.patchBatch(updates, { batchSize, interval, tracer });
   }
 }

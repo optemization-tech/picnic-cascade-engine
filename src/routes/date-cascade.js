@@ -7,6 +7,7 @@ import { enforceConstraints } from '../engine/constraints.js';
 import { NotionClient } from '../notion/client.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
+import { CascadeTracer } from '../services/cascade-tracer.js';
 
 const notionClient = new NotionClient({ tokens: config.notion.tokens });
 const activityLogService = new ActivityLogService({
@@ -23,9 +24,9 @@ function summarizeFailure(error) {
   return `Cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
 }
 
-function buildActivityDetails({ parsed, classified, patched, constrainedSource, cascadeResult, error, noActionReason }) {
+function buildActivityDetails({ parsed, classified, patched, constrainedSource, cascadeResult, error, noActionReason, tracer }) {
   const diagnostics = cascadeResult?.diagnostics || {};
-  return {
+  const base = {
     parentMode: classified?.parentMode || null,
     movement: {
       updatedCount: patched?.updatedCount ?? 0,
@@ -58,6 +59,8 @@ function buildActivityDetails({ parsed, classified, patched, constrainedSource, 
     constrained: constrainedSource?.constrained ?? null,
     merged: constrainedSource?.merged ?? null,
   };
+  if (tracer) Object.assign(base, tracer.toActivityLogDetails());
+  return base;
 }
 
 async function logTerminalEvent({
@@ -70,6 +73,7 @@ async function logTerminalEvent({
   cascadeResult,
   noActionReason,
   error,
+  tracer,
 }) {
   await activityLogService.logTerminalEvent({
     workflow: 'Date Cascade',
@@ -91,6 +95,7 @@ async function logTerminalEvent({
       cascadeResult,
       noActionReason,
       error,
+      tracer,
     }),
   });
 }
@@ -144,7 +149,13 @@ async function processDateCascade(payload) {
   const parsed = parseWebhookPayload(payload);
   if (parsed.skip) return;
 
+  const tracer = new CascadeTracer(parsed.executionId);
+  tracer.set('task_name', parsed.taskName);
+  tracer.set('task_id', parsed.taskId);
+  tracer.set('study_id', parsed.studyId);
+
   if (isSystemModified(parsed)) {
+    console.log(JSON.stringify({ event: 'lmbs_skip', taskName: parsed.taskName, taskId: parsed.taskId }));
     await clearSourceLmbsOnSkip(parsed.taskId);
     return;
   }
@@ -154,6 +165,7 @@ async function processDateCascade(payload) {
       status: 'no_action',
       summary: `No action: Import Mode enabled for ${parsed.taskName || 'task'}`,
       noActionReason: 'import_mode_enabled',
+      tracer,
     });
     return;
   }
@@ -163,6 +175,7 @@ async function processDateCascade(payload) {
       status: 'no_action',
       summary: `No action: ${parsed.taskName || 'task'} is in a frozen status`,
       noActionReason: 'frozen_status',
+      tracer,
     });
     return;
   }
@@ -172,6 +185,7 @@ async function processDateCascade(payload) {
       status: 'no_action',
       summary: `No action: ${parsed.taskName || 'task'} has no dates`,
       noActionReason: 'missing_dates',
+      tracer,
     });
     return;
   }
@@ -181,31 +195,43 @@ async function processDateCascade(payload) {
       status: 'no_action',
       summary: `No action: ${parsed.taskName || 'task'} is missing Study relation`,
       noActionReason: 'missing_study',
+      tracer,
     });
     return;
   }
 
   try {
-    await notionClient.reportStatus(parsed.studyId, 'info', `Cascade started for ${parsed.taskName}...`);
+    await notionClient.reportStatus(parsed.studyId, 'info', `Cascade started for ${parsed.taskName}...`, { tracer });
 
-    const allTasks = await queryStudyTasks(notionClient, config.notion.studyTasksDbId, parsed.studyId);
+    tracer.startPhase('query');
+    const allTasks = await queryStudyTasks(notionClient, config.notion.studyTasksDbId, parsed.studyId, { tracer });
+    tracer.endPhase('query');
+    tracer.set('study_task_count', allTasks.length);
+
+    tracer.startPhase('classify');
     const classified = classify(parsed, allTasks, parsed.startDelta, parsed.endDelta);
+    tracer.endPhase('classify');
+    tracer.set('cascade_mode', classified.cascadeMode);
+
     if (classified.skip || !classified.cascadeMode) {
       if (classified.reason?.includes('Direct parent edit blocked')) {
         await applyError1SideEffects(parsed.studyId);
       } else {
-        await notionClient.reportStatus(parsed.studyId, 'warning', classified.reason || 'No cascade mode determined');
+        await notionClient.reportStatus(parsed.studyId, 'warning', classified.reason || 'No cascade mode determined', { tracer });
       }
+      console.log(tracer.toConsoleLog());
       await logTerminalEvent({
         parsed,
         classified,
         status: 'no_action',
         summary: `No action: ${classified.reason || 'No cascade mode determined'}`,
         noActionReason: classified.reason || 'no_cascade_mode',
+        tracer,
       });
       return;
     }
 
+    tracer.startPhase('cascade');
     const cascadeResult = runCascade({
       sourceTaskId: classified.sourceTaskId,
       sourceTaskName: classified.sourceTaskName,
@@ -218,7 +244,9 @@ async function processDateCascade(payload) {
       cascadeMode: classified.cascadeMode,
       tasks: allTasks,
     });
+    tracer.endPhase('cascade');
 
+    tracer.startPhase('parentSubtask');
     const parentResult = runParentSubtask({
       sourceTaskId: classified.sourceTaskId,
       sourceTaskName: classified.sourceTaskName,
@@ -230,7 +258,9 @@ async function processDateCascade(payload) {
       movedTaskMap: cascadeResult.movedTaskMap,
       tasks: allTasks,
     });
+    tracer.endPhase('parentSubtask');
 
+    tracer.startPhase('constraints');
     const constrainedSource = enforceConstraints({
       task: {
         taskId: classified.sourceTaskId,
@@ -243,7 +273,9 @@ async function processDateCascade(payload) {
       parentResult,
       allTasks,
     });
+    tracer.endPhase('constraints');
 
+    tracer.startPhase('merge');
     const sourceRollUp = (parentResult.updates || []).find(
       (u) => u.taskId === classified.sourceTaskId && u._isRollUp,
     );
@@ -265,8 +297,12 @@ async function processDateCascade(payload) {
     });
 
     const updates = Array.from(updatesByTaskId.values());
+    tracer.endPhase('merge');
+
     if (updates.length === 0) {
-      await notionClient.reportStatus(parsed.studyId, 'info', `No updates needed for ${parsed.taskName}`);
+      await notionClient.reportStatus(parsed.studyId, 'info', `No updates needed for ${parsed.taskName}`, { tracer });
+      tracer.set('update_count', 0);
+      console.log(tracer.toConsoleLog());
       await logTerminalEvent({
         parsed,
         classified,
@@ -276,6 +312,7 @@ async function processDateCascade(payload) {
         constrainedSource,
         cascadeResult,
         noActionReason: 'zero_updates',
+        tracer,
       });
       return;
     }
@@ -284,10 +321,17 @@ async function processDateCascade(payload) {
       taskId: u.taskId,
       properties: buildUpdateProperties(u, classified.sourceTaskName, classified.cascadeMode),
     }));
-    const patched = await notionClient.patchBatch(patchPayload, { batchSize: 3, interval: 1000 });
+
+    tracer.startPhase('patchUpdates');
+    const patched = await notionClient.patchBatch(patchPayload, { batchSize: 3, interval: 1000, tracer });
+    tracer.endPhase('patchUpdates');
 
     // Immediate unlock pass skips roll-up tasks (WF-P parity).
+    tracer.startPhase('sleep');
     await sleep(3000);
+    tracer.endPhase('sleep');
+
+    tracer.startPhase('patchUnlock');
     const unlockPayload = updates
       .filter((u) => !u._isRollUp)
       .map((u) => ({
@@ -295,20 +339,28 @@ async function processDateCascade(payload) {
         properties: { 'Last Modified By System': { checkbox: false } },
       }));
     if (unlockPayload.length > 0) {
-      await notionClient.patchBatch(unlockPayload, { batchSize: 3, interval: 1000 });
+      await notionClient.patchBatch(unlockPayload, { batchSize: 3, interval: 1000, tracer });
     }
+    tracer.endPhase('patchUnlock');
 
+    tracer.startPhase('reportComplete');
     await notionClient.reportStatus(
       parsed.studyId,
       'success',
       `Cascade complete for ${parsed.taskName}: ${classified.cascadeMode} (${patched.updatedCount} task updates)`,
+      { tracer },
     );
+    tracer.endPhase('reportComplete');
 
     const capReached = Boolean(cascadeResult?.diagnostics?.capReached);
     const residueCount = Array.isArray(cascadeResult?.diagnostics?.unresolvedResidue)
       ? cascadeResult.diagnostics.unresolvedResidue.length
       : 0;
 
+    tracer.set('update_count', patched.updatedCount);
+    console.log(tracer.toConsoleLog());
+
+    tracer.startPhase('logTerminal');
     await logTerminalEvent({
       parsed,
       classified,
@@ -320,12 +372,16 @@ async function processDateCascade(payload) {
       constrainedSource,
       cascadeResult,
       noActionReason: null,
+      tracer,
     });
+    tracer.endPhase('logTerminal');
   } catch (error) {
+    console.log(tracer.toConsoleLog());
     await notionClient.reportStatus(
       parsed.studyId,
       'error',
       `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
+      { tracer },
     );
     await logTerminalEvent({
       parsed,
@@ -333,15 +389,20 @@ async function processDateCascade(payload) {
       summary: summarizeFailure(error),
       noActionReason: null,
       error,
+      tracer,
     });
     throw error;
   } finally {
     try {
+      tracer.startPhase('cleanup');
       await notionClient.clearStudyLmbsFlags({
         studyTasksDbId: config.notion.studyTasksDbId,
         studyId: parsed.studyId,
+        tracer,
       });
+      tracer.endPhase('cleanup');
     } catch (cleanupError) {
+      tracer.endPhase('cleanup');
       console.warn('[date-cascade] study-wide LMBS cleanup failed:', cleanupError.message);
     }
   }

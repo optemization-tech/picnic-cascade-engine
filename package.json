@@ -13,7 +13,8 @@
     "test:watch": "vitest --watch",
     "tunnel": "npx ngrok http 3000",
     "patch:task-date": "node scripts/patch-task-date.js",
-    "fire:date-webhook": "node scripts/fire-date-webhook.js"
+    "fire:date-webhook": "node scripts/fire-date-webhook.js",
+    "benchmark": "node scripts/benchmark.js"
   },
   "dependencies": {
     "dotenv": "^17.3.1",

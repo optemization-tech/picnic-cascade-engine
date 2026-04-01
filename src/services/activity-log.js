@@ -49,6 +49,26 @@ function detailLines(details = {}) {
   if (error.errorMessage) {
     lines.push(`Error: ${error.errorMessage}`);
   }
+
+  const timing = details.timing;
+  if (timing && typeof timing.totalMs === 'number') {
+    lines.push(`Total duration: ${timing.totalMs}ms`);
+    if (timing.phases) {
+      const p = timing.phases;
+      const parts = [];
+      if (p.query != null) parts.push(`Query: ${p.query}ms`);
+      if (p.patchUpdates != null) parts.push(`Patch: ${p.patchUpdates}ms`);
+      if (p.patchUnlock != null) parts.push(`Unlock: ${p.patchUnlock}ms`);
+      if (p.cleanup != null) parts.push(`Cleanup: ${p.cleanup}ms`);
+      if (parts.length > 0) lines.push(parts.join(' | '));
+    }
+  }
+
+  const retryStats = details.retryStats;
+  if (retryStats && retryStats.count > 0) {
+    lines.push(`API retries: ${retryStats.count} (${retryStats.totalBackoffMs}ms total backoff)`);
+  }
+
   return lines;
 }
 

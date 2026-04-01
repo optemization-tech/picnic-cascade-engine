@@ -271,21 +271,23 @@ describe('date-cascade route safety', () => {
     expect(unlockTaskIds).toContain('source');
     expect(unlockTaskIds).not.toContain('parent-rollup');
 
-    expect(mocks.mockClient.clearStudyLmbsFlags).toHaveBeenCalledWith({
+    expect(mocks.mockClient.clearStudyLmbsFlags).toHaveBeenCalledWith(expect.objectContaining({
       studyTasksDbId: 'db-study-tasks',
       studyId: 'study-1',
-    });
+    }));
     expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
       1,
       'study-1',
       'info',
       'Cascade started for Source...',
+      expect.any(Object),
     );
     expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
       2,
       'study-1',
       'success',
       'Cascade complete for Source: push-right (3 task updates)',
+      expect.any(Object),
     );
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
       status: 'success',
@@ -319,10 +321,10 @@ describe('date-cascade route safety', () => {
     await Promise.resolve();
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mocks.mockClient.clearStudyLmbsFlags).toHaveBeenCalledWith({
+    expect(mocks.mockClient.clearStudyLmbsFlags).toHaveBeenCalledWith(expect.objectContaining({
       studyTasksDbId: 'db-study-tasks',
       studyId: 'study-1',
-    });
+    }));
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
       status: 'failed',
       summary: expect.stringContaining('Cascade failed'),
