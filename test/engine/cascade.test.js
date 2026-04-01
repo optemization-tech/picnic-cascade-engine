@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runCascade } from '../../src/engine/cascade.js';
-import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream } from '../fixtures/cascade-tasks.js';
+import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream, fanOutFromUpstream, preExistingViolation, transitiveViolations } from '../fixtures/cascade-tasks.js';
 import { twoChainSharedTask, crossChainClampedByOtherBlocker } from '../fixtures/cross-chain-tasks.js';
 
 describe('runCascade', () => {
@@ -658,6 +658,209 @@ describe('runCascade', () => {
           newEnd: u.newEnd,
         });
       }
+    });
+  });
+
+  // @behavior BEH-PULL-LEFT-FANOUT
+  describe('pull-left fan-out: upstream shifts propagate to other downstream tasks', () => {
+    it('shifts upstream task X other downstream D when source B pulls left', () => {
+      const tasks = fanOutFromUpstream();
+      // B: Apr 01-02. Pull-left: entire task moves left by 1 BD.
+      // B becomes Mar 31 - Apr 01. startDelta=-1, endDelta=-1.
+      // pullLeftUpstream: B.newStart=Mar 31. X.end=Mar 31. nextBD(Mar 31)=Apr 01 > Mar 31.
+      // X must shift left so it finishes before B's new start.
+      const result = runCascade({
+        sourceTaskId: 'b',
+        sourceTaskName: 'Task B',
+        newStart: '2026-03-31',   // was Apr 01, now Mar 31
+        newEnd: '2026-04-01',     // was Apr 02, now Apr 01
+        refStart: '2026-04-01',
+        refEnd: '2026-04-02',
+        startDelta: -1,
+        endDelta: -1,
+        cascadeMode: 'pull-left',
+        tasks,
+      });
+
+      // X should have been shifted left by pullLeftUpstream
+      const xUpdate = result.updates.find(u => u.taskId === 'x');
+      expect(xUpdate).toBeDefined();
+
+      // D should also shift left (fan-out from X) — this is the Bug 1 fix
+      const dUpdate = result.updates.find(u => u.taskId === 'd');
+      expect(dUpdate).toBeDefined();
+      // D's new start should be earlier than its original (Apr 01)
+      expect(dUpdate.newStart < '2026-04-01').toBe(true);
+
+      // C (downstream of B) should also shift
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+    });
+
+    it('does not shift fan-out task if clamped by unshifted predecessor', () => {
+      // D has two predecessors: X (shifted) and Q (unshifted, ends later).
+      // D should stay put because Q's constraint prevents D from moving.
+      const tasks = fanOutFromUpstream();
+      // Add a second predecessor Q for D that ends later than X
+      tasks.push({
+        id: 'q',
+        name: 'Task Q',
+        start: new Date('2026-03-30T00:00:00Z'),
+        end: new Date('2026-04-02T00:00:00Z'), // ends Thu Apr 02
+        duration: 4,
+        status: 'Not Started',
+        blockedByIds: [],
+        blockingIds: ['d'],
+      });
+      // Update D to also be blocked by Q
+      const d = tasks.find(t => t.id === 'd');
+      d.blockedByIds.push('q');
+
+      const result = runCascade({
+        sourceTaskId: 'b',
+        sourceTaskName: 'Task B',
+        newStart: '2026-04-01',
+        newEnd: '2026-04-01',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-02',
+        startDelta: 0,
+        endDelta: -1,
+        cascadeMode: 'pull-left',
+        tasks,
+      });
+
+      // D should NOT move earlier — Q (ends Apr 02) clamps D to start at nextBD(Apr 02) = Apr 03.
+      // D's original start was Apr 01. Q's constraint means D cannot go earlier.
+      // D may be pushed right by validation (to Apr 03) since it violates Q's constraint,
+      // but it must NOT move left of its original position.
+      const dUpdate = result.updates.find(u => u.taskId === 'd');
+      if (dUpdate) {
+        expect(dUpdate.newStart >= '2026-04-01').toBe(true);
+      }
+      // Also verify D is NOT in the movedTaskIds with a leftward shift
+      const dInMoved = result.movedTaskMap['d'];
+      if (dInMoved) {
+        expect(dInMoved.newStart >= '2026-04-01').toBe(true);
+      }
+    });
+  });
+
+  // @behavior BEH-CONSTRAINT-VALIDATION
+  describe('post-cascade constraint validation', () => {
+    it('fixes pre-existing violation outside cascade chain', () => {
+      const tasks = preExistingViolation();
+      // Add an unrelated source task Z so A→B violation is NOT in the cascade's reachable set
+      tasks.push({
+        id: 'z', name: 'Task Z',
+        start: new Date('2026-04-07T00:00:00Z'),
+        end: new Date('2026-04-08T00:00:00Z'),
+        duration: 2, status: 'Not Started',
+        blockedByIds: [], blockingIds: [],
+      });
+
+      const result = runCascade({
+        sourceTaskId: 'z',
+        sourceTaskName: 'Task Z',
+        newStart: '2026-04-07',
+        newEnd: '2026-04-09', // push-right by 1 BD
+        refStart: '2026-04-07',
+        refEnd: '2026-04-08',
+        startDelta: 0,
+        endDelta: 1,
+        cascadeMode: 'push-right',
+        tasks,
+      });
+
+      // B should be fixed by validateConstraints (not by conflictOnlyDownstream)
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-04-01');
+
+      expect(result.diagnostics.constraintFixCount).toBeGreaterThan(0);
+      expect(result.diagnostics.constraintFixTaskIds).toContain('b');
+    });
+
+    it('cascades through transitive violations', () => {
+      const tasks = transitiveViolations();
+      // Add unrelated source Z so A→B→C violations are fixed by validateConstraints
+      tasks.push({
+        id: 'z', name: 'Task Z',
+        start: new Date('2026-04-07T00:00:00Z'),
+        end: new Date('2026-04-08T00:00:00Z'),
+        duration: 2, status: 'Not Started',
+        blockedByIds: [], blockingIds: [],
+      });
+
+      const result = runCascade({
+        sourceTaskId: 'z',
+        sourceTaskName: 'Task Z',
+        newStart: '2026-04-07',
+        newEnd: '2026-04-09',
+        refStart: '2026-04-07',
+        refEnd: '2026-04-08',
+        startDelta: 0,
+        endDelta: 1,
+        cascadeMode: 'push-right',
+        tasks,
+      });
+
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(bUpdate).toBeDefined();
+      expect(cUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-04-01'); // nextBD(Mar 31) = Apr 01
+      expect(cUpdate.newStart).toBe('2026-04-03'); // B ends Apr 02 → nextBD = Apr 03
+    });
+
+    it('does not collapse gaps', () => {
+      const tasks = linearGappedChain();
+      // A: Mar 30-31, B: Apr 02-03 (1 BD gap), C: Apr 06-07
+      // Push-right no-op — the gap should be preserved, B should NOT move
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-30',
+        newEnd: '2026-03-31',
+        refStart: '2026-03-30',
+        refEnd: '2026-03-31',
+        startDelta: 0,
+        endDelta: 0,
+        cascadeMode: 'push-right',
+        tasks,
+      });
+
+      // B has a gap after A — should NOT be collapsed
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeUndefined(); // B should not be touched
+      expect(result.diagnostics.constraintFixCount).toBe(0);
+    });
+
+    it('reports diagnostics for constraint fixes', () => {
+      const tasks = preExistingViolation();
+      tasks.push({
+        id: 'z', name: 'Task Z',
+        start: new Date('2026-04-07T00:00:00Z'),
+        end: new Date('2026-04-08T00:00:00Z'),
+        duration: 2, status: 'Not Started',
+        blockedByIds: [], blockingIds: [],
+      });
+
+      const result = runCascade({
+        sourceTaskId: 'z',
+        sourceTaskName: 'Task Z',
+        newStart: '2026-04-07',
+        newEnd: '2026-04-09',
+        refStart: '2026-04-07',
+        refEnd: '2026-04-08',
+        startDelta: 0,
+        endDelta: 1,
+        cascadeMode: 'push-right',
+        tasks,
+      });
+
+      expect(typeof result.diagnostics.constraintFixCount).toBe('number');
+      expect(Array.isArray(result.diagnostics.constraintFixTaskIds)).toBe(true);
+      expect(result.diagnostics.constraintFixCount).toBeGreaterThan(0);
     });
   });
 });

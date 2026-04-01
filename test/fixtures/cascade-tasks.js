@@ -129,3 +129,60 @@ export function diamondUpstream() {
     task('source', 'Source', '2026-04-03', '2026-04-06', { blockedByIds: ['mid1', 'mid2'] }),
   ];
 }
+
+/**
+ * Fan-out from upstream: X fans out to B (source) and D.
+ * B also blocks C downstream.
+ *
+ *       X (Mon-Tue)
+ *      / \
+ *     B   D
+ *     |
+ *     C
+ *
+ * X: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]  blocks B and D
+ * B: Apr 01 (Wed) - Apr 02 (Thu)  [2 BD]  blocked by X, blocks C (SOURCE)
+ * D: Apr 01 (Wed) - Apr 02 (Thu)  [2 BD]  blocked by X (NOT in B's chain)
+ * C: Apr 03 (Fri) - Apr 06 (Mon)  [2 BD]  blocked by B
+ *
+ * Bug: when B pulls left, pullLeftUpstream shifts X left.
+ * gapPreservingDownstream only BFS from B, so D is never shifted.
+ */
+export function fanOutFromUpstream() {
+  return [
+    task('x', 'Task X', '2026-03-30', '2026-03-31', { blockingIds: ['b', 'd'] }),
+    task('b', 'Task B', '2026-04-01', '2026-04-02', { blockedByIds: ['x'], blockingIds: ['c'] }),
+    task('d', 'Task D', '2026-04-01', '2026-04-02', { blockedByIds: ['x'] }),
+    task('c', 'Task C', '2026-04-03', '2026-04-06', { blockedByIds: ['b'] }),
+  ];
+}
+
+/**
+ * Pre-existing constraint violation: B starts same day as A (should start after A ends).
+ *
+ * A: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]  blocks B
+ * B: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]  blocked by A  (VIOLATION: should start Apr 01)
+ * C: Apr 01 (Wed) - Apr 02 (Thu)  [2 BD]  blocked by B
+ */
+export function preExistingViolation() {
+  return [
+    task('a', 'Task A', '2026-03-30', '2026-03-31', { blockingIds: ['b'] }),
+    task('b', 'Task B', '2026-03-30', '2026-03-31', { blockedByIds: ['a'], blockingIds: ['c'] }),
+    task('c', 'Task C', '2026-04-01', '2026-04-02', { blockedByIds: ['b'] }),
+  ];
+}
+
+/**
+ * Transitive violations: B violates A, C violates B.
+ *
+ * A: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]  blocks B
+ * B: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]  blocked by A  (VIOLATION)
+ * C: Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]  blocked by B  (VIOLATION)
+ */
+export function transitiveViolations() {
+  return [
+    task('a', 'Task A', '2026-03-30', '2026-03-31', { blockingIds: ['b'] }),
+    task('b', 'Task B', '2026-03-30', '2026-03-31', { blockedByIds: ['a'], blockingIds: ['c'] }),
+    task('c', 'Task C', '2026-03-30', '2026-03-31', { blockedByIds: ['b'] }),
+  ];
+}
