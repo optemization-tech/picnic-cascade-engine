@@ -19,11 +19,6 @@ function toStatusName(status) {
   return 'Success';
 }
 
-function isPeoplePropertyError(message = '') {
-  const lower = String(message).toLowerCase();
-  return lower.includes('tested by') || lower.includes('people[0].id') || lower.includes('cannot mention bots');
-}
-
 function detailLines(details = {}) {
   const movement = details.movement || {};
   const sourceDates = details.sourceDates || {};
@@ -145,7 +140,10 @@ export class ActivityLogService {
 
     if (event.sourceTaskId) properties['Study Tasks'] = { relation: [{ id: event.sourceTaskId }] };
     if (event.studyId) properties.Study = { relation: [{ id: event.studyId }] };
-    if (event.triggeredByUserId) properties['Tested by'] = { people: [{ id: event.triggeredByUserId }] };
+    // Note: 'Tested by' people property removed — automation-triggered cascades
+    // always have a bot/integration user ID which Notion rejects with 400. The
+    // prior fallback caught the error but only after burning through 5 retries
+    // with exponential backoff (~8s wasted per cascade).
     if (originalDateStart) properties['Original Dates'] = { date: { start: originalDateStart } };
     if (modifiedDateStart) properties['Modified Dates'] = { date: { start: modifiedDateStart } };
 
@@ -159,21 +157,6 @@ export class ActivityLogService {
       const response = await this.notionClient.request('POST', '/pages', payload);
       return { logged: true, pageId: response?.id || null };
     } catch (error) {
-      if (properties['Tested by'] && isPeoplePropertyError(error?.message)) {
-        try {
-          const fallbackProperties = { ...properties };
-          delete fallbackProperties['Tested by'];
-          const response = await this.notionClient.request('POST', '/pages', {
-            ...payload,
-            properties: fallbackProperties,
-          });
-          return { logged: true, pageId: response?.id || null, warning: 'tested-by-omitted' };
-        } catch (fallbackError) {
-          this.logger.warn('[activity-log] failed to create entry:', fallbackError.message);
-          return { logged: false, reason: 'notion-write-failed', error: fallbackError.message };
-        }
-      }
-
       this.logger.warn('[activity-log] failed to create entry:', error.message);
       return { logged: false, reason: 'notion-write-failed', error: error.message };
     }

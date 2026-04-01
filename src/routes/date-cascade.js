@@ -100,16 +100,10 @@ async function logTerminalEvent({
   });
 }
 
-async function clearSourceLmbsOnSkip(taskId) {
-  if (!taskId) return;
-  try {
-    await notionClient.patchPage(taskId, {
-      'Last Modified By System': { checkbox: false },
-    });
-  } catch (error) {
-    console.warn('[date-cascade] failed clearing LMBS on skip:', error.message);
-  }
-}
+// Note: clearSourceLmbsOnSkip previously made a PATCH API call for every
+// LMBS re-trigger (~50-100 per cascade), starving the actual cascade of
+// API budget. Removed — the finally block's clearStudyLmbsFlags handles
+// study-wide LMBS cleanup at the end of each cascade.
 
 async function applyError1SideEffects(studyId) {
   if (!studyId) return;
@@ -156,7 +150,6 @@ async function processDateCascade(payload) {
 
   if (isSystemModified(parsed)) {
     console.log(JSON.stringify({ event: 'lmbs_skip', taskName: parsed.taskName, taskId: parsed.taskId }));
-    await clearSourceLmbsOnSkip(parsed.taskId);
     return;
   }
   if (isImportMode(parsed)) {

@@ -90,19 +90,10 @@ describe('ActivityLogService', () => {
     expect(notionClient.request).not.toHaveBeenCalled();
   });
 
-  it('retries without Tested by when Notion rejects bot mentions', async () => {
-    const notionClient = {
-      request: vi.fn()
-        .mockRejectedValueOnce(new Error('Cannot mention bots. Mentioned bot id: abc'))
-        .mockResolvedValueOnce({ id: 'page-fallback' }),
-    };
-    const service = new ActivityLogService({
-      notionClient,
-      activityLogDbId: 'db-activity',
-      logger: { warn: vi.fn() },
-    });
+  it('never includes Tested by property (bot user IDs cause 400 errors)', async () => {
+    const { service, notionClient } = makeService();
 
-    const result = await service.logTerminalEvent({
+    await service.logTerminalEvent({
       workflow: 'Date Cascade',
       status: 'success',
       summary: 'ok',
@@ -110,10 +101,8 @@ describe('ActivityLogService', () => {
       details: {},
     });
 
-    expect(result.logged).toBe(true);
-    expect(result.warning).toBe('tested-by-omitted');
-    expect(notionClient.request).toHaveBeenCalledTimes(2);
-    const secondPayload = notionClient.request.mock.calls[1][2];
-    expect(secondPayload.properties['Tested by']).toBeUndefined();
+    expect(notionClient.request).toHaveBeenCalledTimes(1);
+    const payload = notionClient.request.mock.calls[0][2];
+    expect(payload.properties['Tested by']).toBeUndefined();
   });
 });

@@ -73,16 +73,16 @@ describe('date-cascade route safety', () => {
   });
 
   // @behavior BEH-LMBS-LIFECYCLE
-  it('clears LMBS on anti-loop skip', async () => {
+  it('skips LMBS re-trigger without API call', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
       taskId: 'task-1',
+      taskName: 'Task 1',
       studyId: 'study-1',
     });
     mocks.isSystemModified.mockReturnValue(true);
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(false);
-    mocks.mockClient.patchPage.mockResolvedValue({});
 
     const { req, res } = makeReqRes({ payload: true });
     await handleDateCascade(req, res);
@@ -90,9 +90,8 @@ describe('date-cascade route safety', () => {
     await Promise.resolve();
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('task-1', {
-      'Last Modified By System': { checkbox: false },
-    });
+    // No API call — LMBS cleanup happens in finally block of the originating cascade
+    expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
