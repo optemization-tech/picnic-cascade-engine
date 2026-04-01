@@ -12,9 +12,8 @@ function getArg(name, fallback = null) {
 
 function usageAndExit(message = '') {
   if (message) console.error(message);
-  console.error('Usage: npm run benchmark -- --study-id <id> --task-id <pageId> --delta <BD> [--url <endpoint>] [--token <token>] [--timeout <ms>]');
+  console.error('Usage: npm run benchmark -- --study-id <id> --task-id <pageId> --delta <BD> [--token <token>] [--timeout <ms>]');
   console.error('  --delta: signed integer business days (e.g. 3, -2)');
-  console.error('  --url: webhook base URL (default: http://localhost:3000)');
   console.error('  --timeout: max ms to poll for completion (default: 120000)');
   process.exit(1);
 }
@@ -25,7 +24,6 @@ const NOTION_VERSION = '2022-06-28';
 const studyId = getArg('study-id');
 const taskId = getArg('task-id');
 const deltaStr = getArg('delta');
-const baseUrl = getArg('url', 'http://localhost:3000');
 const token = getArg('token', process.env.NOTION_TOKEN_1);
 const timeoutMs = Number(getArg('timeout', '120000'));
 const activityLogDbId = process.env.ACTIVITY_LOG_DB_ID;

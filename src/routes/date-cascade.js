@@ -149,7 +149,8 @@ async function processDateCascade(payload) {
   tracer.set('study_id', parsed.studyId);
 
   if (isSystemModified(parsed)) {
-    console.log(JSON.stringify({ event: 'lmbs_skip', taskName: parsed.taskName, taskId: parsed.taskId }));
+    tracer.count('lmbs_skip');
+    console.log(JSON.stringify({ event: 'lmbs_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
     return;
   }
   if (isImportMode(parsed)) {
@@ -370,20 +371,24 @@ async function processDateCascade(payload) {
     tracer.endPhase('logTerminal');
   } catch (error) {
     console.log(tracer.toConsoleLog());
-    await notionClient.reportStatus(
-      parsed.studyId,
-      'error',
-      `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
-      { tracer },
-    );
-    await logTerminalEvent({
-      parsed,
-      status: 'failed',
-      summary: summarizeFailure(error),
-      noActionReason: null,
-      error,
-      tracer,
-    });
+    try {
+      await notionClient.reportStatus(
+        parsed.studyId,
+        'error',
+        `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
+        { tracer },
+      );
+    } catch { /* don't mask original error */ }
+    try {
+      await logTerminalEvent({
+        parsed,
+        status: 'failed',
+        summary: summarizeFailure(error),
+        noActionReason: null,
+        error,
+        tracer,
+      });
+    } catch { /* don't mask original error */ }
     throw error;
   } finally {
     try {
