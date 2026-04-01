@@ -69,7 +69,14 @@ function detailLines(details = {}) {
 
 function buildChildren(event) {
   const lines = detailLines(event.details);
-  const rawDetails = JSON.stringify(event.details || {}, null, 2);
+  // Strip movedTaskIds from the JSON block — it's an array of UUIDs that
+  // can easily exceed the 2000-char Notion limit and push timing/retry
+  // data off the end. The update count is still in the bullet points.
+  const detailsForJson = { ...(event.details || {}) };
+  if (detailsForJson.movement) {
+    detailsForJson.movement = { ...detailsForJson.movement, movedTaskIds: `[${detailsForJson.movement.movedTaskIds?.length || 0} tasks]` };
+  }
+  const rawDetails = JSON.stringify(detailsForJson, null, 2);
 
   const children = [
     {

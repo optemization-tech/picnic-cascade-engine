@@ -70,7 +70,7 @@ export class CascadeTracer {
       updateCount: this.metadata.get('update_count') ?? 0,
       lmbsSkips: this.counters.get('lmbs_skip') || 0,
       retryCount: this.retries.length,
-      retries: this.retries,
+      retries: this.retries.slice(0, 20),
     };
   }
 
