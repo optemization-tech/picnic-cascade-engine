@@ -120,10 +120,7 @@ describe('date-cascade route safety', () => {
     expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
     expect(mocks.mockClient.patchBatch).not.toHaveBeenCalled();
     expect(mocks.mockClient.clearStudyLmbsFlags).not.toHaveBeenCalled();
-    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
-      status: 'no_action',
-      details: expect.objectContaining({ noActionReason: 'import_mode_enabled' }),
-    }));
+    expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
   // @behavior BEH-GUARD-FREEZE

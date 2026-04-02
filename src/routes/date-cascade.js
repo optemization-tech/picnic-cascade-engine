@@ -158,13 +158,8 @@ async function processDateCascade(payload) {
     return;
   }
   if (isImportMode(parsed)) {
-    await logTerminalEvent({
-      parsed,
-      status: 'no_action',
-      summary: `No action: Import Mode enabled for ${parsed.taskName || 'task'}`,
-      noActionReason: 'import_mode_enabled',
-      tracer,
-    });
+    tracer.count('import_mode_skip');
+    console.log(JSON.stringify({ event: 'import_mode_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
     return;
   }
   if (isFrozen(parsed)) {
