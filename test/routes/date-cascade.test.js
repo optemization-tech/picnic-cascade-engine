@@ -250,8 +250,9 @@ describe('date-cascade route safety', () => {
     });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchBatch
-      .mockResolvedValueOnce({ updatedCount: 3, taskIds: ['a', 'parent-rollup', 'source'] })
-      .mockResolvedValueOnce({ updatedCount: 2, taskIds: ['a', 'source'] });
+      .mockResolvedValueOnce({ updatedCount: 3, taskIds: ['a', 'parent-rollup', 'source'] })  // pre-LMBS
+      .mockResolvedValueOnce({ updatedCount: 3, taskIds: ['a', 'parent-rollup', 'source'] })  // date writes
+      .mockResolvedValueOnce({ updatedCount: 2, taskIds: ['a', 'source'] });                  // unlock
     mocks.mockClient.clearStudyLmbsFlags.mockResolvedValue({ updatedCount: 1, taskIds: ['orphan'] });
 
     const { req, res } = makeReqRes({ payload: true });
@@ -260,8 +261,15 @@ describe('date-cascade route safety', () => {
     await Promise.resolve();
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(2);
-    const unlockCall = mocks.mockClient.patchBatch.mock.calls[1][0];
+    expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(3);
+
+    // Call 0: pre-LMBS — all tasks marked LMBS=true before date writes
+    const preLmbsCall = mocks.mockClient.patchBatch.mock.calls[0][0];
+    expect(preLmbsCall.every((u) => u.properties['Last Modified By System']?.checkbox === true)).toBe(true);
+    expect(preLmbsCall.every((u) => !u.properties['Dates'])).toBe(true);
+
+    // Call 2: unlock — roll-up tasks excluded
+    const unlockCall = mocks.mockClient.patchBatch.mock.calls[2][0];
     const unlockTaskIds = unlockCall.map((u) => u.taskId);
     expect(unlockTaskIds).toContain('a');
     expect(unlockTaskIds).toContain('source');

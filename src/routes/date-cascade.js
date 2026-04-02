@@ -310,6 +310,17 @@ async function processDateCascade(payload) {
       return;
     }
 
+    // Pre-mark all target tasks as LMBS=true BEFORE changing dates.
+    // This ensures Notion's "When Dates changes + LMBS unchecked" filter
+    // blocks echo webhooks — LMBS is already true when dates change.
+    tracer.startPhase('preLmbs');
+    const preLmbsPayload = updates.map((u) => ({
+      taskId: u.taskId,
+      properties: { 'Last Modified By System': { checkbox: true } },
+    }));
+    await notionClient.patchBatch(preLmbsPayload, { batchSize: 3, interval: 1000, tracer });
+    tracer.endPhase('preLmbs');
+
     const patchPayload = updates.map((u) => ({
       taskId: u.taskId,
       properties: buildUpdateProperties(u, classified.sourceTaskName, classified.cascadeMode),
