@@ -151,6 +151,8 @@ export class ActivityLogService {
     // always have a bot/integration user ID which Notion rejects with 400. The
     // prior fallback caught the error but only after burning through 5 retries
     // with exponential backoff (~8s wasted per cascade).
+    const totalMs = event.details?.timing?.totalMs;
+    if (typeof totalMs === 'number') properties['Duration (ms)'] = { number: totalMs };
     if (originalDateStart) properties['Original Dates'] = { date: { start: originalDateStart } };
     if (modifiedDateStart) properties['Modified Dates'] = { date: { start: modifiedDateStart } };
 
