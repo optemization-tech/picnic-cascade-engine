@@ -129,8 +129,6 @@ export class ActivityLogService {
     const nowIso = new Date().toISOString();
 
     const sourceDates = event.details?.sourceDates || {};
-    const originalDateStart = sourceDates.originalStart || sourceDates.originalEnd || null;
-    const modifiedDateStart = sourceDates.modifiedStart || sourceDates.modifiedEnd || null;
 
     const properties = {
       Entry: { title: richText(toTitle(event.workflow, event.sourceTaskName)) },
@@ -141,8 +139,6 @@ export class ActivityLogService {
       'Trigger Type': { select: { name: truncate(event.triggerType || 'Unknown', 100) } },
       'Cascade Mode': { select: { name: truncate(event.cascadeMode || 'N/A', 100) } },
       'Execution ID': { rich_text: richText(event.executionId || 'N/A') },
-      Timestamp: { date: { start: event.timestamp || nowIso } },
-      'Tested at': { date: { start: nowIso } },
     };
 
     if (event.sourceTaskId) properties['Study Tasks'] = { relation: [{ id: event.sourceTaskId }] };
@@ -153,8 +149,12 @@ export class ActivityLogService {
     // with exponential backoff (~8s wasted per cascade).
     const totalMs = event.details?.timing?.totalMs;
     if (typeof totalMs === 'number') properties['Duration (ms)'] = { number: totalMs };
-    if (originalDateStart) properties['Original Dates'] = { date: { start: originalDateStart } };
-    if (modifiedDateStart) properties['Modified Dates'] = { date: { start: modifiedDateStart } };
+    if (sourceDates.originalStart || sourceDates.originalEnd) {
+      properties['Original Dates'] = { date: { start: sourceDates.originalStart || sourceDates.originalEnd, end: sourceDates.originalEnd || null } };
+    }
+    if (sourceDates.modifiedStart || sourceDates.modifiedEnd) {
+      properties['Modified Dates'] = { date: { start: sourceDates.modifiedStart || sourceDates.modifiedEnd, end: sourceDates.modifiedEnd || null } };
+    }
 
     const payload = {
       parent: { database_id: this.activityLogDbId },
