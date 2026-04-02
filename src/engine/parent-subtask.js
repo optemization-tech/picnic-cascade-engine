@@ -58,6 +58,15 @@ export function runParentSubtask({
     };
   }
 
+  // Apply cascade-moved dates to in-memory graph BEFORE roll-up computations.
+  // Without this, Case B roll-up would use stale pre-cascade sibling dates.
+  for (const [tid, newDates] of Object.entries(movedTaskMap || {})) {
+    if (taskById[tid] && newDates?.newStart && newDates?.newEnd) {
+      taskById[tid].start = parseDate(newDates.newStart);
+      taskById[tid].end = parseDate(newDates.newEnd);
+    }
+  }
+
   const ts = new Date().toISOString().replace('T', ' ').substring(0, 16);
   const updates = new Map();
 
@@ -322,12 +331,7 @@ export function runParentSubtask({
   // ----------------------------------------------------------
   // Cascade roll-up: parents of tasks moved by WF-D
   // ----------------------------------------------------------
-  for (const [tid, newDates] of Object.entries(movedTaskMap || {})) {
-    if (taskById[tid] && newDates?.newStart && newDates?.newEnd) {
-      taskById[tid].start = parseDate(newDates.newStart);
-      taskById[tid].end = parseDate(newDates.newEnd);
-    }
-  }
+  // (movedTaskMap already applied to taskById at function entry)
 
   if ((movedTaskIds || []).length > 0) {
     const affectedParentIds = new Set();
