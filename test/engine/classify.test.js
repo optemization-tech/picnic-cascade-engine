@@ -145,6 +145,66 @@ describe('classify', () => {
     expect(result.reason).toContain('Direct parent edit blocked');
   });
 
+  it('preserves start-only edit when stale refs would create false drag', () => {
+    // User only pulled start left, but DB refEnd differs from webhook refEnd.
+    // Without the fix, stale-ref correction would make endDelta non-zero,
+    // triggering drag normalization and moving the end date.
+    const result = classify(
+      {
+        taskId: 'task-a',
+        taskName: 'Task A',
+        newStart: '2026-04-01', // user pulled start left
+        newEnd: '2026-04-04',   // user did NOT change end
+        refStart: '2026-04-02', // webhook ref
+        refEnd: '2026-04-04',   // webhook ref matches end (user didn't change it)
+        hasParent: false,
+      },
+      [
+        {
+          id: 'task-a',
+          refStart: '2026-04-03', // DB ref differs (stale)
+          refEnd: '2026-04-05',   // DB refEnd differs from newEnd
+        },
+      ],
+      -1, // startDelta: user moved start left
+      0,  // endDelta: user did NOT change end
+    );
+
+    expect(result.staleRefCorrected).toBe(true);
+    expect(result.startDelta).not.toBe(0); // start was recalculated against DB ref
+    expect(result.endDelta).toBe(0);       // end must stay 0 — user didn't change it
+    expect(result.cascadeMode).toBe('pull-left'); // start-only left, not drag
+    expect(result.newEnd).toBe('2026-04-04'); // end date must NOT change
+  });
+
+  it('preserves end-only edit when stale refs would create false drag', () => {
+    const result = classify(
+      {
+        taskId: 'task-a',
+        taskName: 'Task A',
+        newStart: '2026-04-06', // user did NOT change start (Monday)
+        newEnd: '2026-04-09',   // user pushed end right (Thursday)
+        refStart: '2026-04-06',
+        refEnd: '2026-04-08',   // webhook ref (Wednesday)
+        hasParent: false,
+      },
+      [
+        {
+          id: 'task-a',
+          refStart: '2026-04-02', // DB refStart differs (Thursday prev week)
+          refEnd: '2026-04-07',   // DB refEnd differs (Tuesday)
+        },
+      ],
+      0,  // startDelta: user did NOT change start
+      1,  // endDelta: user pushed end right
+    );
+
+    expect(result.staleRefCorrected).toBe(true);
+    expect(result.startDelta).toBe(0);       // start must stay 0
+    expect(result.endDelta).not.toBe(0);     // end was recalculated
+    expect(result.cascadeMode).toBe('push-right'); // end-only right
+  });
+
   it('corrects stale reference dates from DB snapshot', () => {
     const result = classify(
       {

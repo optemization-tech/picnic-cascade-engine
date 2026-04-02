@@ -82,6 +82,8 @@ export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
   }
 
   // Stale reference correction: if DB refs differ from webhook refs, recompute deltas/mode.
+  // Preserve which dates the user actually changed (webhook deltas) so stale refs
+  // don't turn a start-only edit into a drag.
   let staleRefCorrected = false;
   const dbSourceTask = allTasks.find((row) => (row.id || row.taskId) === sourceTaskId);
 
@@ -93,10 +95,20 @@ export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
   }
 
   if (dbRefStart && dbRefEnd && (dbRefStart !== refStart || dbRefEnd !== refEnd)) {
+    const webhookStartDelta = startDelta;
+    const webhookEndDelta = endDelta;
     refStart = dbRefStart;
     refEnd = dbRefEnd;
-    startDelta = signedBDDelta(parseDate(dbRefStart), parseDate(newStart));
-    endDelta = signedBDDelta(parseDate(dbRefEnd), parseDate(newEnd));
+
+    // Only recalculate deltas for dates the user actually changed.
+    // Without this guard, stale refs can make a zero delta non-zero,
+    // turning a start-only or end-only edit into a drag.
+    startDelta = webhookStartDelta !== 0
+      ? signedBDDelta(parseDate(dbRefStart), parseDate(newStart))
+      : 0;
+    endDelta = webhookEndDelta !== 0
+      ? signedBDDelta(parseDate(dbRefEnd), parseDate(newEnd))
+      : 0;
 
     // Drag normalization after stale-ref correction.
     if (startDelta !== 0 && endDelta !== 0 && Math.sign(startDelta) === Math.sign(endDelta)) {
