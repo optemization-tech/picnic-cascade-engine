@@ -1,11 +1,11 @@
 import { config } from '../config.js';
 import { NotionClient } from '../notion/client.js';
-import { nukeStudyTasks } from '../provisioning/nuke.js';
+import { deleteStudyTasks } from '../provisioning/deletion.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 
-const tokens = config.notion.nukeTokens.length > 0
-  ? config.notion.nukeTokens
+const tokens = config.notion.deletionTokens.length > 0
+  ? config.notion.deletionTokens
   : config.notion.tokens;
 
 const notionClient = new NotionClient({ tokens });
@@ -14,21 +14,21 @@ const activityLogService = new ActivityLogService({
   activityLogDbId: config.notion.activityLogDbId,
 });
 
-async function processNuke(body) {
+async function processDeletion(body) {
   const studyId = body.studyId || body.data?.id;
   if (!studyId) {
-    console.error('[nuke] missing studyId in payload');
+    console.error('[deletion] missing studyId in payload');
     return;
   }
 
   const tracer = new CascadeTracer();
   tracer.set('study_id', studyId);
-  tracer.set('workflow', 'nuke');
+  tracer.set('workflow', 'deletion');
 
   try {
-    await notionClient.reportStatus(studyId, 'info', 'Nuke started — archiving all study tasks...', { tracer });
+    await notionClient.reportStatus(studyId, 'info', 'Deletion started — archiving all study tasks...', { tracer });
 
-    const result = await nukeStudyTasks(notionClient, {
+    const result = await deleteStudyTasks(notionClient, {
       studyTasksDbId: config.notion.studyTasksDbId,
       studyId,
       tracer,
@@ -38,14 +38,14 @@ async function processNuke(body) {
     console.log(tracer.toConsoleLog());
 
     await activityLogService.logTerminalEvent({
-      workflow: 'Nuke',
+      workflow: 'Deletion',
       status: 'success',
       triggerType: 'Manual',
       executionId: tracer.cascadeId,
       timestamp: new Date().toISOString(),
       cascadeMode: 'N/A',
       studyId,
-      summary: `Nuke complete: archived ${result.archivedCount} task(s)`,
+      summary: `Deletion complete: archived ${result.archivedCount} task(s)`,
       details: {
         archivedCount: result.archivedCount,
         ...(tracer.toActivityLogDetails()),
@@ -55,37 +55,37 @@ async function processNuke(body) {
     await notionClient.reportStatus(
       studyId,
       'success',
-      `Nuke complete: archived ${result.archivedCount} task(s)`,
+      `Deletion complete: archived ${result.archivedCount} task(s)`,
       { tracer },
     );
   } catch (error) {
-    console.error('[nuke] processing failed:', error);
+    console.error('[deletion] processing failed:', error);
     console.log(tracer.toConsoleLog());
 
     try {
       await notionClient.reportStatus(
         studyId,
         'error',
-        `Nuke failed: ${String(error.message || error).slice(0, 200)}`,
+        `Deletion failed: ${String(error.message || error).slice(0, 200)}`,
         { tracer },
       );
     } catch { /* don't mask original error */ }
 
     try {
       await activityLogService.logTerminalEvent({
-        workflow: 'Nuke',
+        workflow: 'Deletion',
         status: 'failed',
         triggerType: 'Manual',
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
         studyId,
-        summary: `Nuke failed: ${String(error.message || error).slice(0, 180)}`,
+        summary: `Deletion failed: ${String(error.message || error).slice(0, 180)}`,
         details: {
           error: {
             errorCode: error.code || null,
             errorMessage: String(error.message || error).slice(0, 400),
-            phase: 'nuke',
+            phase: 'deletion',
           },
           ...(tracer.toActivityLogDetails()),
         },
@@ -94,9 +94,9 @@ async function processNuke(body) {
   }
 }
 
-export async function handleNuke(req, res) {
+export async function handleDeletion(req, res) {
   res.status(200).json({ ok: true });
-  void processNuke(req.body).catch((error) => {
-    console.error('[nuke] unhandled processing error:', error);
+  void processDeletion(req.body).catch((error) => {
+    console.error('[deletion] unhandled processing error:', error);
   });
 }

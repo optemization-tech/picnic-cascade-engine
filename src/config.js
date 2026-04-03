@@ -36,8 +36,8 @@ export const config = {
     tokens: collectTokensRequired('NOTION_TOKEN'),
     // Provisioning pool — inception, add-task-set, copy-blocks (bulk operations)
     provisionTokens: collectTokens('NOTION_PROVISION_TOKEN'),
-    // Nuke pool — destructive dev utility (fully isolated)
-    nukeTokens: collectTokens('NOTION_NUKE_TOKEN'),
+    // Deletion pool — destructive dev utility (fully isolated)
+    deletionTokens: collectTokens('NOTION_DELETION_TOKEN'),
     studyTasksDbId: required('STUDY_TASKS_DB_ID'),
     studiesDbId: required('STUDIES_DB_ID'),
     blueprintDbId: process.env.BLUEPRINT_DB_ID || null,

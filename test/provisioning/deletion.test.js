@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { nukeStudyTasks } from '../../src/provisioning/nuke.js';
+import { describe, expect, it, vi } from 'vitest';
+import { deleteStudyTasks } from '../../src/provisioning/deletion.js';
 
 function makeMockClient({ tasks = [] } = {}) {
   return {
@@ -8,7 +8,7 @@ function makeMockClient({ tasks = [] } = {}) {
   };
 }
 
-describe('nukeStudyTasks', () => {
+describe('deleteStudyTasks', () => {
   const studyTasksDbId = 'db-study-tasks';
   const studyId = 'study-123';
 
@@ -20,7 +20,7 @@ describe('nukeStudyTasks', () => {
     ];
     const client = makeMockClient({ tasks });
 
-    const result = await nukeStudyTasks(client, { studyTasksDbId, studyId });
+    const result = await deleteStudyTasks(client, { studyTasksDbId, studyId });
 
     expect(client.queryDatabase).toHaveBeenCalledWith(
       studyTasksDbId,
@@ -39,7 +39,7 @@ describe('nukeStudyTasks', () => {
     const tasks = [{ id: 'only-task' }];
     const client = makeMockClient({ tasks });
 
-    const result = await nukeStudyTasks(client, { studyTasksDbId, studyId });
+    const result = await deleteStudyTasks(client, { studyTasksDbId, studyId });
 
     expect(result).toEqual({ archivedCount: 1 });
     expect(client.request).toHaveBeenCalledTimes(1);
@@ -48,7 +48,7 @@ describe('nukeStudyTasks', () => {
   it('handles empty study (0 tasks) without calling request', async () => {
     const client = makeMockClient({ tasks: [] });
 
-    const result = await nukeStudyTasks(client, { studyTasksDbId, studyId });
+    const result = await deleteStudyTasks(client, { studyTasksDbId, studyId });
 
     expect(result).toEqual({ archivedCount: 0 });
     expect(client.request).not.toHaveBeenCalled();
@@ -62,7 +62,7 @@ describe('nukeStudyTasks', () => {
       endPhase: vi.fn(),
     };
 
-    await nukeStudyTasks(client, { studyTasksDbId, studyId, tracer });
+    await deleteStudyTasks(client, { studyTasksDbId, studyId, tracer });
 
     expect(tracer.startPhase).toHaveBeenCalledWith('query');
     expect(tracer.endPhase).toHaveBeenCalledWith('query');
