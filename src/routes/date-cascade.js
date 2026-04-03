@@ -318,7 +318,7 @@ async function processDateCascade(payload) {
       taskId: u.taskId,
       properties: { 'Last Modified By System': { checkbox: true } },
     }));
-    await notionClient.patchBatch(preLmbsPayload, { batchSize: 3, interval: 1000, tracer });
+    await notionClient.patchBatch(preLmbsPayload, { tracer });
     tracer.endPhase('preLmbs');
 
     const patchPayload = updates.map((u) => ({
