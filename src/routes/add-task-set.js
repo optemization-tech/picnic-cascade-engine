@@ -186,20 +186,66 @@ async function processAddTaskSet(req) {
       applyDeliveryNumbering(filteredLevels, nextNum);
     }
 
-    // TODO: First-subtask unblocking — for each root parent in the filtered set,
-    // find the first child with no internal blockers and clear _templateBlockedBy
-    // so createStudyTasks doesn't set the Blocked by relation. Also for TLF buttons,
-    // clear Blocked by on Draft TLF tasks.
+    // ── First-subtask unblocking ──────────────────────────────────────────
+    // Collect all template IDs in the filtered set (internal deps)
+    const internalIds = new Set();
+    for (const { tasks } of filteredLevels) {
+      for (const task of tasks) internalIds.add(task._templateId);
+    }
 
-    // TODO: External dependency resolution — query existing production tasks,
-    // build templateId -> productionId mapping for tasks that already exist,
-    // pass to createStudyTasks so external deps resolve correctly.
+    // For each root parent (level 0), find children at level 1 whose blockers
+    // are all external (not in the filtered set). The first such child gets
+    // its _templateBlockedBy cleared so it's immediately actionable.
+    if (filteredLevels.length >= 2) {
+      const rootIds = new Set(filteredLevels[0].tasks.map((t) => t._templateId));
+      for (const task of filteredLevels[1]?.tasks || []) {
+        if (!rootIds.has(task._templateParentId)) continue;
+        const internalBlockers = (task._templateBlockedBy || []).filter((id) => internalIds.has(id));
+        if (internalBlockers.length === 0) {
+          task._templateBlockedBy = [];
+        }
+      }
+    }
 
-    // Create tasks level by level
+    // For TLF buttons, clear Blocked by on Draft TLF tasks
+    if (isTlfButton) {
+      for (const { tasks } of filteredLevels) {
+        for (const task of tasks) {
+          if (task._taskName.toLowerCase().includes('draft') && task._taskName.toLowerCase().includes('tlf')) {
+            task._templateBlockedBy = [];
+          }
+        }
+      }
+    }
+
+    // ── External dependency resolution ────────────────────────────────────
+    // Query existing production tasks to resolve deps on already-created tasks
+    tracer.startPhase('resolveExternalDeps');
+    const existingTasks = await notionClient.queryDatabase(
+      config.notion.studyTasksDbId,
+      { property: 'Study', relation: { contains: studyPageId } },
+      100,
+      { tracer },
+    );
+    tracer.endPhase('resolveExternalDeps');
+
+    // Build templateId -> productionId mapping from existing tasks
+    const existingIdMapping = {};
+    for (const page of existingTasks) {
+      const tsid = page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text
+        || page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+      if (tsid && page.id) {
+        existingIdMapping[tsid] = page.id;
+      }
+    }
+    tracer.set('external_deps_resolved', Object.keys(existingIdMapping).length);
+
+    // Create tasks level by level (seed idMapping with existing production tasks)
     const createResult = await createStudyTasks(notionClient, filteredLevels, {
       studyPageId,
       contractSignDate,
       studyTasksDbId: config.notion.studyTasksDbId,
+      existingIdMapping,
       tracer,
     });
 
