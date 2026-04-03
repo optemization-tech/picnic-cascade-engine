@@ -88,6 +88,8 @@ export class NotionClient {
       } catch (err) {
         lastError = err;
         if (attempt === maxAttempts) break;
+        // Don't retry non-retryable HTTP errors (4xx except 429)
+        if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) break;
         const jitter = Math.floor(Math.random() * 100);
         const backoff = baseMs * (2 ** (attempt - 1)) + jitter;
         if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: err.status || 0, tokenIndex });
