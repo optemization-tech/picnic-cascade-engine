@@ -139,8 +139,17 @@ async function processInception(body) {
       workflow: 'Inception',
       status: 'success',
       triggerType: 'Automation',
+      executionId: tracer.cascadeId,
+      timestamp: new Date().toISOString(),
+      cascadeMode: 'N/A',
       studyId: studyPageId,
       summary: `Inception complete: ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`,
+      details: {
+        totalCreated: createResult.totalCreated,
+        parentsPatchedCount: wireResult.parentsPatchedCount,
+        depsPatchedCount: wireResult.depsPatchedCount,
+        ...(tracer.toActivityLogDetails()),
+      },
     });
 
     // Report success
