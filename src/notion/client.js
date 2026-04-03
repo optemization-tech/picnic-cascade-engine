@@ -8,7 +8,7 @@ function sleep(ms) {
 }
 
 export class NotionClient {
-  constructor({ tokens, rateLimit = { maxPerSecond: 3 }, retry = { maxAttempts: 5, baseMs: 500 } }) {
+  constructor({ tokens, rateLimit = { maxPerSecond: 9 }, retry = { maxAttempts: 5, baseMs: 500 } }) {
     if (!Array.isArray(tokens) || tokens.length === 0) {
       throw new Error('NotionClient requires at least one token');
     }
@@ -17,6 +17,8 @@ export class NotionClient {
     this.rateLimit = rateLimit;
     this.retry = retry;
     this.tokenUsage = new Map(tokens.map((t) => [t, []]));
+    // Optimal batch size: all tokens firing at max rate per second
+    this.optimalBatchSize = tokens.length * (rateLimit.maxPerSecond || 9);
   }
 
   _nextToken() {
@@ -130,7 +132,8 @@ export class NotionClient {
   /**
    * updates: [{ taskId, properties }]
    */
-  async patchBatch(updates, { batchSize = 3, interval = 1000, tracer } = {}) {
+  async patchBatch(updates, { batchSize, interval = 1000, tracer } = {}) {
+    batchSize = batchSize ?? this.optimalBatchSize;
     const applied = [];
     for (let i = 0; i < updates.length; i += batchSize) {
       const batch = updates.slice(i, i + batchSize);
@@ -159,7 +162,8 @@ export class NotionClient {
   /**
    * Clears LMBS=true for all tasks in a study (safety-net cleanup).
    */
-  async clearStudyLmbsFlags({ studyTasksDbId, studyId, batchSize = 3, interval = 1000, tracer } = {}) {
+  async clearStudyLmbsFlags({ studyTasksDbId, studyId, batchSize, interval = 1000, tracer } = {}) {
+    batchSize = batchSize ?? this.optimalBatchSize;
     if (!studyTasksDbId || !studyId) return { updatedCount: 0, taskIds: [] };
 
     const lmdbTasks = await this.queryDatabase(studyTasksDbId, {
