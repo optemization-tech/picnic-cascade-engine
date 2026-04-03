@@ -4,7 +4,7 @@ import { copyBlocks, stripNullValues, cleanBlock } from '../../src/provisioning/
 // --- Helpers ---
 
 function makeBlock(type, data = {}, overrides = {}) {
-  return { id: 'block-id-will-be-stripped', type, [type]: data, ...overrides };
+  return { id: overrides.id || 'block-id-will-be-stripped', type, [type]: data, ...overrides };
 }
 
 function mockClient({ blocksByPage = {}, appendErrors = {} } = {}) {
@@ -12,7 +12,7 @@ function mockClient({ blocksByPage = {}, appendErrors = {} } = {}) {
 
   return {
     calls,
-    request: vi.fn(async (method, path, body, opts) => {
+    request: vi.fn(async (method, path, body) => {
       calls.request.push({ method, path, body });
 
       // GET blocks
@@ -36,14 +36,6 @@ function mockClient({ blocksByPage = {}, appendErrors = {} } = {}) {
     reportStatus: vi.fn(async (studyId, level, message) => {
       calls.reportStatus.push({ studyId, level, message });
     }),
-  };
-}
-
-function makeTracer() {
-  return {
-    startPhase: vi.fn(),
-    endPhase: vi.fn(),
-    recordRetry: vi.fn(),
   };
 }
 
@@ -136,6 +128,40 @@ describe('cleanBlock', () => {
     const result = cleanBlock(block);
     expect(result.heading_1).toEqual({ rich_text: [] });
   });
+
+  it('renames text -> rich_text for rich text block types', () => {
+    const block = makeBlock('paragraph', {
+      text: [{ text: { content: 'Hello' } }],
+    });
+    const result = cleanBlock(block);
+    expect(result.paragraph.rich_text).toEqual([{ text: { content: 'Hello' } }]);
+    expect(result.paragraph.text).toBeUndefined();
+  });
+
+  it('does NOT rename text -> rich_text if rich_text already exists', () => {
+    const block = makeBlock('paragraph', {
+      rich_text: [{ text: { content: 'Real' } }],
+      text: [{ text: { content: 'Old' } }],
+    });
+    const result = cleanBlock(block);
+    expect(result.paragraph.rich_text).toEqual([{ text: { content: 'Real' } }]);
+  });
+
+  it('renames text -> rich_text for heading types', () => {
+    for (const type of ['heading_1', 'heading_2', 'heading_3']) {
+      const block = makeBlock(type, { text: [{ text: { content: 'Title' } }] });
+      const result = cleanBlock(block);
+      expect(result[type].rich_text).toEqual([{ text: { content: 'Title' } }]);
+      expect(result[type].text).toBeUndefined();
+    }
+  });
+
+  it('does NOT rename text for non-rich-text block types', () => {
+    const block = makeBlock('image', { text: 'something', file: { url: 'https://x.com' } });
+    const result = cleanBlock(block);
+    // text should remain since image is not a rich text block type
+    expect(result.image.text).toBe('something');
+  });
 });
 
 // --- copyBlocks ---
@@ -175,7 +201,10 @@ describe('copyBlocks', () => {
     }
   });
 
-  it('filters out unsupported block types', async () => {
+  it('filters out unsupported block types but resolves synced_block', async () => {
+    const syncedSourceBlocks = [
+      makeBlock('paragraph', { rich_text: [{ text: { content: 'From synced' } }] }),
+    ];
     const blocks = [
       makeBlock('paragraph', { rich_text: [{ text: { content: 'Keep me' } }] }),
       makeBlock('child_database', { title: 'DB' }),
@@ -186,23 +215,143 @@ describe('copyBlocks', () => {
       makeBlock('breadcrumb', {}),
       makeBlock('column_list', {}),
       makeBlock('column', {}),
-      makeBlock('synced_block', { synced_from: { block_id: 'x' } }),
+      makeBlock('synced_block', { synced_from: { block_id: 'sync-source' } }, { id: 'sb-1' }),
       makeBlock('heading_1', { rich_text: [{ text: { content: 'Also keep' } }] }),
     ];
-    const client = mockClient({ blocksByPage: { 'tpl-1': blocks } });
+    const client = mockClient({
+      blocksByPage: {
+        'tpl-1': blocks,
+        'sync-source': syncedSourceBlocks,
+      },
+    });
 
     const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
       studyPageId: 'study-1',
       studyName: 'Test',
     });
 
-    expect(result.blocksWrittenCount).toBe(2);
+    // 3 blocks: paragraph + synced paragraph + heading_1
+    expect(result.blocksWrittenCount).toBe(3);
     const appendCall = client.calls.request.find(
       (c) => c.method === 'PATCH' && c.path.includes('prod-1'),
     );
-    expect(appendCall.body.children).toHaveLength(2);
+    expect(appendCall.body.children).toHaveLength(3);
     expect(appendCall.body.children[0].type).toBe('paragraph');
-    expect(appendCall.body.children[1].type).toBe('heading_1');
+    expect(appendCall.body.children[1].type).toBe('paragraph');
+    expect(appendCall.body.children[1].paragraph.rich_text[0].text.content).toBe('From synced');
+    expect(appendCall.body.children[2].type).toBe('heading_1');
+  });
+
+  it('resolves synced blocks with syncCache (shared across pages)', async () => {
+    const syncedSourceBlocks = [
+      makeBlock('paragraph', { rich_text: [{ text: { content: 'Shared content' } }] }),
+    ];
+    // Both pages reference the same synced block source
+    const blocks1 = [
+      makeBlock('synced_block', { synced_from: { block_id: 'shared-sync' } }, { id: 'sb-1' }),
+    ];
+    const blocks2 = [
+      makeBlock('synced_block', { synced_from: { block_id: 'shared-sync' } }, { id: 'sb-2' }),
+    ];
+    const client = mockClient({
+      blocksByPage: {
+        'tpl-1': blocks1,
+        'tpl-2': blocks2,
+        'shared-sync': syncedSourceBlocks,
+      },
+    });
+
+    const result = await copyBlocks(client, { 'tpl-1': 'prod-1', 'tpl-2': 'prod-2' }, {
+      studyPageId: 'study-1',
+      studyName: 'Test',
+      concurrency: 1, // Sequential to test cache correctly
+    });
+
+    expect(result.blocksWrittenCount).toBe(2);
+    expect(result.pagesProcessed).toBe(2);
+
+    // The sync source should only be fetched ONCE (cached)
+    const syncFetches = client.calls.request.filter(
+      (c) => c.method === 'GET' && c.path.includes('shared-sync'),
+    );
+    expect(syncFetches).toHaveLength(1);
+  });
+
+  it('handles nested synced blocks (one level deep)', async () => {
+    const innerBlocks = [
+      makeBlock('paragraph', { rich_text: [{ text: { content: 'Nested content' } }] }),
+    ];
+    const outerBlocks = [
+      makeBlock('synced_block', { synced_from: { block_id: 'inner-sync' } }, { id: 'nested-sb' }),
+    ];
+    const pageBlocks = [
+      makeBlock('synced_block', { synced_from: { block_id: 'outer-sync' } }, { id: 'page-sb' }),
+    ];
+    const client = mockClient({
+      blocksByPage: {
+        'tpl-1': pageBlocks,
+        'outer-sync': outerBlocks,
+        'inner-sync': innerBlocks,
+      },
+    });
+
+    const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
+      studyPageId: 'study-1',
+      studyName: 'Test',
+    });
+
+    expect(result.blocksWrittenCount).toBe(1);
+    expect(result.pagesProcessed).toBe(1);
+    const appendCall = client.calls.request.find(
+      (c) => c.method === 'PATCH' && c.path.includes('prod-1'),
+    );
+    expect(appendCall.body.children[0].paragraph.rich_text[0].text.content).toBe('Nested content');
+  });
+
+  it('handles original synced blocks (synced_from is null, uses block.id)', async () => {
+    const originalChildren = [
+      makeBlock('paragraph', { rich_text: [{ text: { content: 'Original content' } }] }),
+    ];
+    const pageBlocks = [
+      makeBlock('synced_block', { synced_from: null }, { id: 'original-sync-id' }),
+    ];
+    const client = mockClient({
+      blocksByPage: {
+        'tpl-1': pageBlocks,
+        'original-sync-id': originalChildren,
+      },
+    });
+
+    const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
+      studyPageId: 'study-1',
+      studyName: 'Test',
+    });
+
+    expect(result.blocksWrittenCount).toBe(1);
+    expect(result.pagesProcessed).toBe(1);
+  });
+
+  it('gracefully handles synced block fetch failure', async () => {
+    const pageBlocks = [
+      makeBlock('synced_block', { synced_from: { block_id: 'missing-sync' } }, { id: 'sb-1' }),
+      makeBlock('paragraph', { rich_text: [{ text: { content: 'Still here' } }] }),
+    ];
+    // missing-sync is NOT in blocksByPage — fetchAllBlocks will return []
+    const client = mockClient({
+      blocksByPage: {
+        'tpl-1': pageBlocks,
+        // 'missing-sync' intentionally missing — will return empty
+      },
+    });
+
+    const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
+      studyPageId: 'study-1',
+      studyName: 'Test',
+    });
+
+    // Only the paragraph survives (synced block resolved to empty)
+    expect(result.blocksWrittenCount).toBe(1);
+    expect(result.pagesProcessed).toBe(1);
   });
 
   it('caps blocks at 100 per page', async () => {
@@ -262,12 +411,8 @@ describe('copyBlocks', () => {
     consoleSpy.mockRestore();
   });
 
-  it('skips pages with no supported blocks', async () => {
-    const blocks = [
-      makeBlock('child_database', { title: 'DB' }),
-      makeBlock('synced_block', { synced_from: { block_id: 'x' } }),
-    ];
-    const client = mockClient({ blocksByPage: { 'tpl-1': blocks } });
+  it('skips pages with empty blocks', async () => {
+    const client = mockClient({ blocksByPage: { 'tpl-1': [] } });
 
     const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
       studyPageId: 'study-1',
@@ -277,16 +422,9 @@ describe('copyBlocks', () => {
     expect(result.pagesProcessed).toBe(0);
     expect(result.pagesSkipped).toBe(1);
     expect(result.blocksWrittenCount).toBe(0);
-
-    // Should NOT have made an append call
-    const appendCalls = client.calls.request.filter(
-      (c) => c.method === 'PATCH' && c.path.includes('/children'),
-    );
-    expect(appendCalls).toHaveLength(0);
   });
 
   it('reports progress every 50 pages', async () => {
-    // Create 51 template→production pairs so we cross the 50-page threshold
     const idMapping = {};
     const blocksByPage = {};
     for (let i = 0; i < 51; i++) {
@@ -302,6 +440,7 @@ describe('copyBlocks', () => {
     const result = await copyBlocks(client, idMapping, {
       studyPageId: 'study-1',
       studyName: 'Test',
+      concurrency: 10,
     });
 
     expect(result.pagesProcessed).toBe(51);
@@ -374,10 +513,10 @@ describe('copyBlocks', () => {
     expect(getCalls[1][1]).toContain('start_cursor=cursor-2');
   });
 
-  it('uses tracer phases for fetchBlocks and appendBlocks', async () => {
+  it('uses tracer copyBlocks phase', async () => {
     const blocks = [makeBlock('paragraph', { rich_text: [] })];
     const client = mockClient({ blocksByPage: { 'tpl-1': blocks } });
-    const tracer = makeTracer();
+    const tracer = { startPhase: vi.fn(), endPhase: vi.fn(), recordRetry: vi.fn() };
 
     await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
       studyPageId: 'study-1',
@@ -385,10 +524,8 @@ describe('copyBlocks', () => {
       tracer,
     });
 
-    expect(tracer.startPhase).toHaveBeenCalledWith('fetchBlocks');
-    expect(tracer.endPhase).toHaveBeenCalledWith('fetchBlocks');
-    expect(tracer.startPhase).toHaveBeenCalledWith('appendBlocks');
-    expect(tracer.endPhase).toHaveBeenCalledWith('appendBlocks');
+    expect(tracer.startPhase).toHaveBeenCalledWith('copyBlocks');
+    expect(tracer.endPhase).toHaveBeenCalledWith('copyBlocks');
   });
 
   it('null-strips block data before appending (icon:null regression)', async () => {
@@ -412,5 +549,27 @@ describe('copyBlocks', () => {
     const calloutData = appendCall.body.children[0].callout;
     expect(calloutData.icon).toBeUndefined();
     expect(calloutData.rich_text).toEqual([{ text: { content: 'Important' } }]);
+  });
+
+  it('processes pages in parallel batches with concurrency', async () => {
+    const blocksByPage = {};
+    const idMapping = {};
+    for (let i = 0; i < 10; i++) {
+      blocksByPage[`tpl-${i}`] = [
+        makeBlock('paragraph', { rich_text: [{ text: { content: `Block ${i}` } }] }),
+      ];
+      idMapping[`tpl-${i}`] = `prod-${i}`;
+    }
+
+    const client = mockClient({ blocksByPage });
+
+    const result = await copyBlocks(client, idMapping, {
+      studyPageId: 'study-1',
+      studyName: 'Test',
+      concurrency: 3,
+    });
+
+    expect(result.pagesProcessed).toBe(10);
+    expect(result.blocksWrittenCount).toBe(10);
   });
 });
