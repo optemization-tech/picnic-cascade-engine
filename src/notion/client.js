@@ -28,7 +28,7 @@ export class NotionClient {
   }
 
   async _throttleToken(token) {
-    const maxPerSecond = this.rateLimit.maxPerSecond || 3;
+    const maxPerSecond = this.rateLimit.maxPerSecond || 9;
     const now = Date.now();
     const windowStart = now - 1000;
     const usage = (this.tokenUsage.get(token) || []).filter((ts) => ts > windowStart);
