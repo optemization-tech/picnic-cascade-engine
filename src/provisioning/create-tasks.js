@@ -210,14 +210,15 @@ function accumulateIdMappings(createdPages, entries, idMapping, depTracking, par
  *
  * @param {import('../notion/client.js').NotionClient} client
  * @param {Array<{ level: number, tasks: object[], isLastLevel: boolean }>} levels - from buildTaskTree()
- * @param {{ studyPageId: string, contractSignDate: string, blueprintDbId: string, studyTasksDbId: string, tracer?: import('../services/cascade-tracer.js').CascadeTracer }} options
+ * @param {{ studyPageId: string, contractSignDate: string, blueprintDbId: string, studyTasksDbId: string, existingIdMapping?: object, tracer?: import('../services/cascade-tracer.js').CascadeTracer }} options
  * @returns {Promise<{ idMapping: object, totalCreated: number, depTracking: object[], parentTracking: object[] }>}
  */
-export async function createStudyTasks(client, levels, { studyPageId, contractSignDate, studyTasksDbId, tracer } = {}) {
+export async function createStudyTasks(client, levels, { studyPageId, contractSignDate, studyTasksDbId, existingIdMapping, tracer } = {}) {
   if (tracer) tracer.startPhase('createStudyTasks');
 
   const anchorDate = contractSignDate ? parseDate(contractSignDate) : new Date();
-  const idMapping = {};
+  // Seed with existing production task mappings (for add-task-set external deps)
+  const idMapping = { ...(existingIdMapping || {}) };
   const depTracking = [];
   const parentTracking = [];
   let totalCreated = 0;
