@@ -6,9 +6,13 @@ const app = createServer();
 app.listen(config.port, () => {
   console.log(`Cascade engine listening on port ${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
-  console.log(`Notion tokens: ${config.notion.tokens.length}`);
+  console.log(`Token pools: cascade=${config.notion.tokens.length}, provision=${config.notion.provisionTokens.length}, nuke=${config.notion.nukeTokens.length}`);
   console.log(`Endpoints:`);
   console.log(`  POST /webhook/date-cascade`);
   console.log(`  POST /webhook/status-rollup`);
+  console.log(`  POST /webhook/inception`);
+  console.log(`  POST /webhook/add-task-set`);
+  console.log(`  POST /webhook/copy-blocks`);
+  console.log(`  POST /webhook/nuke`);
   console.log(`  GET  /health`);
 });

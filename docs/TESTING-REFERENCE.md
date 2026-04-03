@@ -31,7 +31,6 @@ NOTION_TOKEN_1=<integration token>
 STUDY_TASKS_DB_ID=<study tasks database ID>
 STUDIES_DB_ID=<studies database ID>
 ACTIVITY_LOG_DB_ID=<activity log database ID>
-ACTIVITY_LOG_WEBHOOK_URL=<n8n webhook URL for status-rollup logging>
 PORT=3000
 NODE_ENV=development
 ```
