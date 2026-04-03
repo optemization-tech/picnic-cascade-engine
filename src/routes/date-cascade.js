@@ -316,7 +316,7 @@ async function processDateCascade(payload) {
     }));
 
     tracer.startPhase('patchUpdates');
-    const patched = await notionClient.patchBatch(patchPayload, { batchSize: 3, interval: 1000, tracer });
+    const patched = await notionClient.patchBatch(patchPayload, { tracer });
     tracer.endPhase('patchUpdates');
 
     // Immediate unlock pass skips roll-up tasks (WF-P parity).
@@ -332,7 +332,7 @@ async function processDateCascade(payload) {
         properties: { 'Last Modified By System': { checkbox: false } },
       }));
     if (unlockPayload.length > 0) {
-      await notionClient.patchBatch(unlockPayload, { batchSize: 3, interval: 1000, tracer });
+      await notionClient.patchBatch(unlockPayload, { tracer });
     }
     tracer.endPhase('patchUnlock');
 
