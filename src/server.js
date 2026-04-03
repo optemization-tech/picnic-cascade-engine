@@ -4,7 +4,7 @@ import { handleStatusRollup } from './routes/status-rollup.js';
 import { handleInception } from './routes/inception.js';
 import { handleAddTaskSet } from './routes/add-task-set.js';
 import { handleCopyBlocks } from './routes/copy-blocks.js';
-import { handleNuke } from './routes/nuke.js';
+import { handleDeletion } from './routes/deletion.js';
 
 export function createServer() {
   const app = express();
@@ -36,8 +36,8 @@ export function createServer() {
   app.post('/webhook/add-task-set', handleAddTaskSet);
   app.post('/webhook/copy-blocks', handleCopyBlocks);
 
-  // Nuke webhook endpoint (use nuke token pool)
-  app.post('/webhook/nuke', handleNuke);
+  // Deletion webhook endpoint (use deletion token pool)
+  app.post('/webhook/deletion', handleDeletion);
 
   return app;
 }

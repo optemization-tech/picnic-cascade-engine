@@ -1,11 +1,11 @@
 /**
- * Nuke module — archives all study tasks for a given study.
+ * Deletion module — archives all study tasks for a given study.
  *
  * Uses raw PATCH /pages/{id} with { archived: true } since the standard
  * patchBatch() sends { properties: ... } which doesn't support archiving.
  */
 
-export async function nukeStudyTasks(client, { studyTasksDbId, studyId, tracer }) {
+export async function deleteStudyTasks(client, { studyTasksDbId, studyId, tracer }) {
   const filter = { property: 'Study', relation: { contains: studyId } };
 
   if (tracer) tracer.startPhase('query');
