@@ -3,8 +3,13 @@ import { parseWebhookPayload, isSystemModified } from '../gates/guards.js';
 import { computeStatusRollup } from '../engine/status-rollup.js';
 import { NotionClient } from '../notion/client.js';
 import { normalizeTask } from '../notion/properties.js';
+import { ActivityLogService } from '../services/activity-log.js';
 
 const notionClient = new NotionClient({ tokens: config.notion.tokens });
+const activityLogService = new ActivityLogService({
+  notionClient,
+  activityLogDbId: config.notion.activityLogDbId,
+});
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,34 +60,22 @@ async function processStatusRollup(payload) {
     'Last Modified By System': { checkbox: false },
   });
 
-  if (config.activityLogWebhookUrl) {
-    try {
-      await fetch(config.activityLogWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow: 'Status Roll-Up',
-          triggerType: 'Automation',
-          sourceTaskId: changedTask.id,
-          sourceTaskName: changedTask.name,
-          studyId: changedTask.studyId,
-          status: 'Success',
-          summary: `Parent ${parentName} status -> ${desiredStatus} (triggered by ${changedTask.name})`,
-          details: {
-            parentId: changedTask.parentId,
-            parentName,
-            oldStatus: parentStatus,
-            newStatus: desiredStatus,
-            subtaskCount: siblings.length,
-          },
-          triggeredByUserId: parsed.triggeredByUserId,
-          timestamp: new Date().toISOString(),
-        }),
-      });
-    } catch (error) {
-      console.warn('[status-rollup] activity log failed:', error.message);
-    }
-  }
+  await activityLogService.logTerminalEvent({
+    workflow: 'Status Roll-Up',
+    triggerType: 'Automation',
+    sourceTaskId: changedTask.id,
+    sourceTaskName: changedTask.name,
+    studyId: changedTask.studyId,
+    status: 'success',
+    summary: `Parent ${parentName} status -> ${desiredStatus} (triggered by ${changedTask.name})`,
+    details: {
+      parentId: changedTask.parentId,
+      parentName,
+      oldStatus: parentStatus,
+      newStatus: desiredStatus,
+      subtaskCount: siblings.length,
+    },
+  });
 }
 
 export async function handleStatusRollup(req, res) {

@@ -1,6 +1,10 @@
 import express from 'express';
 import { handleDateCascade } from './routes/date-cascade.js';
 import { handleStatusRollup } from './routes/status-rollup.js';
+import { handleInception } from './routes/inception.js';
+import { handleAddTaskSet } from './routes/add-task-set.js';
+import { handleCopyBlocks } from './routes/copy-blocks.js';
+import { handleNuke } from './routes/nuke.js';
 
 export function createServer() {
   const app = express();
@@ -23,9 +27,17 @@ export function createServer() {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  // Webhook endpoints
+  // Cascade webhook endpoints (use cascade token pool)
   app.post('/webhook/date-cascade', handleDateCascade);
   app.post('/webhook/status-rollup', handleStatusRollup);
+
+  // Provisioning webhook endpoints (use provision token pool)
+  app.post('/webhook/inception', handleInception);
+  app.post('/webhook/add-task-set', handleAddTaskSet);
+  app.post('/webhook/copy-blocks', handleCopyBlocks);
+
+  // Nuke webhook endpoint (use nuke token pool)
+  app.post('/webhook/nuke', handleNuke);
 
   return app;
 }

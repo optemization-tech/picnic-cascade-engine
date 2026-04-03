@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   isSystemModified: vi.fn(),
   computeStatusRollup: vi.fn(),
   normalizeTask: vi.fn(),
+  activityLogService: {
+    logTerminalEvent: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -19,8 +22,8 @@ vi.mock('../../src/config.js', () => ({
       tokens: ['token-1'],
       studyTasksDbId: 'db-study-tasks',
       studiesDbId: 'db-studies',
+      activityLogDbId: 'db-activity-log',
     },
-    activityLogWebhookUrl: null,
   },
 }));
 
@@ -41,11 +44,16 @@ vi.mock('../../src/notion/properties.js', () => ({
   normalizeTask: mocks.normalizeTask,
 }));
 
+vi.mock('../../src/services/activity-log.js', () => ({
+  ActivityLogService: vi.fn(() => mocks.activityLogService),
+}));
+
 import { handleStatusRollup } from '../../src/routes/status-rollup.js';
 
 describe('status-rollup route error reporting', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true, pageId: 'page-1' });
   });
 
   // @behavior BEH-GUARD-IMPORT-MODE

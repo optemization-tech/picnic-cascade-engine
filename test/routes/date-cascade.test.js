@@ -30,7 +30,6 @@ vi.mock('../../src/config.js', () => ({
       studiesDbId: 'db-studies',
       activityLogDbId: 'db-activity-log',
     },
-    activityLogWebhookUrl: null,
   },
 }));
 
