@@ -252,10 +252,12 @@ async function processAddTaskSet(req) {
     }, { tracer });
     tracer.endPhase('disableImportMode');
 
-    // Fire copy-blocks only for newly created tasks (exclude pre-existing ones)
+    // Fire copy-blocks only for newly created tasks (exclude pre-existing ones).
+    // Template IDs (keys) repeat across operations — filter by production IDs (values).
+    const existingProductionIds = new Set(Object.values(existingIdMapping));
     const newIdMapping = {};
     for (const [templateId, productionId] of Object.entries(createResult.idMapping)) {
-      if (!existingIdMapping[templateId]) {
+      if (!existingProductionIds.has(productionId)) {
         newIdMapping[templateId] = productionId;
       }
     }
