@@ -220,6 +220,37 @@ async function processAddTaskSet(req) {
     }
     tracer.set('external_deps_resolved', Object.keys(existingIdMapping).length);
 
+    // ── Repeat-delivery date copying ─────────────────────────────────────
+    // Copy dates from the latest delivery's tasks so each new delivery
+    // inherits the previous one's dates (which may have been manually adjusted).
+    if (isRepeatDelivery) {
+      const latestDates = {};
+      for (const page of existingTasks) {
+        const tsid = page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text
+          || page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+        const dates = page.properties?.['Dates']?.date;
+        if (tsid && dates?.start) {
+          const created = page.created_time || '';
+          if (!latestDates[tsid] || created > latestDates[tsid].created) {
+            latestDates[tsid] = { start: dates.start, end: dates.end, created };
+          }
+        }
+      }
+
+      let overrideCount = 0;
+      for (const { tasks } of filteredLevels) {
+        for (const task of tasks) {
+          const override = latestDates[task._templateId];
+          if (override) {
+            task._overrideStartDate = override.start;
+            task._overrideEndDate = override.end;
+            overrideCount++;
+          }
+        }
+      }
+      tracer.set('date_overrides_applied', overrideCount);
+    }
+
     // Create tasks level by level (seed idMapping with existing production tasks)
     const createResult = await createStudyTasks(notionClient, filteredLevels, {
       studyPageId,
