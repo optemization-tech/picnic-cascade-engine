@@ -252,13 +252,20 @@ async function processAddTaskSet(req) {
     }, { tracer });
     tracer.endPhase('disableImportMode');
 
-    // Fire copy-blocks (self-POST, fire-and-forget)
+    // Fire copy-blocks only for newly created tasks (exclude pre-existing ones)
+    const newIdMapping = {};
+    for (const [templateId, productionId] of Object.entries(createResult.idMapping)) {
+      if (!existingIdMapping[templateId]) {
+        newIdMapping[templateId] = productionId;
+      }
+    }
+
     const selfUrl = `http://localhost:${config.port}/webhook/copy-blocks`;
     fetch(selfUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        idMapping: createResult.idMapping,
+        idMapping: newIdMapping,
         studyPageId,
         studyName,
       }),
