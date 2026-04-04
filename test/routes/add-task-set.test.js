@@ -164,7 +164,7 @@ describe('add-task-set route', () => {
     );
   });
 
-  it('rejects when Import Mode is already active', async () => {
+  it('proceeds even when Import Mode is already active (Notion automation sets it before webhook)', async () => {
     mocks.mockClient.getPage.mockResolvedValue(mockStudyPage({ importMode: true }));
 
     const { req, res } = makeReqRes(
@@ -176,21 +176,8 @@ describe('add-task-set route', () => {
     await flush();
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
-      'study-1',
-      'error',
-      expect.stringContaining('Import Mode already active'),
-      expect.any(Object),
-    );
-    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflow: 'Add Task Set',
-        status: 'failed',
-        summary: expect.stringContaining('concurrent Import Mode'),
-      }),
-    );
-    // Should NOT proceed to fetch blueprint
-    expect(mocks.fetchBlueprint).not.toHaveBeenCalled();
+    // Should proceed to fetch blueprint (Import Mode ON is expected from Notion automation)
+    expect(mocks.fetchBlueprint).toHaveBeenCalled();
   });
 
   it('resolves delivery numbering for repeat-delivery button', async () => {
