@@ -92,33 +92,9 @@ async function processAddTaskSet(req) {
   let studyPage;
 
   try {
-    // Import Mode guard — reject if already active (concurrent operation)
-    tracer.startPhase('importModeCheck');
-    studyPage = await notionClient.getPage(studyPageId);
-    tracer.endPhase('importModeCheck');
-
-    const importModeActive = studyPage.properties?.['Import Mode']?.checkbox === true;
-    if (importModeActive) {
-      await notionClient.reportStatus(
-        studyPageId,
-        'error',
-        'Add Task Set blocked: Import Mode already active (concurrent operation in progress)',
-        { tracer },
-      );
-      await activityLogService.logTerminalEvent({
-        workflow: 'Add Task Set',
-        status: 'failed',
-        triggerType: 'Automation',
-        executionId: tracer.cascadeId,
-        timestamp: new Date().toISOString(),
-        cascadeMode: 'N/A',
-        studyId: studyPageId,
-        summary: 'Add Task Set blocked: concurrent Import Mode',
-      });
-      return;
-    }
-
-    // Enable Import Mode
+    // Enable Import Mode (may already be ON — the Notion button automation
+    // sets Import Mode = true BEFORE sending the webhook, so it's expected
+    // to be active when we arrive here. We just ensure it stays on.)
     tracer.startPhase('enableImportMode');
     await notionClient.request('PATCH', `/pages/${studyPageId}`, {
       properties: { 'Import Mode': { checkbox: true } },
@@ -134,6 +110,10 @@ async function processAddTaskSet(req) {
     );
 
     // Fetch study details for contract sign date and study name
+    tracer.startPhase('fetchStudy');
+    studyPage = await notionClient.getPage(studyPageId);
+    tracer.endPhase('fetchStudy');
+
     const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start
       || new Date().toISOString().split('T')[0];
     const studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
