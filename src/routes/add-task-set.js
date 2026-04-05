@@ -158,9 +158,10 @@ async function processAddTaskSet(req) {
     }
 
     // Set numbering for repeat-delivery
+    let nextNum = null;
     if (isRepeatDelivery) {
       tracer.startPhase('resolveDeliveryNumber');
-      const nextNum = await resolveNextDeliveryNumber(studyPageId, tracer);
+      nextNum = await resolveNextDeliveryNumber(studyPageId, tracer);
       tracer.endPhase('resolveDeliveryNumber');
       tracer.set('next_delivery_num', nextNum);
       applyDeliveryNumbering(filteredLevels, nextNum);
@@ -223,32 +224,71 @@ async function processAddTaskSet(req) {
     // ── Repeat-delivery date copying ─────────────────────────────────────
     // Copy dates from the latest delivery's tasks so each new delivery
     // inherits the previous one's dates (which may have been manually adjusted).
+    // The blueprint has separate delivery subtrees (#1-#9) with unique template
+    // IDs, so we can't match by template ID. Instead, find the latest delivery's
+    // parent, collect its children's dates by task name, and match by name.
     if (isRepeatDelivery) {
-      const latestDates = {};
+      const maxNum = nextNum - 1; // nextNum was resolved earlier
+      const deliveryPattern = new RegExp(`Data Delivery #${maxNum}`);
+
+      // Find the parent task for the latest delivery
+      let latestDeliveryParentId = null;
       for (const page of existingTasks) {
-        const tsid = page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text
-          || page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
-        const dates = page.properties?.['Dates']?.date;
-        if (tsid && dates?.start) {
-          const created = page.created_time || '';
-          if (!latestDates[tsid] || created > latestDates[tsid].created) {
-            latestDates[tsid] = { start: dates.start, end: dates.end, created };
-          }
+        const name = page.properties?.['Task Name']?.title?.[0]?.plain_text || '';
+        if (deliveryPattern.test(name) && name.includes('Activities')) {
+          latestDeliveryParentId = page.id;
+          break;
         }
       }
 
-      let overrideCount = 0;
-      for (const { tasks } of filteredLevels) {
-        for (const task of tasks) {
-          const override = latestDates[task._templateId];
-          if (override) {
-            task._overrideStartDate = override.start;
-            task._overrideEndDate = override.end;
-            overrideCount++;
+      if (latestDeliveryParentId) {
+        // Collect children of that parent and map by task name → dates
+        const latestDates = {};
+        for (const page of existingTasks) {
+          const parentRel = page.properties?.['Parent Task']?.relation || [];
+          if (parentRel.some((r) => r.id === latestDeliveryParentId)) {
+            const name = page.properties?.['Task Name']?.title?.[0]?.plain_text || '';
+            const dates = page.properties?.['Dates']?.date;
+            if (name && dates?.start) {
+              latestDates[name.trim()] = { start: dates.start, end: dates.end };
+            }
           }
         }
+
+        // Also grab the parent's own dates
+        for (const page of existingTasks) {
+          if (page.id === latestDeliveryParentId) {
+            const dates = page.properties?.['Dates']?.date;
+            if (dates?.start) {
+              latestDates['__parent__'] = { start: dates.start, end: dates.end };
+            }
+            break;
+          }
+        }
+
+        // Apply date overrides — match by task name (after delivery renumbering)
+        let overrideCount = 0;
+        for (const { tasks } of filteredLevels) {
+          for (const task of tasks) {
+            // Strip delivery number from name for matching (e.g., "Data Delivery #10 Activities" → match parent)
+            const isParent = task._taskName.includes('Activities') && task._taskName.includes('Data Delivery');
+            if (isParent && latestDates['__parent__']) {
+              task._overrideStartDate = latestDates['__parent__'].start;
+              task._overrideEndDate = latestDates['__parent__'].end;
+              overrideCount++;
+            } else {
+              const override = latestDates[task._taskName.trim()];
+              if (override) {
+                task._overrideStartDate = override.start;
+                task._overrideEndDate = override.end;
+                overrideCount++;
+              }
+            }
+          }
+        }
+        tracer.set('date_overrides_applied', overrideCount);
+        tracer.set('latest_delivery_matched', `#${maxNum}`);
       }
-      tracer.set('date_overrides_applied', overrideCount);
     }
 
     // Create tasks level by level (seed idMapping with existing production tasks)
