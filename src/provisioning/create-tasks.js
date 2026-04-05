@@ -35,17 +35,25 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
   const taskName = task._taskName;
 
   // ── Date calculation ────────────────────────────────────────────────────
-  const sDateOffset = props['SDate Offset']?.number;
-  const eDateOffset = props['EDate Offset']?.number;
+  let startDateStr, endDateStr;
 
-  if (sDateOffset == null || eDateOffset == null) {
-    return null; // skip — missing offset
+  if (task._overrideStartDate) {
+    // Repeat-delivery: copy dates from the latest delivery
+    startDateStr = task._overrideStartDate;
+    endDateStr = task._overrideEndDate || task._overrideStartDate;
+  } else {
+    const sDateOffset = props['SDate Offset']?.number;
+    const eDateOffset = props['EDate Offset']?.number;
+
+    if (sDateOffset == null || eDateOffset == null) {
+      return null; // skip — missing offset
+    }
+
+    const startDate = addBusinessDays(anchorDate, sDateOffset);
+    const endDate = addBusinessDays(anchorDate, eDateOffset);
+    startDateStr = formatDate(startDate);
+    endDateStr = formatDate(endDate);
   }
-
-  const startDate = addBusinessDays(anchorDate, sDateOffset);
-  const endDate = addBusinessDays(anchorDate, eDateOffset);
-  const startDateStr = formatDate(startDate);
-  const endDateStr = formatDate(endDate);
 
   // ── Inline dependency resolution ────────────────────────────────────────
   const templateBlockedBy = task._templateBlockedBy || [];
