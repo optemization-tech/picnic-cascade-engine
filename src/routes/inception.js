@@ -194,16 +194,6 @@ async function processInception(body) {
     } catch (cleanupError) {
       console.warn('[inception] failed to disable Import Mode in finally:', cleanupError.message);
     }
-    // Clear per-task LMBS flags left from task creation
-    try {
-      await notionClient.clearStudyLmbsFlags({
-        studyTasksDbId: config.notion.studyTasksDbId,
-        studyId: studyPageId,
-        tracer,
-      });
-    } catch (cleanupError) {
-      console.warn('[inception] study-wide LMBS cleanup failed:', cleanupError.message);
-    }
   }
 }
 
