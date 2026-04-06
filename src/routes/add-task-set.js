@@ -62,10 +62,18 @@ function applyDeliveryNumbering(filteredLevels, nextNum) {
  * For non-repeat-delivery buttons (TLF, CSR, Insights, additional-site),
  * resolve the next number for each top-level parent name.
  *
- * Scans existing production tasks for the base name (unnumbered = counts as 1)
- * or `{name} #N` variants. Returns the max found + 1.
+ * Does its own fresh database query (like resolveNextDeliveryNumber) to avoid
+ * stale data from shared existingTasks arrays. Scans for the base name
+ * (unnumbered = counts as 1) or `{name} #N` variants. Returns max + 1.
  */
-function resolveNextTaskSetNumber(existingTasks, parentNames) {
+async function resolveNextTaskSetNumber(studyPageId, parentNames, tracer) {
+  const existingTasks = await notionClient.queryDatabase(
+    config.notion.studyTasksDbId,
+    { property: 'Study', relation: { contains: studyPageId } },
+    100,
+    { tracer },
+  );
+
   let maxNum = 0;
   for (const baseName of parentNames) {
     // Match exact name (unnumbered) or "{name} #N"
@@ -279,7 +287,9 @@ async function processAddTaskSet(req) {
     // Adds "#N" suffix to top-level parent names so successive presses
     // produce "TLF #2", "Insights Report #2", etc.
     if (!isRepeatDelivery && parentTaskNames.length > 0) {
-      const taskSetNum = resolveNextTaskSetNumber(existingTasks, parentTaskNames);
+      tracer.startPhase('resolveTaskSetNumber');
+      const taskSetNum = await resolveNextTaskSetNumber(studyPageId, parentTaskNames, tracer);
+      tracer.endPhase('resolveTaskSetNumber');
       tracer.set('next_task_set_num', taskSetNum);
       applyTaskSetNumbering(filteredLevels, taskSetNum);
     }
