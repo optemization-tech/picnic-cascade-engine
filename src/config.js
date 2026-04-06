@@ -31,6 +31,7 @@ function collectTokensRequired(prefix = 'NOTION_TOKEN') {
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
+  cascadeDebounceMs: parseInt(process.env.CASCADE_DEBOUNCE_MS || '5000', 10),
   notion: {
     // Cascade pool — date-cascade, status-rollup (user-facing, latency-sensitive)
     tokens: collectTokensRequired('NOTION_TOKEN'),
@@ -41,6 +42,7 @@ export const config = {
     studyTasksDbId: required('STUDY_TASKS_DB_ID'),
     studiesDbId: required('STUDIES_DB_ID'),
     blueprintDbId: process.env.BLUEPRINT_DB_ID || null,
+    blueprintV2DbId: process.env.BLUEPRINT_V2_DB_ID || null,
     activityLogDbId: process.env.ACTIVITY_LOG_DB_ID || null,
   },
 };
