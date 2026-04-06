@@ -83,6 +83,7 @@ function resolveTaskSetNumbers(existingTasks, filteredLevels) {
   // Each level-0 parent gets its own next number
   for (const task of filteredLevels[0].tasks) {
     const count = tsidCounts[task._templateId] || 0;
+    console.log(`[numbering] parent="${task._taskName}" templateId=${task._templateId} existingCount=${count} nextNum=${count + 1} totalExistingTasks=${existingTasks.length}`);
     numbers.set(task._templateId, count + 1);
   }
 
