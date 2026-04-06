@@ -5,6 +5,9 @@ import { handleInception } from './routes/inception.js';
 import { handleAddTaskSet } from './routes/add-task-set.js';
 import { handleCopyBlocks } from './routes/copy-blocks.js';
 import { handleDeletion } from './routes/deletion.js';
+import { handleDateCascade as handleDateCascadeV2 } from './v2/routes/date-cascade.js';
+import { handleInception as handleInceptionV2 } from './v2/routes/inception.js';
+import { handleAddTaskSet as handleAddTaskSetV2 } from './v2/routes/add-task-set.js';
 
 export function createServer() {
   const app = express();
@@ -38,6 +41,11 @@ export function createServer() {
 
   // Deletion webhook endpoint (use deletion token pool)
   app.post('/webhook/deletion', handleDeletion);
+
+  // V2 endpoints (parent-level-only, top-down subtask fan-out)
+  app.post('/webhook/v2/date-cascade', handleDateCascadeV2);
+  app.post('/webhook/v2/inception', handleInceptionV2);
+  app.post('/webhook/v2/add-task-set', handleAddTaskSetV2);
 
   return app;
 }
