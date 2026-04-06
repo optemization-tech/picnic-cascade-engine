@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     queryDatabase: vi.fn(),
     reportStatus: vi.fn(),
     request: vi.fn(),
+    patchBatch: vi.fn(),
   },
   fetchBlueprint: vi.fn(),
   buildTaskTree: vi.fn(),
