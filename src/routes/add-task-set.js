@@ -150,10 +150,18 @@ async function processAddTaskSet(req) {
       || new Date().toISOString().split('T')[0];
     const studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
 
-    // Fetch blueprint
-    tracer.startPhase('fetchBlueprint');
-    const blueprintTasks = await fetchBlueprint(notionClient, config.notion.blueprintDbId, { tracer });
-    tracer.endPhase('fetchBlueprint');
+    // Fetch blueprint + existing tasks in parallel (independent queries)
+    tracer.startPhase('fetchBlueprintAndExisting');
+    const [blueprintTasks, existingTasks] = await Promise.all([
+      fetchBlueprint(notionClient, config.notion.blueprintDbId, { tracer }),
+      notionClient.queryDatabase(
+        config.notion.studyTasksDbId,
+        { property: 'Study', relation: { contains: studyPageId } },
+        100,
+        { tracer },
+      ),
+    ]);
+    tracer.endPhase('fetchBlueprintAndExisting');
 
     if (!blueprintTasks || blueprintTasks.length === 0) {
       await notionClient.reportStatus(studyPageId, 'error', 'No blueprint tasks found', { tracer });
@@ -230,17 +238,6 @@ async function processAddTaskSet(req) {
         }
       }
     }
-
-    // ── External dependency resolution ────────────────────────────────────
-    // Query existing production tasks to resolve deps on already-created tasks
-    tracer.startPhase('resolveExternalDeps');
-    const existingTasks = await notionClient.queryDatabase(
-      config.notion.studyTasksDbId,
-      { property: 'Study', relation: { contains: studyPageId } },
-      100,
-      { tracer },
-    );
-    tracer.endPhase('resolveExternalDeps');
 
     // Build templateId -> productionId mapping from existing tasks
     const existingIdMapping = {};
