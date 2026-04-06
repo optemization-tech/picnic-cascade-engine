@@ -83,23 +83,12 @@ function resolveTaskSetNumbers(existingTasks, filteredLevels) {
   // Each level-0 parent gets its own next number
   for (const task of filteredLevels[0].tasks) {
     const count = tsidCounts[task._templateId] || 0;
-    console.log(`[numbering] parent="${task._taskName}" templateId=${task._templateId} existingCount=${count} nextNum=${count + 1} totalExistingTasks=${existingTasks.length}`);
     numbers.set(task._templateId, count + 1);
   }
 
   return numbers;
 }
 
-/**
- * Append ` #N` to each level-0 parent task name using per-parent numbers.
- */
-function applyTaskSetNumbering(filteredLevels, numberMap) {
-  if (filteredLevels.length === 0) return;
-  for (const task of filteredLevels[0].tasks) {
-    const num = numberMap.get(task._templateId);
-    if (num) task._taskName = `${task._taskName} #${num}`;
-  }
-}
 
 async function processAddTaskSet(req) {
   const body = req.body || {};
@@ -392,7 +381,6 @@ async function processAddTaskSet(req) {
       );
 
       const numberMap = resolveTaskSetNumbers(freshTasks, filteredLevels);
-      console.log(`[numbering-post-create] freshTaskCount=${freshTasks.length} numbers=${JSON.stringify(Object.fromEntries(numberMap))}`);
 
       // PATCH-rename each parent page
       const renames = [];
