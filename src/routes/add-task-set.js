@@ -260,7 +260,20 @@ async function processAddTaskSet(req) {
         existingIdMapping[tsid] = page.id;
       }
     }
+
+    // Strip current subtree's template IDs from existingIdMapping so that
+    // intra-set deps (e.g., Draft TLF → Internal Review within TLF #2) stay
+    // unresolved during task creation and get wired to the NEW batch's tasks
+    // by wireRemainingRelations, instead of pointing to inception's originals.
+    const internalTemplateIds = new Set();
+    for (const { tasks } of filteredLevels) {
+      for (const task of tasks) internalTemplateIds.add(task._templateId);
+    }
+    for (const tid of internalTemplateIds) {
+      delete existingIdMapping[tid];
+    }
     tracer.set('external_deps_resolved', Object.keys(existingIdMapping).length);
+    tracer.set('internal_template_ids_excluded', internalTemplateIds.size);
 
     // ── Task set numbering for non-repeat-delivery buttons ───────────────
     // Adds "#N" suffix to top-level parent names so successive presses
