@@ -60,12 +60,13 @@ function applyDeliveryNumbering(filteredLevels, nextNum) {
 
 /**
  * For non-repeat-delivery buttons, count how many production tasks already
- * exist with the same Template Source ID as the level-0 parents. Each button
- * press (including inception) creates one task per template, so the count
- * equals the number of existing sets. Next number = count + 1.
+ * exist with the same Template Source ID as each level-0 parent. Each parent
+ * gets its own number: TLF might be #3 while CSR is #2 if CSR has fewer
+ * existing instances. Returns a Map of templateId → nextNum.
  */
-async function resolveNextTaskSetNumber(studyPageId, filteredLevels, tracer) {
-  if (filteredLevels.length === 0 || filteredLevels[0].tasks.length === 0) return 2;
+async function resolveTaskSetNumbers(studyPageId, filteredLevels, tracer) {
+  const numbers = new Map();
+  if (filteredLevels.length === 0 || filteredLevels[0].tasks.length === 0) return numbers;
 
   const existingTasks = await notionClient.queryDatabase(
     config.notion.studyTasksDbId,
@@ -74,34 +75,32 @@ async function resolveNextTaskSetNumber(studyPageId, filteredLevels, tracer) {
     { tracer },
   );
 
-  // Count production tasks that share any level-0 template ID
-  const parentTemplateIds = new Set(
-    filteredLevels[0].tasks.map((t) => t._templateId),
-  );
-  let maxCount = 0;
-  for (const tid of parentTemplateIds) {
-    let count = 0;
-    for (const page of existingTasks) {
-      const tsid =
-        page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text ||
-        page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
-      if (tsid === tid) count++;
-    }
-    if (count > maxCount) maxCount = count;
+  // Build a count of existing production tasks per Template Source ID
+  const tsidCounts = {};
+  for (const page of existingTasks) {
+    const tsid =
+      page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text ||
+      page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+    if (tsid) tsidCounts[tsid] = (tsidCounts[tsid] || 0) + 1;
   }
 
-  // Inception = 1, first button press = 2, etc.
-  return maxCount + 1;
+  // Each level-0 parent gets its own next number
+  for (const task of filteredLevels[0].tasks) {
+    const count = tsidCounts[task._templateId] || 0;
+    numbers.set(task._templateId, count + 1);
+  }
+
+  return numbers;
 }
 
 /**
- * Append ` #N` to top-level parent task names (level 0) for non-repeat-delivery
- * buttons so successive presses produce "TLF #2", "TLF #3", etc.
+ * Append ` #N` to each level-0 parent task name using per-parent numbers.
  */
-function applyTaskSetNumbering(filteredLevels, nextNum) {
+function applyTaskSetNumbering(filteredLevels, numberMap) {
   if (filteredLevels.length === 0) return;
   for (const task of filteredLevels[0].tasks) {
-    task._taskName = `${task._taskName} #${nextNum}`;
+    const num = numberMap.get(task._templateId);
+    if (num) task._taskName = `${task._taskName} #${num}`;
   }
 }
 
@@ -286,10 +285,10 @@ async function processAddTaskSet(req) {
     // produce "TLF #2", "Insights Report #2", etc.
     if (!isRepeatDelivery && parentTaskNames.length > 0) {
       tracer.startPhase('resolveTaskSetNumber');
-      const taskSetNum = await resolveNextTaskSetNumber(studyPageId, filteredLevels, tracer);
+      const numberMap = await resolveTaskSetNumbers(studyPageId, filteredLevels, tracer);
       tracer.endPhase('resolveTaskSetNumber');
-      tracer.set('next_task_set_num', taskSetNum);
-      applyTaskSetNumbering(filteredLevels, taskSetNum);
+      tracer.set('task_set_numbers', JSON.stringify(Object.fromEntries(numberMap)));
+      applyTaskSetNumbering(filteredLevels, numberMap);
     }
 
     // ── Repeat-delivery date copying ─────────────────────────────────────
