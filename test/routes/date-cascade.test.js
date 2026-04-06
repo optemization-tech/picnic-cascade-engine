@@ -52,6 +52,13 @@ vi.mock('../../src/notion/queries.js', () => ({ queryStudyTasks: mocks.queryStud
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
 }));
+vi.mock('../../src/services/cascade-queue.js', () => ({
+  cascadeQueue: {
+    enqueue: vi.fn((payload, parseFn, processFn) => {
+      void processFn(payload).catch(() => {});
+    }),
+  },
+}));
 
 import { handleDateCascade } from '../../src/routes/date-cascade.js';
 

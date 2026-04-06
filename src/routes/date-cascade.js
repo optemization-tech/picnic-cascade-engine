@@ -8,6 +8,7 @@ import { NotionClient } from '../notion/client.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
+import { cascadeQueue } from '../services/cascade-queue.js';
 
 const notionClient = new NotionClient({ tokens: config.notion.tokens });
 const activityLogService = new ActivityLogService({
@@ -418,7 +419,5 @@ async function processDateCascade(payload) {
 
 export async function handleDateCascade(req, res) {
   res.status(200).json({ ok: true });
-  void processDateCascade(req.body).catch((error) => {
-    console.error('[date-cascade] processing failed:', error);
-  });
+  cascadeQueue.enqueue(req.body, parseWebhookPayload, processDateCascade);
 }
