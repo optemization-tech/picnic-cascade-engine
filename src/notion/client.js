@@ -122,10 +122,20 @@ export class NotionClient {
       const body = { filter, page_size: pageSize };
       if (cursor) body.start_cursor = cursor;
 
-      const data = await this.request('POST', `/databases/${dbId}/query`, body, { tracer });
-      results.push(...(data.results || []));
-      hasMore = Boolean(data.has_more);
-      cursor = data.next_cursor || undefined;
+      try {
+        const data = await this.request('POST', `/databases/${dbId}/query`, body, { tracer });
+        results.push(...(data.results || []));
+        hasMore = Boolean(data.has_more);
+        cursor = data.next_cursor || undefined;
+      } catch (err) {
+        // Notion can invalidate cursors when the dataset changes mid-pagination.
+        // Return what we have so far rather than failing the entire operation.
+        if (cursor && err.message?.includes('start_cursor')) {
+          console.warn(`[queryDatabase] cursor invalidated after ${results.length} results, returning partial`);
+          break;
+        }
+        throw err;
+      }
     }
 
     return results;
