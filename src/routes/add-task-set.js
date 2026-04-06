@@ -59,14 +59,14 @@ function applyDeliveryNumbering(filteredLevels, nextNum) {
 }
 
 /**
- * For non-repeat-delivery buttons (TLF, CSR, Insights, additional-site),
- * resolve the next number for each top-level parent name.
- *
- * Does its own fresh database query (like resolveNextDeliveryNumber) to avoid
- * stale data from shared existingTasks arrays. Scans for the base name
- * (unnumbered = counts as 1) or `{name} #N` variants. Returns max + 1.
+ * For non-repeat-delivery buttons, count how many production tasks already
+ * exist with the same Template Source ID as the level-0 parents. Each button
+ * press (including inception) creates one task per template, so the count
+ * equals the number of existing sets. Next number = count + 1.
  */
-async function resolveNextTaskSetNumber(studyPageId, parentNames, tracer) {
+async function resolveNextTaskSetNumber(studyPageId, filteredLevels, tracer) {
+  if (filteredLevels.length === 0 || filteredLevels[0].tasks.length === 0) return 2;
+
   const existingTasks = await notionClient.queryDatabase(
     config.notion.studyTasksDbId,
     { property: 'Study', relation: { contains: studyPageId } },
@@ -74,26 +74,24 @@ async function resolveNextTaskSetNumber(studyPageId, parentNames, tracer) {
     { tracer },
   );
 
-  let maxNum = 0;
-  for (const baseName of parentNames) {
-    // Match exact name (unnumbered) or "{name} #N"
-    const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pattern = new RegExp(`^${escaped}(\\s+#(\\d+))?$`);
-
+  // Count production tasks that share any level-0 template ID
+  const parentTemplateIds = new Set(
+    filteredLevels[0].tasks.map((t) => t._templateId),
+  );
+  let maxCount = 0;
+  for (const tid of parentTemplateIds) {
+    let count = 0;
     for (const page of existingTasks) {
-      const name = (
-        page.properties?.['Task Name']?.title?.[0]?.text?.content ||
-        page.properties?.['Task Name']?.title?.[0]?.plain_text ||
-        ''
-      ).trim();
-      const match = name.match(pattern);
-      if (match) {
-        const num = match[2] ? parseInt(match[2], 10) : 1;
-        if (num > maxNum) maxNum = num;
-      }
+      const tsid =
+        page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text ||
+        page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+      if (tsid === tid) count++;
     }
+    if (count > maxCount) maxCount = count;
   }
-  return maxNum + 1;
+
+  // Inception = 1, first button press = 2, etc.
+  return maxCount + 1;
 }
 
 /**
@@ -288,7 +286,7 @@ async function processAddTaskSet(req) {
     // produce "TLF #2", "Insights Report #2", etc.
     if (!isRepeatDelivery && parentTaskNames.length > 0) {
       tracer.startPhase('resolveTaskSetNumber');
-      const taskSetNum = await resolveNextTaskSetNumber(studyPageId, parentTaskNames, tracer);
+      const taskSetNum = await resolveNextTaskSetNumber(studyPageId, filteredLevels, tracer);
       tracer.endPhase('resolveTaskSetNumber');
       tracer.set('next_task_set_num', taskSetNum);
       applyTaskSetNumbering(filteredLevels, taskSetNum);
