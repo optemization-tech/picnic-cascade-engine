@@ -63,17 +63,13 @@ function applyDeliveryNumbering(filteredLevels, nextNum) {
  * exist with the same Template Source ID as each level-0 parent. Each parent
  * gets its own number: TLF might be #3 while CSR is #2 if CSR has fewer
  * existing instances. Returns a Map of templateId → nextNum.
+ *
+ * Uses the already-fetched existingTasks array (from dep resolution) rather
+ * than a separate query — both query the same DB with the same filter.
  */
-async function resolveTaskSetNumbers(studyPageId, filteredLevels, tracer) {
+function resolveTaskSetNumbers(existingTasks, filteredLevels) {
   const numbers = new Map();
   if (filteredLevels.length === 0 || filteredLevels[0].tasks.length === 0) return numbers;
-
-  const existingTasks = await notionClient.queryDatabase(
-    config.notion.studyTasksDbId,
-    { property: 'Study', relation: { contains: studyPageId } },
-    100,
-    { tracer },
-  );
 
   // Build a count of existing production tasks per Template Source ID
   const tsidCounts = {};
@@ -284,9 +280,7 @@ async function processAddTaskSet(req) {
     // Adds "#N" suffix to top-level parent names so successive presses
     // produce "TLF #2", "Insights Report #2", etc.
     if (!isRepeatDelivery && parentTaskNames.length > 0) {
-      tracer.startPhase('resolveTaskSetNumber');
-      const numberMap = await resolveTaskSetNumbers(studyPageId, filteredLevels, tracer);
-      tracer.endPhase('resolveTaskSetNumber');
+      const numberMap = resolveTaskSetNumbers(existingTasks, filteredLevels);
       tracer.set('task_set_numbers', JSON.stringify(Object.fromEntries(numberMap)));
       applyTaskSetNumbering(filteredLevels, numberMap);
     }
