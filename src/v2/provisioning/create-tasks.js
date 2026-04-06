@@ -1,16 +1,13 @@
 /**
  * V2 create-tasks — creates study tasks from Blueprint V2 templates.
  *
- * Forked from V1 create-tasks with one key addition:
- *   - Subtasks get Relative SDate Offset / Relative EDate Offset written
- *     (read from Blueprint, carried through to production tasks)
+ * Nearly identical to V1. The only behavioral difference is that V2 Blueprint
+ * subtasks have no Blocking/Blocked by relations, so buildTaskBody automatically
+ * skips dep wiring for them.
  *
  * Date computation is identical to V1 at inception time (anchor + global offset).
- * The relative offsets are stored on production subtasks so the V2 cascade's
- * subtask fan-out can recompute dates when parent dates change.
- *
- * Dependency wiring is also identical — V2 Blueprint subtasks have no deps,
- * so buildTaskBody automatically skips Blocked by for them.
+ * No stored offset properties are written to production tasks — the V2 cascade's
+ * subtask fan-out computes offsets dynamically from current parent/subtask dates.
  */
 
 import { addBusinessDays, formatDate, parseDate } from '../../utils/business-days.js';

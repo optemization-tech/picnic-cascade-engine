@@ -226,21 +226,8 @@ async function processDateCascade(payload) {
     });
     tracer.endPhase('cascade');
 
-    // Phase 5: Subtask fan-out (V2 — replaces runParentSubtask)
-    tracer.startPhase('subtaskFanout');
-    const allMovedParentIds = [classified.sourceTaskId, ...cascadeResult.movedTaskIds];
-    const subtaskResult = computeSubtaskUpdates({
-      movedParentIds: allMovedParentIds,
-      movedParentMap: {
-        [classified.sourceTaskId]: { newStart: classified.newStart, newEnd: classified.newEnd },
-        ...cascadeResult.movedTaskMap,
-      },
-      allTasks,
-    });
-    tracer.endPhase('subtaskFanout');
-    tracer.set('subtask_update_count', subtaskResult.updates.length);
-
-    // Phase 6: Constraints on source (no case-a merge — parentResult=null)
+    // Phase 5: Constraints on source (no case-a merge — parentResult=null)
+    // Runs BEFORE fan-out so subtask dates use the constrained source start.
     tracer.startPhase('constraints');
     const constrainedSource = enforceConstraints({
       task: {
@@ -255,6 +242,21 @@ async function processDateCascade(payload) {
       allTasks: parentTasks,
     });
     tracer.endPhase('constraints');
+
+    // Phase 6: Subtask fan-out (V2 — replaces runParentSubtask)
+    // Uses constrained source dates so subtasks align with final parent position.
+    tracer.startPhase('subtaskFanout');
+    const allMovedParentIds = [classified.sourceTaskId, ...cascadeResult.movedTaskIds];
+    const subtaskResult = computeSubtaskUpdates({
+      movedParentIds: allMovedParentIds,
+      movedParentMap: {
+        [classified.sourceTaskId]: { newStart: constrainedSource.newStart, newEnd: constrainedSource.newEnd },
+        ...cascadeResult.movedTaskMap,
+      },
+      allTasks,
+    });
+    tracer.endPhase('subtaskFanout');
+    tracer.set('subtask_update_count', subtaskResult.updates.length);
 
     // Phase 7: Merge parent cascade + subtask fan-out updates
     tracer.startPhase('merge');
