@@ -114,31 +114,37 @@ export class NotionClient {
   }
 
   async queryDatabase(dbId, filter, pageSize = 100, { tracer } = {}) {
-    let hasMore = true;
-    let cursor = undefined;
-    const results = [];
+    const maxRetries = 2;
 
-    while (hasMore) {
-      const body = { filter, page_size: pageSize };
-      if (cursor) body.start_cursor = cursor;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let hasMore = true;
+      let cursor = undefined;
+      const results = [];
+      let cursorFailed = false;
 
-      try {
-        const data = await this.request('POST', `/databases/${dbId}/query`, body, { tracer });
-        results.push(...(data.results || []));
-        hasMore = Boolean(data.has_more);
-        cursor = data.next_cursor || undefined;
-      } catch (err) {
-        // Notion can invalidate cursors when the dataset changes mid-pagination.
-        // Return what we have so far rather than failing the entire operation.
-        if (cursor && err.message?.includes('start_cursor')) {
-          console.warn(`[queryDatabase] cursor invalidated after ${results.length} results, returning partial`);
-          break;
+      while (hasMore) {
+        const body = { filter, page_size: pageSize };
+        if (cursor) body.start_cursor = cursor;
+
+        try {
+          const data = await this.request('POST', `/databases/${dbId}/query`, body, { tracer });
+          results.push(...(data.results || []));
+          hasMore = Boolean(data.has_more);
+          cursor = data.next_cursor || undefined;
+        } catch (err) {
+          // Notion can invalidate cursors when the dataset changes mid-pagination.
+          // Retry the entire query from scratch rather than returning partial results.
+          if (cursor && err.message?.includes('start_cursor') && attempt < maxRetries) {
+            console.warn(`[queryDatabase] cursor invalidated after ${results.length} results (attempt ${attempt + 1}/${maxRetries + 1}), retrying from scratch`);
+            cursorFailed = true;
+            break;
+          }
+          throw err;
         }
-        throw err;
       }
-    }
 
-    return results;
+      if (!cursorFailed) return results;
+    }
   }
 
   /**
