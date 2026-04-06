@@ -58,6 +58,47 @@ function applyDeliveryNumbering(filteredLevels, nextNum) {
   }
 }
 
+/**
+ * For non-repeat-delivery buttons (TLF, CSR, Insights, additional-site),
+ * resolve the next number for each top-level parent name.
+ *
+ * Scans existing production tasks for the base name (unnumbered = counts as 1)
+ * or `{name} #N` variants. Returns the max found + 1.
+ */
+function resolveNextTaskSetNumber(existingTasks, parentNames) {
+  let maxNum = 0;
+  for (const baseName of parentNames) {
+    // Match exact name (unnumbered) or "{name} #N"
+    const escaped = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^${escaped}(\\s+#(\\d+))?$`);
+
+    for (const page of existingTasks) {
+      const name = (
+        page.properties?.['Task Name']?.title?.[0]?.text?.content ||
+        page.properties?.['Task Name']?.title?.[0]?.plain_text ||
+        ''
+      ).trim();
+      const match = name.match(pattern);
+      if (match) {
+        const num = match[2] ? parseInt(match[2], 10) : 1;
+        if (num > maxNum) maxNum = num;
+      }
+    }
+  }
+  return maxNum + 1;
+}
+
+/**
+ * Append ` #N` to top-level parent task names (level 0) for non-repeat-delivery
+ * buttons so successive presses produce "TLF #2", "TLF #3", etc.
+ */
+function applyTaskSetNumbering(filteredLevels, nextNum) {
+  if (filteredLevels.length === 0) return;
+  for (const task of filteredLevels[0].tasks) {
+    task._taskName = `${task._taskName} #${nextNum}`;
+  }
+}
+
 async function processAddTaskSet(req) {
   const body = req.body || {};
   const headers = req.headers || {};
@@ -220,6 +261,15 @@ async function processAddTaskSet(req) {
       }
     }
     tracer.set('external_deps_resolved', Object.keys(existingIdMapping).length);
+
+    // ── Task set numbering for non-repeat-delivery buttons ───────────────
+    // Adds "#N" suffix to top-level parent names so successive presses
+    // produce "TLF #2", "Insights Report #2", etc.
+    if (!isRepeatDelivery && parentTaskNames.length > 0) {
+      const taskSetNum = resolveNextTaskSetNumber(existingTasks, parentTaskNames);
+      tracer.set('next_task_set_num', taskSetNum);
+      applyTaskSetNumbering(filteredLevels, taskSetNum);
+    }
 
     // ── Repeat-delivery date copying ─────────────────────────────────────
     // Copy dates from the latest delivery's tasks so each new delivery
