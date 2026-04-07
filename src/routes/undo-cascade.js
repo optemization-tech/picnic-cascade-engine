@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { NotionClient } from '../notion/client.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { undoStore } from '../services/undo-store.js';
+import { cascadeQueue } from '../services/cascade-queue.js';
 
 const notionClient = new NotionClient({ tokens: config.notion.tokens });
 const activityLogService = new ActivityLogService({
@@ -16,7 +17,7 @@ async function processUndoCascade(payload) {
     return;
   }
 
-  const entry = undoStore.pop(studyId);
+  const entry = undoStore.peek(studyId);
   if (!entry) {
     await notionClient.reportStatus(studyId, 'warning', 'No recent cascade to undo (expired or already undone)');
     await activityLogService.logTerminalEvent({
@@ -54,6 +55,10 @@ async function processUndoCascade(payload) {
       },
     }));
     await notionClient.patchBatch(restorePayload);
+
+    // Only consume the undo entry after successful restore.
+    // If patchBatch fails mid-batch, the entry stays available for retry.
+    undoStore.pop(studyId);
 
     await notionClient.reportStatus(
       studyId,
@@ -96,7 +101,12 @@ async function processUndoCascade(payload) {
   }
 }
 
+function parseUndoPayload(payload) {
+  const studyId = payload?.data?.studyId || payload?.studyId;
+  return { skip: false, taskId: '__undo__', studyId };
+}
+
 export async function handleUndoCascade(req, res) {
   res.status(200).json({ ok: true });
-  void processUndoCascade(req.body).catch((err) => console.error('[undo-cascade] unhandled:', err));
+  cascadeQueue.enqueue(req.body, parseUndoPayload, processUndoCascade);
 }
