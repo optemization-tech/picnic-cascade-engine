@@ -9,6 +9,7 @@ import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { cascadeQueue } from '../services/cascade-queue.js';
+import { undoStore } from '../services/undo-store.js';
 
 const notionClient = new NotionClient({ tokens: config.notion.tokens });
 const activityLogService = new ActivityLogService({
@@ -191,6 +192,18 @@ async function processDateCascade(payload) {
     tracer.endPhase('query');
     tracer.set('study_task_count', allTasks.length);
 
+    // Snapshot pre-cascade dates for undo capability.
+    // allTasks has current dates for all downstream tasks (only source has changed).
+    const preSnapshot = new Map();
+    for (const t of allTasks) {
+      preSnapshot.set(t.id, { start: t.start, end: t.end, refStart: t.refStart, refEnd: t.refEnd });
+    }
+    // Source task's pre-edit dates come from webhook payload (allTasks already has the new edit)
+    preSnapshot.set(parsed.taskId, {
+      start: parsed.refStart, end: parsed.refEnd,
+      refStart: parsed.refStart, refEnd: parsed.refEnd,
+    });
+
     tracer.startPhase('classify');
     const classified = classify(parsed, allTasks, parsed.startDelta, parsed.endDelta);
     tracer.endPhase('classify');
@@ -341,6 +354,29 @@ async function processDateCascade(payload) {
       tracer,
     });
     tracer.endPhase('logTerminal');
+
+    // Save undo manifest — only for successful cascades that actually moved tasks
+    if (!capReached && updates.length > 0) {
+      const undoManifest = {};
+      for (const u of updates) {
+        const pre = preSnapshot.get(u.taskId);
+        if (pre) {
+          undoManifest[u.taskId] = {
+            oldStart: pre.start,
+            oldEnd: pre.end,
+            newStart: u.newStart,
+            newEnd: u.newEnd,
+          };
+        }
+      }
+      undoStore.save(parsed.studyId, {
+        cascadeId: tracer.cascadeId,
+        sourceTaskId: classified.sourceTaskId,
+        sourceTaskName: classified.sourceTaskName,
+        cascadeMode: classified.cascadeMode,
+        manifest: undoManifest,
+      });
+    }
   } catch (error) {
     console.log(tracer.toConsoleLog());
     try {

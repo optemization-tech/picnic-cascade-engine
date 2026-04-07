@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     logTerminalEvent: vi.fn(),
   },
   undoStore: {
+    peek: vi.fn(),
     pop: vi.fn(),
   },
 }));
@@ -35,6 +36,14 @@ vi.mock('../../src/services/undo-store.js', () => ({
   undoStore: mocks.undoStore,
 }));
 
+vi.mock('../../src/services/cascade-queue.js', () => ({
+  cascadeQueue: {
+    enqueue: vi.fn((payload, parseFn, processFn) => {
+      void processFn(payload).catch(() => {});
+    }),
+  },
+}));
+
 import { handleUndoCascade } from '../../src/routes/undo-cascade.js';
 
 function makeReqRes(body = {}) {
@@ -56,7 +65,7 @@ describe('undo-cascade route', () => {
   });
 
   it('returns 200 immediately', async () => {
-    mocks.undoStore.pop.mockReturnValue(null);
+    mocks.undoStore.peek.mockReturnValue(null);
     const { req, res } = makeReqRes({ studyId: 'study-1' });
     await handleUndoCascade(req, res);
     await vi.runAllTimersAsync();
@@ -67,7 +76,7 @@ describe('undo-cascade route', () => {
   });
 
   it('reports warning when no undo available', async () => {
-    mocks.undoStore.pop.mockReturnValue(null);
+    mocks.undoStore.peek.mockReturnValue(null);
     const { req, res } = makeReqRes({ studyId: 'study-1' });
     await handleUndoCascade(req, res);
     await vi.runAllTimersAsync();
@@ -84,7 +93,7 @@ describe('undo-cascade route', () => {
   });
 
   it('restores dates in a single patch batch without LMBS', async () => {
-    mocks.undoStore.pop.mockReturnValue({
+    mocks.undoStore.peek.mockReturnValue({
       cascadeId: 'c1',
       sourceTaskId: 'source',
       sourceTaskName: 'Source Task',
@@ -121,7 +130,7 @@ describe('undo-cascade route', () => {
   });
 
   it('reports error when restore throws', async () => {
-    mocks.undoStore.pop.mockReturnValue({
+    mocks.undoStore.peek.mockReturnValue({
       cascadeId: 'c1',
       sourceTaskId: 'source',
       sourceTaskName: 'Source',
@@ -144,7 +153,7 @@ describe('undo-cascade route', () => {
   });
 
   it('logs activity entry on success', async () => {
-    mocks.undoStore.pop.mockReturnValue({
+    mocks.undoStore.peek.mockReturnValue({
       cascadeId: 'c1',
       sourceTaskId: 'source',
       sourceTaskName: 'Source Task',

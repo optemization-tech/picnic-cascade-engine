@@ -17,9 +17,16 @@ export class UndoStore {
       cascadeMode,
       manifest, // { taskId: { oldStart, oldEnd, newStart, newEnd } }
       timestamp: Date.now(),
-      timer: setTimeout(() => this._store.delete(studyId), this._ttlMs),
+      timer: setTimeout(() => this._store.delete(studyId), this._ttlMs).unref(),
     };
     this._store.set(studyId, entry);
+  }
+
+  peek(studyId) {
+    const entry = this._store.get(studyId);
+    if (!entry) return null;
+    const { timer: _, ...data } = entry;
+    return data;
   }
 
   pop(studyId) {
