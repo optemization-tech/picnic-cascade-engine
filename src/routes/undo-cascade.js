@@ -55,6 +55,10 @@ async function processUndoCascade(payload) {
         },
       },
     }));
+    // Sort by ascending start date so top-of-timeline tasks restore first
+    restorePayload.sort((a, b) =>
+      (a.properties['Dates'].date.start || '').localeCompare(b.properties['Dates'].date.start || ''),
+    );
     await notionClient.patchBatch(restorePayload);
 
     // Only consume the undo entry after successful restore.

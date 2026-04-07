@@ -115,6 +115,9 @@ describe('undo-cascade route', () => {
 
     const restoreCall = mocks.mockClient.patchBatch.mock.calls[0][0];
     expect(restoreCall).toHaveLength(2);
+    // Restore payload sorted by ascending start date (top-of-timeline first)
+    expect(restoreCall[0].taskId).toBe('task-a'); // oldStart 2026-04-01
+    expect(restoreCall[1].taskId).toBe('task-b'); // oldStart 2026-04-05
     const taskA = restoreCall.find((u) => u.taskId === 'task-a');
     expect(taskA.properties['Dates']).toEqual({ date: { start: '2026-04-01', end: '2026-04-02' } });
     expect(taskA.properties['Reference Start Date']).toEqual({ date: { start: '2026-04-01' } });

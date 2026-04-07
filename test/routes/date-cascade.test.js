@@ -253,12 +253,17 @@ describe('date-cascade route safety', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(1);
     expect(mocks.mockClient.patchBatch).toHaveBeenCalledWith([
-      expect.objectContaining({ taskId: 'a' }),
       expect.objectContaining({ taskId: 'parent-rollup' }),
       expect.objectContaining({ taskId: 'source' }),
+      expect.objectContaining({ taskId: 'a' }),
     ], expect.any(Object));
     const patchPayload = mocks.mockClient.patchBatch.mock.calls[0][0];
     expect(patchPayload.every((u) => u.properties['Last Modified By System'] === undefined)).toBe(true);
+    // Patch payload sorted by ascending start date (top-of-timeline first)
+    const starts = patchPayload.map((u) => u.properties['Dates'].date.start);
+    for (let i = 1; i < starts.length; i++) {
+      expect(starts[i] >= starts[i - 1]).toBe(true);
+    }
     expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
       1,
       'study-1',
