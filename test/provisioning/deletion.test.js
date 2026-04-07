@@ -86,15 +86,12 @@ describe('deleteStudyTasks', () => {
     const client = {
       request: vi.fn().mockResolvedValue({}),
     };
-    client.request
-      .mockResolvedValueOnce({ results: batch1, has_more: true })
-      .mockResolvedValueOnce({}) // archive calls get default {}
-    ;
+    client.requestBatch = vi.fn(async (operations, options = {}) => Promise.all(
+      operations.map((op) => client.request(op.method, op.path, op.body, { tracer: options.tracer })),
+    ));
     // After batch1 archives, next query returns batch2
     // We need to handle the sequence: query → 100 archives → query → 2 archives
-    // Reset to handle this properly:
     let queryCount = 0;
-    client.request.mockReset();
     client.request.mockImplementation((method, path) => {
       if (method === 'POST' && path.includes('/query')) {
         queryCount++;

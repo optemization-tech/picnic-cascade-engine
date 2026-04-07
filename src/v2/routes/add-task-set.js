@@ -322,7 +322,7 @@ async function processAddTaskSet(req) {
         }
       }
       if (renames.length > 0) {
-        await notionClient.patchBatch(renames, { tracer });
+        await notionClient.patchPages(renames, { tracer });
       }
       tracer.set('task_set_numbers', JSON.stringify(Object.fromEntries(numberMap)));
       tracer.endPhase('applyTaskSetNumbering');

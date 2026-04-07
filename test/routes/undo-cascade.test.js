@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   mockClient: {
-    patchBatch: vi.fn(),
+    patchPages: vi.fn(),
     reportStatus: vi.fn(),
   },
   activityLogService: {
@@ -61,7 +61,7 @@ describe('undo-cascade route', () => {
     vi.useFakeTimers();
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
     mocks.mockClient.reportStatus.mockResolvedValue({});
-    mocks.mockClient.patchBatch.mockResolvedValue({ updatedCount: 2 });
+    mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 2 });
   });
 
   it('returns 200 immediately', async () => {
@@ -110,10 +110,10 @@ describe('undo-cascade route', () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    // Single patchBatch call: restore dates (no pre-LMBS, no unlock)
-    expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(1);
+    // Single patchPages call: restore dates (no pre-LMBS, no unlock)
+    expect(mocks.mockClient.patchPages).toHaveBeenCalledTimes(1);
 
-    const restoreCall = mocks.mockClient.patchBatch.mock.calls[0][0];
+    const restoreCall = mocks.mockClient.patchPages.mock.calls[0][0];
     expect(restoreCall).toHaveLength(2);
     // Restore payload sorted by ascending start date (top-of-timeline first)
     expect(restoreCall[0].taskId).toBe('task-a'); // oldStart 2026-04-01
@@ -141,7 +141,7 @@ describe('undo-cascade route', () => {
       manifest: { 'task-a': { oldStart: '2026-04-01', oldEnd: '2026-04-02', newStart: '2026-04-03', newEnd: '2026-04-04' } },
       timestamp: Date.now(),
     });
-    mocks.mockClient.patchBatch.mockRejectedValueOnce(new Error('restore failed'));
+    mocks.mockClient.patchPages.mockRejectedValueOnce(new Error('restore failed'));
 
     const { req, res } = makeReqRes({ studyId: 'study-1' });
     await handleUndoCascade(req, res);
