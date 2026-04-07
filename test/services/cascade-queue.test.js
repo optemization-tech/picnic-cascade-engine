@@ -253,6 +253,7 @@ describe('CascadeQueue', () => {
     zeroQueue._clearAll();
   });
 
+  // @behavior BEH-DEBOUNCE-ECHO
   it('does NOT replace user webhook with bot echo', async () => {
     const processFn = vi.fn().mockResolvedValue(undefined);
     const parseFn = makeParseFn();
@@ -268,6 +269,7 @@ describe('CascadeQueue', () => {
     );
   });
 
+  // @behavior BEH-DEBOUNCE-ECHO
   it('DOES replace user webhook with another user webhook', async () => {
     const processFn = vi.fn().mockResolvedValue(undefined);
     const parseFn = makeParseFn();
@@ -283,6 +285,7 @@ describe('CascadeQueue', () => {
     );
   });
 
+  // @behavior BEH-DEBOUNCE-ECHO
   it('bot echo does NOT reset the debounce timer', async () => {
     const processFn = vi.fn().mockResolvedValue(undefined);
     const parseFn = makeParseFn();
@@ -302,6 +305,24 @@ describe('CascadeQueue', () => {
     );
   });
 
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('drops consecutive bot echoes — only first enters buffer', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-1', editedByBot: true }, parseFn, processFn);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-2', editedByBot: true }, parseFn, processFn);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-3', editedByBot: true }, parseFn, processFn);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(processFn).toHaveBeenCalledTimes(1);
+    expect(processFn).toHaveBeenCalledWith(
+      expect.objectContaining({ v: 'echo-1' }),
+    );
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
   it('user webhook replaces a bot webhook in the debounce buffer', async () => {
     const processFn = vi.fn().mockResolvedValue(undefined);
     const parseFn = makeParseFn();
