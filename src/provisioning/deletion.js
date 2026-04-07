@@ -3,25 +3,37 @@
  *
  * Uses raw PATCH /pages/{id} with { archived: true } since the standard
  * patchBatch() sends { properties: ... } which doesn't support archiving.
+ *
+ * Strategy: query-archive-repeat without cursor pagination. Archived tasks
+ * disappear from query results, so we always fetch page 1 and repeat until
+ * empty. This avoids cursor invalidation errors that occur when the database
+ * changes between paginated requests.
  */
 
 export async function deleteStudyTasks(client, { studyTasksDbId, studyId, tracer }) {
   const filter = { property: 'Study', relation: { contains: studyId } };
+  let totalArchived = 0;
 
-  if (tracer) tracer.startPhase('query');
-  const tasks = await client.queryDatabase(studyTasksDbId, filter, 100, { tracer });
-  if (tracer) tracer.endPhase('query');
+  while (true) {
+    if (tracer) tracer.startPhase('query');
+    const data = await client.request('POST', `/databases/${studyTasksDbId}/query`, {
+      filter,
+      page_size: 100,
+    }, { tracer });
+    if (tracer) tracer.endPhase('query');
 
-  if (tasks.length === 0) {
-    return { archivedCount: 0 };
+    const tasks = data.results || [];
+    if (tasks.length === 0) break;
+
+    if (tracer) tracer.startPhase('archive');
+    await Promise.all(
+      tasks.map((t) => client.request('PATCH', `/pages/${t.id}`, { archived: true }, { tracer })),
+    );
+    if (tracer) tracer.endPhase('archive');
+
+    totalArchived += tasks.length;
+    if (!data.has_more) break;
   }
 
-  if (tracer) tracer.startPhase('archive');
-  const archiveOps = tasks.map((t) =>
-    client.request('PATCH', `/pages/${t.id}`, { archived: true }, { tracer }),
-  );
-  await Promise.all(archiveOps);
-  if (tracer) tracer.endPhase('archive');
-
-  return { archivedCount: tasks.length };
+  return { archivedCount: totalArchived };
 }
