@@ -15,6 +15,7 @@ function makeParseFn(overrides = {}) {
     taskId: payload.taskId || 'task-1',
     studyId: payload.studyId || 'study-1',
     taskName: payload.taskName || 'Test Task',
+    editedByBot: payload.editedByBot || false,
     ...overrides,
   }));
 }
@@ -250,6 +251,91 @@ describe('CascadeQueue', () => {
 
     expect(callOrder).toEqual(['start', 'end', 'start', 'end']);
     zeroQueue._clearAll();
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('does NOT replace user webhook with bot echo', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'user-edit' }, parseFn, processFn);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'bot-echo', editedByBot: true }, parseFn, processFn);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(processFn).toHaveBeenCalledTimes(1);
+    expect(processFn).toHaveBeenCalledWith(
+      expect.objectContaining({ v: 'user-edit' }),
+    );
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('DOES replace user webhook with another user webhook', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'edit-1' }, parseFn, processFn);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'edit-2' }, parseFn, processFn);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(processFn).toHaveBeenCalledTimes(1);
+    expect(processFn).toHaveBeenCalledWith(
+      expect.objectContaining({ v: 'edit-2' }),
+    );
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('bot echo does NOT reset the debounce timer', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'user-edit' }, parseFn, processFn);
+
+    // 3s in, bot echo arrives — should be ignored
+    await vi.advanceTimersByTimeAsync(3000);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'bot-echo', editedByBot: true }, parseFn, processFn);
+
+    // 2s more (5s total from user edit) — timer should fire with user payload
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(processFn).toHaveBeenCalledTimes(1);
+    expect(processFn).toHaveBeenCalledWith(
+      expect.objectContaining({ v: 'user-edit' }),
+    );
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('drops consecutive bot echoes — only first enters buffer', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-1', editedByBot: true }, parseFn, processFn);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-2', editedByBot: true }, parseFn, processFn);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-3', editedByBot: true }, parseFn, processFn);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(processFn).toHaveBeenCalledTimes(1);
+    expect(processFn).toHaveBeenCalledWith(
+      expect.objectContaining({ v: 'echo-1' }),
+    );
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('user webhook replaces a bot webhook in the debounce buffer', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'bot-first', editedByBot: true }, parseFn, processFn);
+    queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'user-edit' }, parseFn, processFn);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(processFn).toHaveBeenCalledTimes(1);
+    expect(processFn).toHaveBeenCalledWith(
+      expect.objectContaining({ v: 'user-edit' }),
+    );
   });
 
   it('getStats reflects current state', () => {

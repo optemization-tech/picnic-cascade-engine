@@ -42,6 +42,11 @@ export class CascadeQueue {
     // Cancel existing debounce timer for this task
     const existing = this._debounce.get(taskId);
     if (existing) {
+      if (parsed.editedByBot) {
+        // Bot-edited webhook = cascade echo. Don't replace the user's original edit.
+        console.log(JSON.stringify({ event: 'debounce_echo_ignored', taskId, taskName, studyId }));
+        return;
+      }
       clearTimeout(existing.timer);
       console.log(JSON.stringify({ event: 'debounce_replaced', taskId, taskName, studyId }));
     } else {

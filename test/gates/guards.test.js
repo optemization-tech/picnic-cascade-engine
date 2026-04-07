@@ -6,7 +6,7 @@ function buildPayload(overrides = {}) {
     body: {
       data: {
         id: 'task-1',
-        last_edited_by: { id: 'user-1' },
+        last_edited_by: { id: 'user-1', type: 'person' },
         properties: {
           'Task Name': { title: [{ text: { content: 'Task One' } }] },
           'Dates': { date: { start: '2026-04-01', end: '2026-04-02' } },
@@ -70,6 +70,27 @@ describe('guards parseWebhookPayload', () => {
     }));
     expect(parsed.status).toBe('Done');
     expect(isFrozen(parsed)).toBe(true);
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('sets editedByBot true when last_edited_by type is bot', () => {
+    const payload = buildPayload();
+    payload.body.data.last_edited_by = { id: 'bot-1', type: 'bot' };
+    expect(parseWebhookPayload(payload).editedByBot).toBe(true);
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('sets editedByBot false when last_edited_by type is person', () => {
+    const payload = buildPayload();
+    payload.body.data.last_edited_by = { id: 'user-1', type: 'person' };
+    expect(parseWebhookPayload(payload).editedByBot).toBe(false);
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('sets editedByBot false when last_edited_by is missing', () => {
+    const payload = buildPayload();
+    delete payload.body.data.last_edited_by;
+    expect(parseWebhookPayload(payload).editedByBot).toBe(false);
   });
 });
 
