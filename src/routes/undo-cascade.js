@@ -11,7 +11,8 @@ const activityLogService = new ActivityLogService({
 });
 
 async function processUndoCascade(payload) {
-  const studyId = payload?.data?.studyId || payload?.studyId;
+  console.log('[undo-cascade] raw payload:', JSON.stringify(payload).slice(0, 500));
+  const studyId = payload?.data?.studyId || payload?.studyId || payload?.data?.id || payload?.source?.id;
   if (!studyId) {
     console.warn('[undo-cascade] no studyId in payload, skipping');
     return;
@@ -102,7 +103,7 @@ async function processUndoCascade(payload) {
 }
 
 function parseUndoPayload(payload) {
-  const studyId = payload?.data?.studyId || payload?.studyId;
+  const studyId = payload?.data?.studyId || payload?.studyId || payload?.data?.id || payload?.source?.id;
   return { skip: false, taskId: '__undo__', studyId };
 }
 
