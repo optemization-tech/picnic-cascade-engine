@@ -71,6 +71,24 @@ describe('guards parseWebhookPayload', () => {
     expect(parsed.status).toBe('Done');
     expect(isFrozen(parsed)).toBe(true);
   });
+
+  it('sets editedByBot true when last_edited_by type is bot', () => {
+    const payload = buildPayload();
+    payload.body.data.last_edited_by = { id: 'bot-1', type: 'bot' };
+    expect(parseWebhookPayload(payload).editedByBot).toBe(true);
+  });
+
+  it('sets editedByBot false when last_edited_by type is person', () => {
+    const payload = buildPayload();
+    payload.body.data.last_edited_by = { id: 'user-1', type: 'person' };
+    expect(parseWebhookPayload(payload).editedByBot).toBe(false);
+  });
+
+  it('sets editedByBot false when last_edited_by is missing', () => {
+    const payload = buildPayload();
+    delete payload.body.data.last_edited_by;
+    expect(parseWebhookPayload(payload).editedByBot).toBe(false);
+  });
 });
 
 describe('guards predicates', () => {

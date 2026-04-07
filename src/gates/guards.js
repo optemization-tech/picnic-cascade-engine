@@ -85,6 +85,7 @@ export function parseWebhookPayload(payload) {
     hasParent: parentRel.length > 0,
     hasSubtasks: subtaskRel.length > 0,
     triggeredByUserId: data?.last_edited_by?.id || null,
+    editedByBot: data?.last_edited_by?.type === 'bot',
     executionId,
     rawProperties: props,
   };
