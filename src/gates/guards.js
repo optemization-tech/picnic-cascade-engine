@@ -43,8 +43,6 @@ export function parseWebhookPayload(payload) {
   const subtaskRel = props['Subtask(s)']?.relation || [];
 
   const status = props['Status']?.status?.name || '';
-  const lastModifiedBySystem = props['Last Modified By System']?.checkbox === true;
-
   // Import Mode can arrive as rollup boolean/array or direct checkbox.
   const importModeRollup = props['Import Mode']?.rollup;
   const importModeFromRollup = importModeRollup?.type === 'array'
@@ -81,7 +79,6 @@ export function parseWebhookPayload(payload) {
     startDelta,
     endDelta,
     status,
-    lastModifiedBySystem,
     importMode,
     studyId: studyRel[0]?.id || null,
     parentTaskId: parentRel[0]?.id || null,
@@ -91,10 +88,6 @@ export function parseWebhookPayload(payload) {
     executionId,
     rawProperties: props,
   };
-}
-
-export function isSystemModified(task) {
-  return task.lastModifiedBySystem === true;
 }
 
 export function isImportMode(task) {

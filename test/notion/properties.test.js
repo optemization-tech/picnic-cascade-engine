@@ -15,7 +15,6 @@ describe('normalizeTask', () => {
         'Study': { relation: [{ id: 's' }] },
         'Reference Start Date': { date: { start: '2026-03-31' } },
         'Reference End Date': { date: { start: '2026-04-02' } },
-        'Last Modified By System': { checkbox: true },
       },
     };
 
@@ -29,6 +28,5 @@ describe('normalizeTask', () => {
     expect(task.studyId).toBe('s');
     expect(task.refStart).toBe('2026-03-31');
     expect(task.refEnd).toBe('2026-04-02');
-    expect(task.lastModifiedBySystem).toBe(true);
   });
 });

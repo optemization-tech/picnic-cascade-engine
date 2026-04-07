@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { parseWebhookPayload, isSystemModified } from '../gates/guards.js';
+import { parseWebhookPayload } from '../gates/guards.js';
 import { computeStatusRollup } from '../engine/status-rollup.js';
 import { NotionClient } from '../notion/client.js';
 import { normalizeTask } from '../notion/properties.js';
@@ -11,10 +11,6 @@ const activityLogService = new ActivityLogService({
   activityLogDbId: config.notion.activityLogDbId,
 });
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function mapRollupStatusToNotion(status) {
   if (status === 'Not Started') return 'Not started';
   return status;
@@ -23,13 +19,13 @@ function mapRollupStatusToNotion(status) {
 async function processStatusRollup(payload) {
   const parsed = parseWebhookPayload(payload);
   if (parsed.skip) return;
-  if (isSystemModified(parsed)) return;
 
   // Fetch changed task to ensure parent/study are current.
   const changedTaskPage = await notionClient.getPage(parsed.taskId);
   const changedTask = normalizeTask(changedTaskPage);
   if (!changedTask.parentId || !changedTask.studyId) return;
-  if (changedTask.lastModifiedBySystem) return;
+  const hasSubtasks = (changedTaskPage?.properties?.['Subtask(s)']?.relation || []).length > 0;
+  if (hasSubtasks) return;
 
   const study = await notionClient.getPage(changedTask.studyId);
   if (study?.properties?.['Import Mode']?.checkbox === true) return;
@@ -52,12 +48,6 @@ async function processStatusRollup(payload) {
 
   await notionClient.patchPage(changedTask.parentId, {
     'Status': { status: { name: desiredStatus } },
-    'Last Modified By System': { checkbox: true },
-  });
-
-  await sleep(3000);
-  await notionClient.patchPage(changedTask.parentId, {
-    'Last Modified By System': { checkbox: false },
   });
 
   await activityLogService.logTerminalEvent({

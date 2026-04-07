@@ -173,7 +173,6 @@ Same behavior as pull-right (unified in code):
 
 ### Case B: Subtask Edited (source has a parent)
 - After cascade completes, parent dates expand or contract to cover the natural span of all its subtasks.
-- The parent's `_isRollUp = true` flag prevents LMBS immediate unlock (WF-P parity).
 
 ### Cascade Roll-up
 - When cascade moves tasks that have parents, those parents' date envelopes auto-adjust.
@@ -198,28 +197,23 @@ After `gapPreservingDownstream` runs, a downstream task may be **clamped** by a 
 - If the blocker is frozen (Done/N/A): downstream task stays clamped — correct.
 - Activity Log `crossChain.capHit` should be `false` for normal cascades.
 
-## 7) LMBS & Webhook Flood Pattern
+## 7) Webhook Echo Pattern
 
 ### Expected Behavior
 When a cascade fires, the engine patches multiple tasks via the Notion API. Each patch triggers the Notion automation again (because dates changed). This creates a flood of webhook calls:
 
 ```
 POST /webhook/date-cascade 200 485ms   ← actual cascade (one)
-POST /webhook/date-cascade 200 0ms     ← LMBS-gated (many)
+POST /webhook/date-cascade 200 0ms     ← zero-delta no-op (many)
 POST /webhook/date-cascade 200 0ms
 POST /webhook/date-cascade 200 1ms
 ...
 ```
 
 - **One request takes >100ms** — the real cascade processing.
-- **Many requests take 0-1ms** — LMBS gate catches them instantly (system-modified flag is `true`).
+- **Many requests take 0-1ms** — reference dates already match dates, so zero-delta guard exits immediately.
 
 This is normal. Wait for the flood to settle (~30s after last line) before checking results.
-
-### Stuck LMBS
-If the server crashes mid-cascade, tasks may be left with `Last Modified By System = true`. All subsequent webhooks for those tasks will be silently dropped.
-
-**Recovery:** Check for stuck LMBS flags on affected tasks. The engine has a finally-block safety net that attempts study-wide LMBS cleanup, but process crashes bypass it.
 
 ## 8) Activity Log Verification
 
@@ -249,7 +243,7 @@ Each test maps to a behavior row from `ENGINE-BEHAVIOR-REFERENCE.md` Section 1.
 | Test ID | Behavior Row | Edit Type | Cascade Mode | What It Validates |
 |---|---|---|---|---|
 | 1.1 | — | — | — | Fresh inception baseline (265 tasks, deps wired) |
-| H.1 | — | — | — | Import Mode off + LMBS clear on all tasks |
+| H.1 | — | — | — | Import Mode off and reference dates aligned |
 | H.2 | — | — | — | Reference dates aligned with current dates |
 | 2A.1 | Start-only right | Left edge drag right +5 BD | `pull-right` | ALL upstream shift unconditionally, gap-preserving |
 | 2A.2 | Start-only right | Left edge drag right on gapped chain | `pull-right` | No gap absorption — gaps preserved exactly |
@@ -320,11 +314,10 @@ The following rules must be present in every session prompt:
 | Date picker vs timeline drag | Wrong cascade mode (e.g., pull-left instead of pull-right) | Always use timeline view for test edits |
 | Tunnel URL changes on restart | Webhooks fail silently | Re-update Notion automation URLs after every tunnel restart |
 | Database restore reverts automations | Webhooks point to old/production URLs | Re-update automation URLs after every restore |
-| LMBS flood in server terminal | Looks like something is wrong | Normal — one real hit (>100ms), rest are 0ms LMBS gates |
+| Webhook echo flood in server terminal | Looks like something is wrong | Normal — one real hit (>100ms), rest are 0ms zero-delta exits |
 | Expanded seeds in downstream pass | Unexpected downstream movement in pull-right | Trace ALL blockers of the moved downstream task, not just the source |
 | Parent expansion after cascade | Parent dates change unexpectedly | Normal Case B roll-up — parent envelope covers all subtask dates |
 | Cross-chain clamping in pull-left | Downstream task doesn't reach full delta | Check if a non-moving cross-chain blocker is limiting it |
-| Server crash leaves stuck LMBS | Subsequent edits silently ignored | Check for `Last Modified By System = true` on affected tasks |
 
 ## Change Log
 

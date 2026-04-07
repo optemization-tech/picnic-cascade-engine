@@ -5,11 +5,9 @@ const mocks = vi.hoisted(() => ({
     patchPage: vi.fn(),
     reportStatus: vi.fn(),
     patchBatch: vi.fn().mockResolvedValue({ updatedCount: 0 }),
-    clearStudyLmbsFlags: vi.fn(),
     request: vi.fn(),
   },
   parseWebhookPayload: vi.fn(),
-  isSystemModified: vi.fn(),
   isImportMode: vi.fn(),
   isFrozen: vi.fn(),
   classify: vi.fn(),
@@ -39,7 +37,6 @@ vi.mock('../../../src/notion/client.js', () => ({
 
 vi.mock('../../../src/gates/guards.js', () => ({
   parseWebhookPayload: mocks.parseWebhookPayload,
-  isSystemModified: mocks.isSystemModified,
   isImportMode: mocks.isImportMode,
   isFrozen: mocks.isFrozen,
 }));
@@ -54,7 +51,7 @@ vi.mock('../../../src/services/activity-log.js', () => ({
 }));
 vi.mock('../../../src/services/cascade-queue.js', () => ({
   cascadeQueue: {
-    enqueue: vi.fn((payload, parseFn, processFn) => {
+    enqueue: vi.fn((payload, _parseFn, processFn) => {
       void processFn(payload).catch(() => {});
     }),
   },
@@ -94,7 +91,6 @@ describe('V2 date-cascade route', () => {
     vi.useFakeTimers();
     mocks.mockClient.patchBatch.mockResolvedValue({ updatedCount: 3 });
     mocks.mockClient.reportStatus.mockResolvedValue({});
-    mocks.mockClient.clearStudyLmbsFlags.mockResolvedValue({});
   });
 
   it('returns 200 immediately', async () => {
@@ -104,9 +100,10 @@ describe('V2 date-cascade route', () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
-  it('skips on LMBS (system-modified)', async () => {
-    mocks.parseWebhookPayload.mockReturnValue(baseParsed());
-    mocks.isSystemModified.mockReturnValue(true);
+  it('skips on zero delta', async () => {
+    mocks.parseWebhookPayload.mockReturnValue(baseParsed({ startDelta: 0, endDelta: 0 }));
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
 
     const { req, res } = makeReqRes({});
     await handleDateCascade(req, res);
@@ -114,11 +111,11 @@ describe('V2 date-cascade route', () => {
     await Promise.resolve();
 
     expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
+    expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
   });
 
   it('skips on import mode', async () => {
     mocks.parseWebhookPayload.mockReturnValue(baseParsed());
-    mocks.isSystemModified.mockReturnValue(false);
     mocks.isImportMode.mockReturnValue(true);
 
     const { req, res } = makeReqRes({});
@@ -126,12 +123,12 @@ describe('V2 date-cascade route', () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
+    expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
   });
 
   it('logs no_action for frozen task', async () => {
     mocks.parseWebhookPayload.mockReturnValue(baseParsed());
-    mocks.isSystemModified.mockReturnValue(false);
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(true);
 
@@ -145,14 +142,12 @@ describe('V2 date-cascade route', () => {
     );
   });
 
-  it('runs full V2 pipeline: cascade + subtask fan-out + patch', async () => {
+  it('runs full V2 pipeline: cascade + subtask fan-out + single patch batch', async () => {
     const parsed = baseParsed();
     mocks.parseWebhookPayload.mockReturnValue(parsed);
-    mocks.isSystemModified.mockReturnValue(false);
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(false);
 
-    // Study has 2 parents + 3 subtasks
     const allTasks = [
       { id: 'parent-1', parentId: null, name: 'Protocol', blockedByIds: [], blockingIds: ['parent-2'], status: '', refStart: '2027-03-15', refEnd: '2027-04-14' },
       { id: 'parent-2', parentId: null, name: 'Data Model', blockedByIds: ['parent-1'], blockingIds: [], status: '', refStart: '2027-04-15', refEnd: '2027-05-15' },
@@ -205,33 +200,17 @@ describe('V2 date-cascade route', () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    // Verify cascade was called with parent-only tasks
-    expect(mocks.runCascade).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tasks: expect.arrayContaining([
-          expect.objectContaining({ id: 'parent-1' }),
-          expect.objectContaining({ id: 'parent-2' }),
-        ]),
-      }),
-    );
-    // Cascade should NOT receive subtasks
+    expect(res.status).toHaveBeenCalledWith(200);
     const cascadeCall = mocks.runCascade.mock.calls[0][0];
     expect(cascadeCall.tasks).toHaveLength(2);
-
-    // Verify subtask fan-out was called with all moved parents
     expect(mocks.computeSubtaskUpdates).toHaveBeenCalledWith(
       expect.objectContaining({
         movedParentIds: expect.arrayContaining(['parent-1', 'parent-2']),
-        allTasks: expect.arrayContaining([
-          expect.objectContaining({ id: 'sub-1' }),
-        ]),
       }),
     );
-
-    // Verify patchBatch was called (preLmbs + patchUpdates + unlock = 3 calls)
-    expect(mocks.mockClient.patchBatch).toHaveBeenCalled();
-
-    // Verify activity log records V2 workflow
+    expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(1);
+    const patchPayload = mocks.mockClient.patchBatch.mock.calls[0][0];
+    expect(patchPayload.every((u) => u.properties['Last Modified By System'] === undefined)).toBe(true);
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         workflow: 'V2 Date Cascade',
@@ -240,23 +219,24 @@ describe('V2 date-cascade route', () => {
     );
   });
 
-  it('runs study-wide LMBS cleanup in finally even on error', async () => {
+  it('reports failure when async processing throws', async () => {
     mocks.parseWebhookPayload.mockReturnValue(baseParsed());
-    mocks.isSystemModified.mockReturnValue(false);
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(false);
     mocks.queryStudyTasks.mockRejectedValue(new Error('boom'));
     mocks.mockClient.reportStatus.mockResolvedValue({});
 
     const { req, res } = makeReqRes({});
-    handleDateCascade(req, res);
-    // Flush the async pipeline: the handler responds 200 then processes async
-    await vi.advanceTimersByTimeAsync(100);
-    // Allow microtask queue to drain (error path + finally block)
-    for (let i = 0; i < 10; i++) await Promise.resolve();
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
 
-    expect(mocks.mockClient.clearStudyLmbsFlags).toHaveBeenCalledWith(
-      expect.objectContaining({ studyId: 'study-1' }),
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
+      'study-1',
+      'error',
+      expect.stringContaining('V2 Cascade failed for Protocol'),
+      expect.any(Object),
     );
   });
 });

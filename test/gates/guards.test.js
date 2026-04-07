@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseWebhookPayload, isSystemModified, isImportMode, isFrozen } from '../../src/gates/guards.js';
+import { parseWebhookPayload, isImportMode, isFrozen } from '../../src/gates/guards.js';
 
 function buildPayload(overrides = {}) {
   return {
@@ -13,7 +13,6 @@ function buildPayload(overrides = {}) {
           'Reference Start Date': { date: { start: '2026-04-01' } },
           'Reference End Date': { date: { start: '2026-04-02' } },
           'Status': { status: { name: 'Not Started' } },
-          'Last Modified By System': { checkbox: false },
           'Import Mode': { rollup: { type: 'boolean', boolean: false } },
           'Study': { relation: [{ id: 'study-1' }] },
           'Parent Task': { relation: [] },
@@ -75,8 +74,7 @@ describe('guards parseWebhookPayload', () => {
 });
 
 describe('guards predicates', () => {
-  it('system/import/frozen checks', () => {
-    expect(isSystemModified({ lastModifiedBySystem: true })).toBe(true);
+  it('import/frozen checks', () => {
     expect(isImportMode({ importMode: true })).toBe(true);
     expect(isFrozen({ status: 'Done' })).toBe(true);
     expect(isFrozen({ status: 'N/A' })).toBe(true);

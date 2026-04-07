@@ -106,11 +106,7 @@ export class NotionClient {
   }
 
   async patchPage(pageId, properties, { tracer } = {}) {
-    const payloadProperties = { ...properties };
-    if (!Object.prototype.hasOwnProperty.call(payloadProperties, 'Last Modified By System')) {
-      payloadProperties['Last Modified By System'] = { checkbox: true };
-    }
-    return this.request('PATCH', `/pages/${pageId}`, { properties: payloadProperties }, { tracer });
+    return this.request('PATCH', `/pages/${pageId}`, { properties }, { tracer });
   }
 
   async queryDatabase(dbId, filter, pageSize = 100, { tracer } = {}) {
@@ -175,29 +171,5 @@ export class NotionClient {
         'Automation Reporting': { rich_text: richText },
       },
     }, { tracer });
-  }
-
-  /**
-   * Clears LMBS=true for all tasks in a study (safety-net cleanup).
-   */
-  async clearStudyLmbsFlags({ studyTasksDbId, studyId, batchSize, interval = 1000, tracer } = {}) {
-    batchSize = batchSize ?? this.optimalBatchSize;
-    if (!studyTasksDbId || !studyId) return { updatedCount: 0, taskIds: [] };
-
-    const lmdbTasks = await this.queryDatabase(studyTasksDbId, {
-      and: [
-        { property: 'Study', relation: { contains: studyId } },
-        { property: 'Last Modified By System', checkbox: { equals: true } },
-      ],
-    }, 100, { tracer });
-    if (lmdbTasks.length === 0) return { updatedCount: 0, taskIds: [] };
-
-    const updates = lmdbTasks.map((page) => ({
-      taskId: page.id,
-      properties: {
-        'Last Modified By System': { checkbox: false },
-      },
-    }));
-    return this.patchBatch(updates, { batchSize, interval, tracer });
   }
 }
