@@ -149,6 +149,33 @@ describe('NotionClient', () => {
     });
   });
 
+  it('patchBatch remains a backward-compatible alias for patchPages', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'ok' }),
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+
+    const result = await client.patchBatch([
+      { taskId: 'task-1', properties: { Status: { status: { name: 'Done' } } } },
+    ]);
+
+    expect(result).toEqual({
+      updatedCount: 1,
+      taskIds: ['task-1'],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   // @behavior BEH-AUTOMATION-REPORTING
   it('reportStatus patches Automation Reporting with formatted rich text', async () => {
     const fetchMock = vi.fn().mockResolvedValue({

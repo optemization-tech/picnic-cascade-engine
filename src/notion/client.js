@@ -219,6 +219,11 @@ export class NotionClient {
     return { updatedCount: updates.length, taskIds: updates.map((update) => update.taskId) };
   }
 
+  // Backward-compatible alias for routes that still call the old helper name.
+  async patchBatch(updates, options = {}) {
+    return this.patchPages(updates, options);
+  }
+
   async reportStatus(studyId, level, message, { tracer } = {}) {
     const richText = buildReportingText(level, message);
     return this.request('PATCH', `/pages/${studyId}`, {
