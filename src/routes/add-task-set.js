@@ -504,16 +504,6 @@ async function processAddTaskSet(req) {
     } catch (cleanupError) {
       console.warn('[add-task-set] failed to disable Import Mode in finally:', cleanupError.message);
     }
-    // Clear per-task LMBS flags left from task creation
-    try {
-      await notionClient.clearStudyLmbsFlags({
-        studyTasksDbId: config.notion.studyTasksDbId,
-        studyId: studyPageId,
-        tracer,
-      });
-    } catch (cleanupError) {
-      console.warn('[add-task-set] study-wide LMBS cleanup failed:', cleanupError.message);
-    }
   }
 }
 

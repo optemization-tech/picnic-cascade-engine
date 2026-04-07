@@ -97,7 +97,6 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
       'Reference End Date': { date: { start: endDateStr } },
       'Study': { relation: [{ id: studyPageId }] },
       'Template Source ID': { rich_text: [{ type: 'text', text: { content: templateId } }] },
-      'Last Modified By System': { checkbox: true },
       'Automation Reporting': { rich_text: [{ type: 'text', text: { content: logEntry } }] },
     },
   };

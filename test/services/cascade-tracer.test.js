@@ -98,22 +98,6 @@ describe('CascadeTracer', () => {
     });
   });
 
-  describe('counters', () => {
-    it('increments from 0', () => {
-      const tracer = new CascadeTracer('t7');
-      tracer.count('lmbs_skip');
-      tracer.count('lmbs_skip');
-      tracer.count('lmbs_skip');
-
-      expect(tracer.toJSON().lmbsSkips).toBe(3);
-    });
-
-    it('defaults to 0 when not incremented', () => {
-      const tracer = new CascadeTracer('t8');
-      expect(tracer.toJSON().lmbsSkips).toBe(0);
-    });
-  });
-
   describe('metadata', () => {
     it('set and get', () => {
       const tracer = new CascadeTracer('t9');
@@ -193,8 +177,6 @@ describe('CascadeTracer', () => {
       vi.advanceTimersByTime(3000);
       tracer.endPhase('patchUpdates');
 
-      tracer.count('lmbs_skip');
-      tracer.count('lmbs_skip');
       tracer.recordRetry({ attempt: 1, backoffMs: 500, status: 429, tokenIndex: 0 });
 
       const details = tracer.toActivityLogDetails();
@@ -202,7 +184,6 @@ describe('CascadeTracer', () => {
       expect(details.timing.totalMs).toBeGreaterThanOrEqual(4000);
       expect(details.timing.phases.query).toBe(1000);
       expect(details.timing.phases.patchUpdates).toBe(3000);
-      expect(details.webhookStats.lmbsSkipsObserved).toBe(2);
       expect(details.retryStats.count).toBe(1);
       expect(details.retryStats.totalBackoffMs).toBe(500);
     });
@@ -212,7 +193,6 @@ describe('CascadeTracer', () => {
       const details = tracer.toActivityLogDetails();
 
       expect(details.timing.phases).toEqual({});
-      expect(details.webhookStats.lmbsSkipsObserved).toBe(0);
       expect(details.retryStats.count).toBe(0);
       expect(details.retryStats.totalBackoffMs).toBe(0);
     });

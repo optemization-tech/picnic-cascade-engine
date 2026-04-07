@@ -1,5 +1,5 @@
 import { config } from '../../config.js';
-import { parseWebhookPayload, isSystemModified, isImportMode, isFrozen } from '../../gates/guards.js';
+import { parseWebhookPayload, isImportMode, isFrozen } from '../../gates/guards.js';
 import { classify } from '../engine/classify.js';
 import { runCascade } from '../../engine/cascade.js';
 import { enforceConstraints } from '../../engine/constraints.js';
@@ -15,10 +15,6 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function summarizeFailure(error) {
   return `V2 Cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
@@ -110,7 +106,6 @@ async function logTerminalEvent({
 
 function buildUpdateProperties(update, sourceTaskName, cascadeMode) {
   return {
-    'Last Modified By System': { checkbox: true },
     'Dates': { date: { start: update.newStart, end: update.newEnd } },
     'Reference Start Date': { date: { start: update.newReferenceStartDate || update.newStart } },
     'Reference End Date': { date: { start: update.newReferenceEndDate || update.newEnd } },
@@ -137,9 +132,8 @@ async function processDateCascade(payload) {
   tracer.set('study_id', parsed.studyId);
   tracer.set('engine_version', 'v2');
 
-  if (isSystemModified(parsed)) {
-    tracer.count('lmbs_skip');
-    console.log(JSON.stringify({ event: 'v2_lmbs_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
+  if (parsed.startDelta === 0 && parsed.endDelta === 0) {
+    console.log(JSON.stringify({ event: 'v2_zero_delta_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
     return;
   }
   if (isImportMode(parsed)) {
@@ -308,16 +302,7 @@ async function processDateCascade(payload) {
       return;
     }
 
-    // Phase 8: Pre-mark LMBS on all targets
-    tracer.startPhase('preLmbs');
-    const preLmbsPayload = updates.map((u) => ({
-      taskId: u.taskId,
-      properties: { 'Last Modified By System': { checkbox: true } },
-    }));
-    await notionClient.patchBatch(preLmbsPayload, { tracer });
-    tracer.endPhase('preLmbs');
-
-    // Phase 9: Patch all updates (parents + subtasks)
+    // Phase 8: Patch all updates (parents + subtasks)
     const patchPayload = updates.map((u) => ({
       taskId: u.taskId,
       properties: buildUpdateProperties(u, classified.sourceTaskName, classified.cascadeMode),
@@ -327,22 +312,7 @@ async function processDateCascade(payload) {
     const patched = await notionClient.patchBatch(patchPayload, { tracer });
     tracer.endPhase('patchUpdates');
 
-    // Phase 10: Unlock all (no roll-up filtering in V2)
-    tracer.startPhase('sleep');
-    await sleep(3000);
-    tracer.endPhase('sleep');
-
-    tracer.startPhase('patchUnlock');
-    const unlockPayload = updates.map((u) => ({
-      taskId: u.taskId,
-      properties: { 'Last Modified By System': { checkbox: false } },
-    }));
-    if (unlockPayload.length > 0) {
-      await notionClient.patchBatch(unlockPayload, { tracer });
-    }
-    tracer.endPhase('patchUnlock');
-
-    // Phase 11: Report + Log
+    // Phase 9: Report + Log
     tracer.startPhase('reportComplete');
     await notionClient.reportStatus(
       parsed.studyId,
@@ -397,20 +367,6 @@ async function processDateCascade(payload) {
       });
     } catch { /* don't mask original error */ }
     throw error;
-  } finally {
-    // Phase 12: Study-wide LMBS cleanup
-    try {
-      tracer.startPhase('cleanup');
-      await notionClient.clearStudyLmbsFlags({
-        studyTasksDbId: config.notion.studyTasksDbId,
-        studyId: parsed.studyId,
-        tracer,
-      });
-      tracer.endPhase('cleanup');
-    } catch (cleanupError) {
-      tracer.endPhase('cleanup');
-      console.warn('[v2-date-cascade] study-wide LMBS cleanup failed:', cleanupError.message);
-    }
   }
 }
 

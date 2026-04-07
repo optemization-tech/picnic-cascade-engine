@@ -29,7 +29,6 @@ export function normalizeTask(notionPage) {
     studyId: (p['Study']?.relation || [])[0]?.id || null,
     refStart: p['Reference Start Date']?.date?.start || startStr,
     refEnd: p['Reference End Date']?.date?.start || endStr,
-    lastModifiedBySystem: p['Last Modified By System']?.checkbox === true,
     importMode: p['Import Mode']?.checkbox === true,
     notionPage,
   };

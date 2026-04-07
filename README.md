@@ -29,7 +29,7 @@ Optional:
 - **src/engine/** — Pure function modules (cascade, parent-subtask, classify). No Notion calls. Fully testable.
 - **src/notion/** — Notion API client with retry, rate limiting, token rotation.
 - **src/routes/** — Express webhook handlers that orchestrate engine + Notion calls.
-- **src/gates/** — Anti-loop gate checks (LMBS, Import Mode, Complete Freeze).
+- **src/gates/** — Webhook guard checks (Import Mode, Complete Freeze, zero-delta parsing support).
 - **test/** — Vitest. Engine tests use fixture data, no mocking needed.
 
 ## Webhook Endpoints

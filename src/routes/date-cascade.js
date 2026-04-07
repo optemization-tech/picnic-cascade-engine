@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { parseWebhookPayload, isSystemModified, isImportMode, isFrozen } from '../gates/guards.js';
+import { parseWebhookPayload, isImportMode, isFrozen } from '../gates/guards.js';
 import { classify } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
@@ -17,10 +17,6 @@ const activityLogService = new ActivityLogService({
   activityLogDbId: config.notion.activityLogDbId,
 });
 const DIRECT_PARENT_WARNING = '⚠️ This task has subtasks — edit a subtask directly to shift dates and trigger cascading.';
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function summarizeFailure(error) {
   return `Cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
@@ -106,11 +102,6 @@ async function logTerminalEvent({
   });
 }
 
-// Note: clearSourceLmbsOnSkip previously made a PATCH API call for every
-// LMBS re-trigger (~50-100 per cascade), starving the actual cascade of
-// API budget. Removed — the finally block's clearStudyLmbsFlags handles
-// study-wide LMBS cleanup at the end of each cascade.
-
 async function applyError1SideEffects(studyId) {
   if (!studyId) return;
   await notionClient.request('PATCH', `/pages/${studyId}`, {
@@ -129,7 +120,6 @@ async function applyError1SideEffects(studyId) {
 
 function buildUpdateProperties(update, sourceTaskName, cascadeMode) {
   return {
-    'Last Modified By System': { checkbox: true },
     'Dates': { date: { start: update.newStart, end: update.newEnd } },
     'Reference Start Date': { date: { start: update.newReferenceStartDate || update.newStart } },
     'Reference End Date': { date: { start: update.newReferenceEndDate || update.newEnd } },
@@ -154,9 +144,8 @@ async function processDateCascade(payload) {
   tracer.set('task_id', parsed.taskId);
   tracer.set('study_id', parsed.studyId);
 
-  if (isSystemModified(parsed)) {
-    tracer.count('lmbs_skip');
-    console.log(JSON.stringify({ event: 'lmbs_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
+  if (parsed.startDelta === 0 && parsed.endDelta === 0) {
+    console.log(JSON.stringify({ event: 'zero_delta_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
     return;
   }
   if (isImportMode(parsed)) {
@@ -324,17 +313,6 @@ async function processDateCascade(payload) {
       return;
     }
 
-    // Pre-mark all target tasks as LMBS=true BEFORE changing dates.
-    // This ensures Notion's "When Dates changes + LMBS unchecked" filter
-    // blocks echo webhooks — LMBS is already true when dates change.
-    tracer.startPhase('preLmbs');
-    const preLmbsPayload = updates.map((u) => ({
-      taskId: u.taskId,
-      properties: { 'Last Modified By System': { checkbox: true } },
-    }));
-    await notionClient.patchBatch(preLmbsPayload, { tracer });
-    tracer.endPhase('preLmbs');
-
     const patchPayload = updates.map((u) => ({
       taskId: u.taskId,
       properties: buildUpdateProperties(u, classified.sourceTaskName, classified.cascadeMode),
@@ -343,23 +321,6 @@ async function processDateCascade(payload) {
     tracer.startPhase('patchUpdates');
     const patched = await notionClient.patchBatch(patchPayload, { tracer });
     tracer.endPhase('patchUpdates');
-
-    // Immediate unlock pass skips roll-up tasks (WF-P parity).
-    tracer.startPhase('sleep');
-    await sleep(3000);
-    tracer.endPhase('sleep');
-
-    tracer.startPhase('patchUnlock');
-    const unlockPayload = updates
-      .filter((u) => !u._isRollUp)
-      .map((u) => ({
-        taskId: u.taskId,
-        properties: { 'Last Modified By System': { checkbox: false } },
-      }));
-    if (unlockPayload.length > 0) {
-      await notionClient.patchBatch(unlockPayload, { tracer });
-    }
-    tracer.endPhase('patchUnlock');
 
     tracer.startPhase('reportComplete');
     await notionClient.reportStatus(
@@ -437,19 +398,6 @@ async function processDateCascade(payload) {
       });
     } catch { /* don't mask original error */ }
     throw error;
-  } finally {
-    try {
-      tracer.startPhase('cleanup');
-      await notionClient.clearStudyLmbsFlags({
-        studyTasksDbId: config.notion.studyTasksDbId,
-        studyId: parsed.studyId,
-        tracer,
-      });
-      tracer.endPhase('cleanup');
-    } catch (cleanupError) {
-      tracer.endPhase('cleanup');
-      console.warn('[date-cascade] study-wide LMBS cleanup failed:', cleanupError.message);
-    }
   }
 }
 

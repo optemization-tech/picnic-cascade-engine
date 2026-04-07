@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
     reportStatus: vi.fn(),
   },
   parseWebhookPayload: vi.fn(),
-  isSystemModified: vi.fn(),
   computeStatusRollup: vi.fn(),
   normalizeTask: vi.fn(),
   activityLogService: {
@@ -33,7 +32,6 @@ vi.mock('../../src/notion/client.js', () => ({
 
 vi.mock('../../src/gates/guards.js', () => ({
   parseWebhookPayload: mocks.parseWebhookPayload,
-  isSystemModified: mocks.isSystemModified,
 }));
 
 vi.mock('../../src/engine/status-rollup.js', () => ({
@@ -64,14 +62,13 @@ describe('status-rollup route error reporting', () => {
       taskName: 'Task One',
       studyId: 'study-1',
     });
-    mocks.isSystemModified.mockReturnValue(false);
     mocks.mockClient.getPage
       .mockResolvedValueOnce({
         id: 'task-1',
         properties: {
           'Parent Task': { relation: [{ id: 'parent-1' }] },
           Study: { relation: [{ id: 'study-1' }] },
-          'Last Modified By System': { checkbox: false },
+          'Subtask(s)': { relation: [] },
           'Task Name': { title: [{ plain_text: 'Task One' }] },
         },
       })
@@ -84,7 +81,6 @@ describe('status-rollup route error reporting', () => {
       name: 'Task One',
       parentId: 'parent-1',
       studyId: 'study-1',
-      lastModifiedBySystem: false,
     });
 
     const req = { body: { data: { id: 'task-1' } } };
@@ -108,7 +104,6 @@ describe('status-rollup route error reporting', () => {
       taskName: 'Task One',
       studyId: 'study-1',
     });
-    mocks.isSystemModified.mockReturnValue(false);
     mocks.mockClient.getPage.mockRejectedValue(new Error('status route boom'));
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.computeStatusRollup.mockReturnValue('Done');
@@ -127,5 +122,39 @@ describe('status-rollup route error reporting', () => {
       'error',
       expect.stringContaining('Status roll-up failed for Task One'),
     );
+  });
+
+  it('skips parent-originated events that already have subtasks', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'task-1',
+      taskName: 'Task One',
+      studyId: 'study-1',
+    });
+    mocks.mockClient.getPage.mockResolvedValueOnce({
+      id: 'task-1',
+      properties: {
+        'Parent Task': { relation: [{ id: 'parent-1' }] },
+        Study: { relation: [{ id: 'study-1' }] },
+        'Subtask(s)': { relation: [{ id: 'child-1' }] },
+      },
+    });
+    mocks.normalizeTask.mockReturnValue({
+      id: 'task-1',
+      name: 'Task One',
+      parentId: 'parent-1',
+      studyId: 'study-1',
+    });
+
+    const req = { body: { data: { id: 'task-1' } } };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handleStatusRollup(req, res);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.mockClient.queryDatabase).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
   });
 });

@@ -163,7 +163,6 @@ describe('createStudyTasks — null stripping', () => {
     expect(body.properties['Dates']).toBeDefined();
     expect(body.properties['Study']).toBeDefined();
     expect(body.properties['Template Source ID']).toBeDefined();
-    expect(body.properties['Last Modified By System']).toBeDefined();
     expect(body.properties['Automation Reporting']).toBeDefined();
 
     // Optional properties should NOT be present when empty
@@ -561,16 +560,6 @@ describe('createStudyTasks — property mapping', () => {
 
     const body = client.postCalls[0];
     expect(body.parent).toEqual({ database_id: 'tasks-db-1' });
-  });
-
-  it('sets Last Modified By System to true', async () => {
-    const levels = buildLevels([taskEntry('t1', 'Task 1')]);
-    const client = mockClient();
-
-    await createStudyTasks(client, levels, baseOptions);
-
-    const body = client.postCalls[0];
-    expect(body.properties['Last Modified By System']).toEqual({ checkbox: true });
   });
 
   it('sets Template Source ID to the template page ID', async () => {
