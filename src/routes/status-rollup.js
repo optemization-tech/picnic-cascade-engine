@@ -30,17 +30,20 @@ async function processStatusRollup(payload) {
   const study = await notionClient.getPage(changedTask.studyId);
   if (study?.properties?.['Import Mode']?.checkbox === true) return;
 
-  const parent = await notionClient.getPage(changedTask.parentId);
+  const [parent, siblingPages] = await Promise.all([
+    notionClient.getPage(changedTask.parentId),
+    notionClient.queryDatabase(
+      config.notion.studyTasksDbId,
+      { property: 'Parent Task', relation: { contains: changedTask.parentId } },
+      100,
+    ),
+  ]);
+
   const parentStatus = parent?.properties?.['Status']?.status?.name || 'Not started';
   const parentName = parent?.properties?.['Task Name']?.title?.[0]?.text?.content
     || parent?.properties?.['Task Name']?.title?.[0]?.plain_text
     || changedTask.parentId.substring(0, 8);
 
-  const siblingPages = await notionClient.queryDatabase(
-    config.notion.studyTasksDbId,
-    { property: 'Parent Task', relation: { contains: changedTask.parentId } },
-    100,
-  );
   const siblings = siblingPages.map(normalizeTask);
   const desiredStatus = mapRollupStatusToNotion(computeStatusRollup(siblings));
 

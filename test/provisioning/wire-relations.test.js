@@ -4,15 +4,15 @@ import { wireRemainingRelations } from '../../src/provisioning/wire-relations.js
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Create a mock client with a spied patchBatch method.
- * Records all updates passed to patchBatch for assertion.
+ * Create a mock client with a spied patchPages method.
+ * Records all updates passed to patchPages for assertion.
  */
 function mockClient() {
   const allUpdates = [];
   const client = {
     optimalBatchSize: 50,
     allUpdates,
-    patchBatch: vi.fn(async (updates) => {
+    patchPages: vi.fn(async (updates) => {
       allUpdates.push(...updates);
       return { updatedCount: updates.length, taskIds: updates.map((u) => u.taskId) };
     }),
@@ -41,7 +41,7 @@ describe('wireRemainingRelations — parent patching', () => {
 
     expect(result.parentsPatchedCount).toBe(1);
     expect(result.depsPatchedCount).toBe(0);
-    expect(client.patchBatch).toHaveBeenCalledTimes(1);
+    expect(client.patchPages).toHaveBeenCalledTimes(1);
 
     const updates = client.allUpdates;
     expect(updates).toHaveLength(1);
@@ -174,7 +174,7 @@ describe('wireRemainingRelations — mixed patches', () => {
 
     expect(result.parentsPatchedCount).toBe(1);
     expect(result.depsPatchedCount).toBe(1);
-    expect(client.patchBatch).toHaveBeenCalledTimes(1);
+    expect(client.patchPages).toHaveBeenCalledTimes(1);
     expect(client.allUpdates).toHaveLength(2);
 
     // Parent patch first, then dep patch
@@ -197,10 +197,10 @@ describe('wireRemainingRelations — empty inputs', () => {
 
     expect(result.parentsPatchedCount).toBe(0);
     expect(result.depsPatchedCount).toBe(0);
-    expect(client.patchBatch).not.toHaveBeenCalled();
+    expect(client.patchPages).not.toHaveBeenCalled();
   });
 
-  it('does not call patchBatch when all tracking entries fail to resolve', async () => {
+  it('does not call patchPages when all tracking entries fail to resolve', async () => {
     const client = mockClient();
 
     const result = await wireRemainingRelations(client, {
@@ -219,7 +219,7 @@ describe('wireRemainingRelations — empty inputs', () => {
 
     expect(result.parentsPatchedCount).toBe(0);
     expect(result.depsPatchedCount).toBe(0);
-    expect(client.patchBatch).not.toHaveBeenCalled();
+    expect(client.patchPages).not.toHaveBeenCalled();
   });
 });
 
@@ -243,7 +243,7 @@ describe('wireRemainingRelations — missing mappings', () => {
     });
 
     expect(result.parentsPatchedCount).toBe(0);
-    expect(client.patchBatch).not.toHaveBeenCalled();
+    expect(client.patchPages).not.toHaveBeenCalled();
   });
 
   it('skips parent patch when parent templateId not in idMapping', async () => {
@@ -263,7 +263,7 @@ describe('wireRemainingRelations — missing mappings', () => {
     });
 
     expect(result.parentsPatchedCount).toBe(0);
-    expect(client.patchBatch).not.toHaveBeenCalled();
+    expect(client.patchPages).not.toHaveBeenCalled();
   });
 
   it('skips dep patch when task templateId not in idMapping', async () => {
@@ -287,7 +287,7 @@ describe('wireRemainingRelations — missing mappings', () => {
     });
 
     expect(result.depsPatchedCount).toBe(0);
-    expect(client.patchBatch).not.toHaveBeenCalled();
+    expect(client.patchPages).not.toHaveBeenCalled();
   });
 
   it('skips dep patch when no unresolved blockers can be resolved', async () => {
@@ -312,7 +312,7 @@ describe('wireRemainingRelations — missing mappings', () => {
 
     // No newly resolved IDs means no patch needed
     expect(result.depsPatchedCount).toBe(0);
-    expect(client.patchBatch).not.toHaveBeenCalled();
+    expect(client.patchPages).not.toHaveBeenCalled();
   });
 
   it('resolves some blockers even when others are missing', async () => {
@@ -424,7 +424,7 @@ describe('wireRemainingRelations — tracer', () => {
     expect(phases).toEqual(['start:wireRemainingRelations', 'end:wireRemainingRelations']);
   });
 
-  it('passes tracer to patchBatch', async () => {
+  it('passes tracer to patchPages', async () => {
     const tracer = {
       startPhase() {},
       endPhase() {},
@@ -442,9 +442,9 @@ describe('wireRemainingRelations — tracer', () => {
       tracer,
     });
 
-    expect(client.patchBatch).toHaveBeenCalledWith(
+    expect(client.patchPages).toHaveBeenCalledWith(
       expect.any(Array),
-      { tracer },
+      { tracer, workersPerToken: 10 },
     );
   });
 

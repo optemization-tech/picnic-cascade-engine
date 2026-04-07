@@ -71,7 +71,10 @@ export async function wireRemainingRelations(client, { idMapping, depTracking, p
   const allPatches = [...parentPatches, ...depPatches];
 
   if (allPatches.length > 0) {
-    await client.patchBatch(allPatches, { tracer });
+    await client.patchPages(allPatches, {
+      tracer,
+      workersPerToken: 10,
+    });
   }
 
   if (tracer) tracer.endPhase('wireRemainingRelations');

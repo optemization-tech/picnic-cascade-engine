@@ -8,7 +8,7 @@
  *   - Shared syncCache across all pages (avoids re-fetching same source block)
  *   - Handles nested synced blocks (one level deep)
  *   - Renames block.text -> block.rich_text for rich text block types
- *   - Processes pages in parallel batches for token rotation utilization
+ *   - Processes pages through the shared token-aware worker queue
  */
 
 const UNSUPPORTED_BLOCK_TYPES = new Set([
@@ -39,6 +39,8 @@ const RICH_TEXT_BLOCK_TYPES = new Set([
 const MAX_BLOCKS_PER_APPEND = 100;
 const PROGRESS_INTERVAL = 50;
 const DEFAULT_CONCURRENCY = 5;
+const DEFAULT_READ_WORKERS_PER_TOKEN = 3;
+const DEFAULT_WRITE_WORKERS_PER_TOKEN = 10;
 
 /**
  * Recursively strips null and undefined values from an object.
@@ -116,6 +118,30 @@ async function fetchAllBlocks(client, pageId, { tracer } = {}) {
   return blocks;
 }
 
+async function ensureCachedBlocks(client, syncCache, fetchId, { tracer } = {}) {
+  if (!fetchId) return [];
+
+  const cached = syncCache[fetchId];
+  if (Array.isArray(cached)) {
+    return cached;
+  }
+  if (cached) {
+    return cached;
+  }
+
+  syncCache[fetchId] = (async () => {
+    try {
+      return await fetchAllBlocks(client, fetchId, { tracer });
+    } catch {
+      return [];
+    }
+  })();
+
+  const resolved = await syncCache[fetchId];
+  syncCache[fetchId] = resolved;
+  return resolved;
+}
+
 /**
  * Resolves synced blocks in a block list by fetching their children
  * and inlining them as regular blocks.
@@ -137,14 +163,7 @@ async function resolveSyncedBlocks(client, rawBlocks, syncCache, { tracer } = {}
   for (const block of rawBlocks) {
     if (block.type === 'synced_block') {
       const fetchId = block.synced_block?.synced_from?.block_id || block.id;
-      if (fetchId && syncCache[fetchId] === undefined) {
-        try {
-          const children = await fetchAllBlocks(client, fetchId, { tracer });
-          syncCache[fetchId] = children;
-        } catch {
-          syncCache[fetchId] = [];
-        }
-      }
+      await ensureCachedBlocks(client, syncCache, fetchId, { tracer });
     }
   }
 
@@ -153,21 +172,14 @@ async function resolveSyncedBlocks(client, rawBlocks, syncCache, { tracer } = {}
   for (const block of rawBlocks) {
     if (block.type === 'synced_block') {
       const fetchId = block.synced_block?.synced_from?.block_id || block.id;
-      const children = syncCache[fetchId] || [];
+      const children = await ensureCachedBlocks(client, syncCache, fetchId, { tracer });
 
       for (const child of children) {
         // Handle nested synced blocks (one level deep)
         if (child.type === 'synced_block') {
           const nestedId = child.synced_block?.synced_from?.block_id || child.id;
-          if (nestedId && syncCache[nestedId] === undefined) {
-            try {
-              const nestedChildren = await fetchAllBlocks(client, nestedId, { tracer });
-              syncCache[nestedId] = nestedChildren;
-            } catch {
-              syncCache[nestedId] = [];
-            }
-          }
-          for (const nc of (syncCache[nestedId] || [])) {
+          const nestedChildren = await ensureCachedBlocks(client, syncCache, nestedId, { tracer });
+          for (const nc of nestedChildren) {
             resolved.push(nc);
           }
         } else {
@@ -182,28 +194,57 @@ async function resolveSyncedBlocks(client, rawBlocks, syncCache, { tracer } = {}
   return resolved;
 }
 
+async function prepareTemplateChildren(client, templateId, syncCache, { tracer } = {}) {
+  const rawBlocks = await fetchAllBlocks(client, templateId, { tracer });
+  if (rawBlocks.length === 0) return [];
+
+  const resolved = await resolveSyncedBlocks(client, rawBlocks, syncCache, { tracer });
+
+  return resolved
+    .filter((b) => !UNSUPPORTED_BLOCK_TYPES.has(b.type))
+    .map(cleanBlock)
+    .slice(0, MAX_BLOCKS_PER_APPEND);
+}
+
+export async function prefetchTemplateBlocks(client, templateIds, {
+  tracer,
+  concurrency,
+  workersPerToken = DEFAULT_READ_WORKERS_PER_TOKEN,
+} = {}) {
+  const ids = Array.from(new Set((templateIds || []).filter(Boolean)));
+  if (ids.length === 0) return {};
+
+  const syncCache = {};
+  const preparedBlocksByTemplate = {};
+
+  await client.runParallel(
+    ids,
+    async (templateId) => {
+      const children = await prepareTemplateChildren(client, templateId, syncCache, { tracer });
+      if (children.length > 0) {
+        preparedBlocksByTemplate[templateId] = children;
+      }
+      return children;
+    },
+    {
+      maxWorkers: concurrency ?? ids.length,
+      workersPerToken,
+    },
+  );
+
+  return preparedBlocksByTemplate;
+}
+
 /**
  * Process a single page: fetch blocks, resolve synced blocks, clean, append.
  *
  * @returns {{ blocksWritten: number, success: boolean }}
  */
 async function processOnePage(client, templateId, productionId, syncCache, { studyName, tracer } = {}) {
-  // 1. Fetch all child blocks from the template page
-  const rawBlocks = await fetchAllBlocks(client, templateId, { tracer });
-  if (rawBlocks.length === 0) return { blocksWritten: 0, success: false };
-
-  // 2. Resolve synced blocks into real blocks
-  const resolved = await resolveSyncedBlocks(client, rawBlocks, syncCache, { tracer });
-
-  // 3. Filter unsupported types + clean for append API
-  const children = resolved
-    .filter((b) => !UNSUPPORTED_BLOCK_TYPES.has(b.type))
-    .map(cleanBlock)
-    .slice(0, MAX_BLOCKS_PER_APPEND);
-
+  const children = await prepareTemplateChildren(client, templateId, syncCache, { tracer });
   if (children.length === 0) return { blocksWritten: 0, success: false };
 
-  // 4. Append children to the production page
+  // Append children to the production page
   await client.request('PATCH', `/blocks/${productionId}/children`, { children }, { tracer });
 
   return { blocksWritten: children.length, success: true };
@@ -219,10 +260,19 @@ async function processOnePage(client, templateId, productionId, syncCache, { stu
  * @param {string} opts.studyPageId - Study page ID for progress reporting
  * @param {string} opts.studyName - Study name for log messages
  * @param {number} [opts.concurrency] - Max pages processed in parallel (default: 5)
+ * @param {Record<string, object[]>} [opts.preparedBlocksByTemplate] - optional prefetched clean block payloads
+ * @param {number} [opts.workersPerToken] - queue workers per token for append writes
  * @param {import('../services/cascade-tracer.js').CascadeTracer} [opts.tracer]
  * @returns {Promise<{ blocksWrittenCount: number, pagesProcessed: number, pagesSkipped: number }>}
  */
-export async function copyBlocks(client, idMapping, { studyPageId, studyName, concurrency, tracer } = {}) {
+export async function copyBlocks(client, idMapping, {
+  studyPageId,
+  studyName,
+  concurrency,
+  preparedBlocksByTemplate,
+  workersPerToken = DEFAULT_WRITE_WORKERS_PER_TOKEN,
+  tracer,
+} = {}) {
   const entries = Object.entries(idMapping || {});
   const total = entries.length;
   const maxConcurrency = concurrency ?? DEFAULT_CONCURRENCY;
@@ -235,52 +285,61 @@ export async function copyBlocks(client, idMapping, { studyPageId, studyName, co
 
   if (tracer) tracer.startPhase('copyBlocks');
 
-  // Process pages in batches for parallel token utilization
-  for (let i = 0; i < entries.length; i += maxConcurrency) {
-    const batch = entries.slice(i, i + maxConcurrency);
-
-    const results = await Promise.allSettled(
-      batch.map(async ([templateId, productionId]) => {
-        try {
-          return await processOnePage(client, templateId, productionId, syncCache, { studyName, tracer });
-        } catch (err) {
-          console.log(JSON.stringify({
-            event: 'copy_blocks_page_error',
-            templateId,
-            productionId,
-            error: String(err?.message || err).slice(0, 300),
-            studyName,
-          }));
-          return { blocksWritten: 0, success: false };
+  await client.runParallel(
+    entries,
+    async ([templateId, productionId]) => {
+      let value;
+      try {
+        if (preparedBlocksByTemplate && Object.prototype.hasOwnProperty.call(preparedBlocksByTemplate, templateId)) {
+          const children = preparedBlocksByTemplate[templateId] || [];
+          if (children.length === 0) {
+            value = { blocksWritten: 0, success: false };
+          } else {
+            await client.request('PATCH', `/blocks/${productionId}/children`, { children }, { tracer });
+            value = { blocksWritten: children.length, success: true };
+          }
+        } else {
+          value = await processOnePage(client, templateId, productionId, syncCache, { studyName, tracer });
         }
-      }),
-    );
+      } catch (err) {
+        console.log(JSON.stringify({
+          event: 'copy_blocks_page_error',
+          templateId,
+          productionId,
+          error: String(err?.message || err).slice(0, 300),
+          studyName,
+        }));
+        value = { blocksWritten: 0, success: false };
+      }
 
-    for (const result of results) {
-      const value = result.status === 'fulfilled' ? result.value : { blocksWritten: 0, success: false };
       if (value.success) {
         blocksWrittenCount += value.blocksWritten;
         pagesProcessed++;
       } else {
         pagesSkipped++;
       }
-    }
 
-    // Progress reporting every PROGRESS_INTERVAL pages
-    const processed = pagesProcessed + pagesSkipped;
-    if (processed > 0 && processed % PROGRESS_INTERVAL === 0 && studyPageId) {
-      try {
-        await client.reportStatus(
-          studyPageId,
-          'info',
-          `Copying content: ${processed}/${total} pages...`,
-          { tracer },
-        );
-      } catch {
-        // Don't let progress reporting failures kill the operation
+      const processed = pagesProcessed + pagesSkipped;
+      if (processed > 0 && processed % PROGRESS_INTERVAL === 0 && studyPageId) {
+        try {
+          await client.reportStatus(
+            studyPageId,
+            'info',
+            `Copying content: ${processed}/${total} pages...`,
+            { tracer },
+          );
+        } catch {
+          // Don't let progress reporting failures kill the operation
+        }
       }
-    }
-  }
+
+      return value;
+    },
+    {
+      maxWorkers: maxConcurrency,
+      workersPerToken,
+    },
+  );
 
   if (tracer) tracer.endPhase('copyBlocks');
 

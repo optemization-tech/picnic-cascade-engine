@@ -5,6 +5,9 @@ function makeMockClient({ tasks = [] } = {}) {
   const client = {
     request: vi.fn().mockResolvedValue({}),
   };
+  client.requestBatch = vi.fn(async (operations, options = {}) => Promise.all(
+    operations.map((operation) => client.request(operation.method, operation.path, operation.body, { tracer: options.tracer })),
+  ));
   // First request call is the query, rest are archive PATCHes
   client.request.mockResolvedValueOnce({ results: tasks, has_more: false });
   return client;
@@ -30,6 +33,7 @@ describe('deleteStudyTasks', () => {
       { filter: { property: 'Study', relation: { contains: studyId } }, page_size: 100 },
       { tracer: undefined },
     );
+    expect(client.requestBatch).toHaveBeenCalledTimes(1);
     expect(client.request).toHaveBeenCalledWith('PATCH', '/pages/task-1', { archived: true }, { tracer: undefined });
     expect(client.request).toHaveBeenCalledWith('PATCH', '/pages/task-2', { archived: true }, { tracer: undefined });
     expect(client.request).toHaveBeenCalledWith('PATCH', '/pages/task-3', { archived: true }, { tracer: undefined });
@@ -70,6 +74,9 @@ describe('deleteStudyTasks', () => {
     expect(tracer.endPhase).toHaveBeenCalledWith('query');
     expect(tracer.startPhase).toHaveBeenCalledWith('archive');
     expect(tracer.endPhase).toHaveBeenCalledWith('archive');
+    expect(client.requestBatch).toHaveBeenCalledWith([
+      { method: 'PATCH', path: '/pages/task-1', body: { archived: true } },
+    ], { tracer });
     expect(client.request).toHaveBeenCalledWith('PATCH', '/pages/task-1', { archived: true }, { tracer });
   });
 

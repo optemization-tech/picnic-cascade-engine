@@ -84,6 +84,9 @@ function mockClient({ createdPageIdFn } = {}) {
       }
       return {};
     }),
+    createPages: vi.fn(async (pageBodies) => Promise.all(
+      pageBodies.map((pageBody) => client.request('POST', '/pages', pageBody)),
+    )),
   };
 
   return client;
@@ -252,10 +255,8 @@ describe('createStudyTasks — null offset skipping', () => {
 
 // ── Inline dependency resolution ───────────────────────────────────────────
 
-describe('createStudyTasks — inline dependency resolution', () => {
-  it('resolves blocked-by when blocker was created in a previous level', async () => {
-    // Level 0: blocker (t-blocker)
-    // Level 1: dependent (t-dep) blocked by t-blocker
+describe('createStudyTasks — dependency tracking', () => {
+  it('tracks blueprint-to-blueprint blockers for the later patch phase', async () => {
     const levels = buildLevels(
       [taskEntry('t-blocker', 'Blocker')],
       [taskEntry('t-dep', 'Dependent', { blockedByIds: ['t-blocker'] })],
@@ -266,65 +267,69 @@ describe('createStudyTasks — inline dependency resolution', () => {
 
     const result = await createStudyTasks(client, levels, baseOptions);
 
-    // Dependent's body should include resolved Blocked by
     const depBody = client.postCalls[1];
-    expect(depBody.properties['Blocked by']).toEqual({
-      relation: [{ id: 'prod-t-blocker' }],
-    });
-    expect(result.depTracking).toHaveLength(0);
+    expect(depBody.properties['Blocked by']).toBeUndefined();
+    expect(result.depTracking).toEqual([
+      {
+        templateId: 't-dep',
+        resolvedBlockedByIds: [],
+        unresolvedBlockedByTemplateIds: ['t-blocker'],
+      },
+    ]);
   });
 
-  it('splits into resolved and unresolved when only some blockers are known', async () => {
-    // Level 0: t-a is created
-    // Level 1: t-dep blocked by [t-a, t-unknown]
-    const levels = buildLevels(
-      [taskEntry('t-a', 'Task A')],
-      [taskEntry('t-dep', 'Dependent', { blockedByIds: ['t-a', 't-unknown'] })],
-    );
+  it('still writes blockers inline when they come from existingIdMapping', async () => {
+    const levels = buildLevels([
+      taskEntry('t-dep', 'Dependent', { blockedByIds: ['existing-task', 'missing-task'] }),
+    ]);
+    const client = mockClient({
+      createdPageIdFn: (templateId) => `prod-${templateId}`,
+    });
+
+    const result = await createStudyTasks(client, levels, {
+      ...baseOptions,
+      existingIdMapping: { 'existing-task': 'prod-existing-task' },
+    });
+
+    const depBody = client.postCalls[0];
+    expect(depBody.properties['Blocked by']).toEqual({
+      relation: [{ id: 'prod-existing-task' }],
+    });
+    expect(result.depTracking).toEqual([
+      {
+        templateId: 't-dep',
+        resolvedBlockedByIds: ['prod-existing-task'],
+        unresolvedBlockedByTemplateIds: ['missing-task'],
+      },
+    ]);
+  });
+
+  it('tracks fully unresolved deps when no mapping exists yet', async () => {
+    const levels = buildLevels([
+      taskEntry('t-dep', 'Dependent', { blockedByIds: ['t-missing'] }),
+    ]);
     const client = mockClient({
       createdPageIdFn: (templateId) => `prod-${templateId}`,
     });
 
     const result = await createStudyTasks(client, levels, baseOptions);
 
-    // Resolved blocker included in body
-    const depBody = client.postCalls[1];
-    expect(depBody.properties['Blocked by']).toEqual({
-      relation: [{ id: 'prod-t-a' }],
-    });
-
-    // Unresolved tracked for WF-2 patching
-    expect(result.depTracking).toHaveLength(1);
-    expect(result.depTracking[0].templateId).toBe('t-dep');
-    expect(result.depTracking[0].resolvedBlockedByIds).toEqual(['prod-t-a']);
-    expect(result.depTracking[0].unresolvedBlockedByTemplateIds).toEqual(['t-unknown']);
-  });
-
-  it('tracks fully unresolved deps (blocker not yet created)', async () => {
-    // Single level: t-dep blocked by t-missing (not in any level)
-    const levels = buildLevels(
-      [taskEntry('t-dep', 'Dependent', { blockedByIds: ['t-missing'] })],
-    );
-    const client = mockClient({
-      createdPageIdFn: (templateId) => `prod-${templateId}`,
-    });
-
-    const result = await createStudyTasks(client, levels, baseOptions);
-
-    // No Blocked by in body
     const body = client.postCalls[0];
     expect(body.properties['Blocked by']).toBeUndefined();
-
-    // All unresolved
-    expect(result.depTracking).toHaveLength(1);
-    expect(result.depTracking[0].unresolvedBlockedByTemplateIds).toEqual(['t-missing']);
+    expect(result.depTracking).toEqual([
+      {
+        templateId: 't-dep',
+        resolvedBlockedByIds: [],
+        unresolvedBlockedByTemplateIds: ['t-missing'],
+      },
+    ]);
   });
 });
 
-// ── Inline parent resolution ───────────────────────────────────────────────
+// ── Parent tracking ────────────────────────────────────────────────────────
 
-describe('createStudyTasks — inline parent resolution', () => {
-  it('resolves parent when it was created in a previous level', async () => {
+describe('createStudyTasks — parent tracking', () => {
+  it('tracks blueprint-to-blueprint parents for the later patch phase', async () => {
     const levels = buildLevels(
       [taskEntry('t-parent', 'Parent')],
       [taskEntry('t-child', 'Child', { parentId: 't-parent' })],
@@ -336,29 +341,33 @@ describe('createStudyTasks — inline parent resolution', () => {
     const result = await createStudyTasks(client, levels, baseOptions);
 
     const childBody = client.postCalls[1];
-    expect(childBody.properties['Parent Task']).toEqual({
-      relation: [{ id: 'prod-t-parent' }],
-    });
-    expect(result.parentTracking).toHaveLength(0);
+    expect(childBody.properties['Parent Task']).toBeUndefined();
+    expect(result.parentTracking).toEqual([
+      {
+        templateId: 't-child',
+        templateParentId: 't-parent',
+      },
+    ]);
   });
 
-  it('tracks unresolved parent for post-loop patching', async () => {
-    // t-child has parent t-missing (not in any level)
-    const levels = buildLevels(
-      [taskEntry('t-child', 'Child', { parentId: 't-missing' })],
-    );
+  it('writes parent inline when it already exists in existingIdMapping', async () => {
+    const levels = buildLevels([
+      taskEntry('t-child', 'Child', { parentId: 'existing-parent' }),
+    ]);
     const client = mockClient({
       createdPageIdFn: (templateId) => `prod-${templateId}`,
     });
 
-    const result = await createStudyTasks(client, levels, baseOptions);
+    const result = await createStudyTasks(client, levels, {
+      ...baseOptions,
+      existingIdMapping: { 'existing-parent': 'prod-existing-parent' },
+    });
 
     const body = client.postCalls[0];
-    expect(body.properties['Parent Task']).toBeUndefined();
-
-    expect(result.parentTracking).toHaveLength(1);
-    expect(result.parentTracking[0].templateId).toBe('t-child');
-    expect(result.parentTracking[0].templateParentId).toBe('t-missing');
+    expect(body.properties['Parent Task']).toEqual({
+      relation: [{ id: 'prod-existing-parent' }],
+    });
+    expect(result.parentTracking).toEqual([]);
   });
 });
 
@@ -400,17 +409,19 @@ describe('createStudyTasks — content-based ID accumulation', () => {
         };
       }),
     };
+    client.createPages = vi.fn(async (pageBodies) => Promise.all(
+      pageBodies.map((pageBody) => client.request('POST', '/pages', pageBody)),
+    ));
 
     const result = await createStudyTasks(client, levels, baseOptions);
     expect(result.idMapping).toEqual({ 'tpl-x': 'prod-x' });
   });
 });
 
-// ── Level-by-level progressive resolution ──────────────────────────────────
+// ── Global create pass ─────────────────────────────────────────────────────
 
-describe('createStudyTasks — level-by-level progressive resolution', () => {
-  it('level 0 creates parents, level 1 resolves them as Parent Task', async () => {
-    // 3 levels: root -> child -> grandchild
+describe('createStudyTasks — global create pass', () => {
+  it('creates every task in one client createPages call across multiple levels', async () => {
     const levels = buildLevels(
       [taskEntry('root', 'Root')],
       [taskEntry('child', 'Child', { parentId: 'root' })],
@@ -422,58 +433,14 @@ describe('createStudyTasks — level-by-level progressive resolution', () => {
 
     const result = await createStudyTasks(client, levels, baseOptions);
 
-    // All 3 created
     expect(result.totalCreated).toBe(3);
+    expect(client.createPages).toHaveBeenCalledTimes(1);
+    expect(client.postCalls).toHaveLength(3);
     expect(Object.keys(result.idMapping)).toHaveLength(3);
-
-    // Child should have resolved parent to Root
-    const childBody = client.postCalls[1];
-    expect(childBody.properties['Parent Task']).toEqual({
-      relation: [{ id: 'prod-root' }],
-    });
-
-    // Grandchild should have resolved parent to Child
-    const grandchildBody = client.postCalls[2];
-    expect(grandchildBody.properties['Parent Task']).toEqual({
-      relation: [{ id: 'prod-child' }],
-    });
-
-    // Nothing unresolved
-    expect(result.parentTracking).toHaveLength(0);
-    expect(result.depTracking).toHaveLength(0);
-  });
-
-  it('resolves deps progressively across levels', async () => {
-    // Level 0: A (blocker)
-    // Level 1: B (blocker, blocked by A), C (blocked by A)
-    // Level 2: D (blocked by B and C)
-    const levels = buildLevels(
-      [taskEntry('a', 'Task A')],
-      [
-        taskEntry('b', 'Task B', { blockedByIds: ['a'] }),
-        taskEntry('c', 'Task C', { blockedByIds: ['a'] }),
-      ],
-      [taskEntry('d', 'Task D', { blockedByIds: ['b', 'c'] })],
-    );
-    const client = mockClient({
-      createdPageIdFn: (templateId) => `prod-${templateId}`,
-    });
-
-    const result = await createStudyTasks(client, levels, baseOptions);
-
-    // B body: Blocked by [prod-a]
-    const bBody = client.postCalls[1];
-    expect(bBody.properties['Blocked by']).toEqual({
-      relation: [{ id: 'prod-a' }],
-    });
-
-    // D body: Blocked by [prod-b, prod-c]
-    const dBody = client.postCalls[3];
-    expect(dBody.properties['Blocked by']).toEqual({
-      relation: [{ id: 'prod-b' }, { id: 'prod-c' }],
-    });
-
-    expect(result.depTracking).toHaveLength(0);
+    expect(result.parentTracking).toEqual([
+      { templateId: 'child', templateParentId: 'root' },
+      { templateId: 'grandchild', templateParentId: 'child' },
+    ]);
   });
 });
 
@@ -494,9 +461,9 @@ describe('createStudyTasks — tracking output', () => {
   });
 
   it('accumulates depTracking only for unresolved deps', async () => {
-    // Level 0: t-a created
-    // Level 0: t-b blocked by [t-a, t-ext1, t-ext2]
-    // t-a resolves but t-ext1/t-ext2 are external (not in tree)
+    // t-b depends on one new blueprint task and two external IDs.
+    // None of them are available inline, so all three should be tracked for the
+    // later patch phase.
     const levels = buildLevels([
       taskEntry('t-a', 'Task A'),
       taskEntry('t-b', 'Task B', { blockedByIds: ['t-a', 't-ext1', 't-ext2'] }),
@@ -507,13 +474,10 @@ describe('createStudyTasks — tracking output', () => {
 
     const result = await createStudyTasks(client, levels, baseOptions);
 
-    // t-a was created before t-b in the same batch, but since they are in
-    // the same level, t-a's prod ID is NOT yet in idMapping when t-b's body
-    // is built. So t-a will also be unresolved at build time.
-    // (idMapping is only populated AFTER the batch completes.)
     expect(result.depTracking.length).toBeGreaterThan(0);
     const bTracking = result.depTracking.find((d) => d.templateId === 't-b');
     expect(bTracking).toBeDefined();
+    expect(bTracking.unresolvedBlockedByTemplateIds).toContain('t-a');
     expect(bTracking.unresolvedBlockedByTemplateIds).toContain('t-ext1');
     expect(bTracking.unresolvedBlockedByTemplateIds).toContain('t-ext2');
   });
@@ -625,20 +589,17 @@ describe('createStudyTasks — tracer', () => {
 
 // ── Batching ───────────────────────────────────────────────────────────────
 
-describe('createStudyTasks — batching', () => {
-  it('respects client.optimalBatchSize for parallel batches', async () => {
+describe('createStudyTasks — parallel page creation', () => {
+  it('creates every page through the client parallel creation path', async () => {
     // Create 5 tasks with a batchSize of 2 — should be 3 batches
     const tasks = Array.from({ length: 5 }, (_, i) =>
       taskEntry(`t${i}`, `Task ${i}`),
     );
     const levels = buildLevels(tasks);
 
-    // Track timing of requests to verify batching
-    const requestTimes = [];
     const client = {
       optimalBatchSize: 2,
       request: vi.fn(async (method, path, body) => {
-        requestTimes.push(Date.now());
         const templateId = body.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
         return {
           id: `prod-${templateId}`,
@@ -648,10 +609,14 @@ describe('createStudyTasks — batching', () => {
         };
       }),
     };
+    client.createPages = vi.fn(async (pageBodies) => Promise.all(
+      pageBodies.map((pageBody) => client.request('POST', '/pages', pageBody)),
+    ));
 
     const result = await createStudyTasks(client, levels, baseOptions);
 
     expect(result.totalCreated).toBe(5);
+    expect(client.createPages).toHaveBeenCalledTimes(1);
     expect(client.request).toHaveBeenCalledTimes(5);
   });
 });

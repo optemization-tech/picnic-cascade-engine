@@ -2,7 +2,7 @@
  * Deletion module — archives all study tasks for a given study.
  *
  * Uses raw PATCH /pages/{id} with { archived: true } since the standard
- * patchBatch() sends { properties: ... } which doesn't support archiving.
+ * patchPages() sends { properties: ... } which doesn't support archiving.
  *
  * Strategy: query-archive-repeat without cursor pagination. Archived tasks
  * disappear from query results, so we always fetch page 1 and repeat until
@@ -26,9 +26,11 @@ export async function deleteStudyTasks(client, { studyTasksDbId, studyId, tracer
     if (tasks.length === 0) break;
 
     if (tracer) tracer.startPhase('archive');
-    await Promise.all(
-      tasks.map((t) => client.request('PATCH', `/pages/${t.id}`, { archived: true }, { tracer })),
-    );
+    await client.requestBatch(tasks.map((task) => ({
+      method: 'PATCH',
+      path: `/pages/${task.id}`,
+      body: { archived: true },
+    })), { tracer });
     if (tracer) tracer.endPhase('archive');
 
     totalArchived += tasks.length;
