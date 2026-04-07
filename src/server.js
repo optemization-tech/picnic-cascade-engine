@@ -5,6 +5,7 @@ import { handleInception } from './routes/inception.js';
 import { handleAddTaskSet } from './routes/add-task-set.js';
 import { handleCopyBlocks } from './routes/copy-blocks.js';
 import { handleDeletion } from './routes/deletion.js';
+import { handleUndoCascade } from './routes/undo-cascade.js';
 import { handleDateCascade as handleDateCascadeV2 } from './v2/routes/date-cascade.js';
 import { handleInception as handleInceptionV2 } from './v2/routes/inception.js';
 import { handleAddTaskSet as handleAddTaskSetV2 } from './v2/routes/add-task-set.js';
@@ -38,6 +39,9 @@ export function createServer() {
   app.post('/webhook/inception', handleInception);
   app.post('/webhook/add-task-set', handleAddTaskSet);
   app.post('/webhook/copy-blocks', handleCopyBlocks);
+
+  // Undo cascade (uses cascade token pool)
+  app.post('/webhook/undo-cascade', handleUndoCascade);
 
   // Deletion webhook endpoint (use deletion token pool)
   app.post('/webhook/deletion', handleDeletion);
