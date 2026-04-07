@@ -186,3 +186,75 @@ export function transitiveViolations() {
     task('c', 'Task C', '2026-03-30', '2026-03-31', { blockedByIds: ['b'] }),
   ];
 }
+
+/**
+ * Multi-blocker with stationary predecessor (BL-H4g):
+ *
+ *     A → B → D
+ *     C ------→ D  (C is NOT in A's chain)
+ *
+ * A: Mar 30 (Mon) - Apr 02 (Thu)  [4 BD]
+ * B: Apr 03 (Fri) - Apr 06 (Mon)  [2 BD]  tight after A
+ * C: Apr 03 (Fri) - Apr 08 (Wed)  [4 BD]  independent chain
+ * D: Apr 10 (Fri) - Apr 13 (Mon)  [2 BD]  blocked by B and C, gap after C
+ *
+ * When A's end shrinks by 2 BD (pull-left):
+ * - B shifts left by 2 BD (only blocker is A, which is a seed)
+ * - D has stationary blocker C with gap (D.start Apr 10 > nextBD(C.end Apr 08) = Apr 09) → held
+ */
+export function multiBlockerStationary() {
+  return [
+    task('a', 'Task A', '2026-03-30', '2026-04-02', { blockingIds: ['b'] }),
+    task('b', 'Task B', '2026-04-03', '2026-04-06', { blockedByIds: ['a'], blockingIds: ['d'] }),
+    task('c', 'Task C', '2026-04-03', '2026-04-08', { blockingIds: ['d'] }),
+    task('d', 'Task D', '2026-04-10', '2026-04-13', { blockedByIds: ['b', 'c'] }),
+  ];
+}
+
+/**
+ * Multi-blocker, all moved (BL-H4g control):
+ * Same as multiBlockerStationary but C is upstream of A,
+ * so C gets shifted by the cascade too.
+ *
+ *     A → B → D
+ *     A → C → D
+ *
+ * A: Mar 30 (Mon) - Apr 02 (Thu)  [4 BD]
+ * B: Apr 03 (Fri) - Apr 06 (Mon)  [2 BD]  tight after A
+ * C: Apr 03 (Fri) - Apr 08 (Wed)  [4 BD]  also downstream of A
+ * D: Apr 10 (Fri) - Apr 13 (Mon)  [2 BD]  blocked by B and C, gap after C
+ *
+ * When A's end shrinks by 2 BD (pull-left):
+ * - Both B and C shift (both are downstream of source A)
+ * - D can move because ALL blockers moved
+ */
+export function multiBlockerAllMoved() {
+  return [
+    task('a', 'Task A', '2026-03-30', '2026-04-02', { blockingIds: ['b', 'c'] }),
+    task('b', 'Task B', '2026-04-03', '2026-04-06', { blockedByIds: ['a'], blockingIds: ['d'] }),
+    task('c', 'Task C', '2026-04-03', '2026-04-08', { blockedByIds: ['a'], blockingIds: ['d'] }),
+    task('d', 'Task D', '2026-04-10', '2026-04-13', { blockedByIds: ['b', 'c'] }),
+  ];
+}
+
+/**
+ * Multi-blocker, tight with stationary (BL-H4g control):
+ * D is tight with stationary blocker C (no gap).
+ * Clamp + frustration resolver should handle this normally.
+ *
+ *     A → B → D
+ *     C ------→ D  (C is NOT in A's chain, D tight with C)
+ *
+ * A: Mar 30 (Mon) - Apr 02 (Thu)  [4 BD]
+ * B: Apr 03 (Fri) - Apr 06 (Mon)  [2 BD]  tight after A
+ * C: Apr 03 (Fri) - Apr 08 (Wed)  [4 BD]  independent chain
+ * D: Apr 09 (Thu) - Apr 10 (Fri)  [2 BD]  blocked by B and C, TIGHT with C
+ */
+export function multiBlockerTightStationary() {
+  return [
+    task('a', 'Task A', '2026-03-30', '2026-04-02', { blockingIds: ['b'] }),
+    task('b', 'Task B', '2026-04-03', '2026-04-06', { blockedByIds: ['a'], blockingIds: ['d'] }),
+    task('c', 'Task C', '2026-04-03', '2026-04-08', { blockingIds: ['d'] }),
+    task('d', 'Task D', '2026-04-09', '2026-04-10', { blockedByIds: ['b', 'c'] }),
+  ];
+}
