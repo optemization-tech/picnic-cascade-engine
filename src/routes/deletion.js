@@ -1,14 +1,8 @@
 import { config } from '../config.js';
-import { NotionClient } from '../notion/client.js';
+import { deletionClient as notionClient } from '../notion/clients.js';
 import { deleteStudyTasks } from '../provisioning/deletion.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
-
-const tokens = config.notion.deletionTokens.length > 0
-  ? config.notion.deletionTokens
-  : config.notion.tokens;
-
-const notionClient = new NotionClient({ tokens });
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,

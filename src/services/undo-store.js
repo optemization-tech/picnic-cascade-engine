@@ -38,14 +38,6 @@ export class UndoStore {
     return data;
   }
 
-  has(studyId) {
-    return this._store.has(studyId);
-  }
-
-  get size() {
-    return this._store.size;
-  }
-
   _clearAll() {
     for (const entry of this._store.values()) {
       if (entry.timer) clearTimeout(entry.timer);

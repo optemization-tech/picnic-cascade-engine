@@ -39,7 +39,8 @@ export class NotionClient {
 
   async _throttleSlot(slotKey) {
     const maxPerSecond = this.rateLimit.maxPerSecond || 9;
-    for (;;) {
+    const MAX_ITERATIONS = 100;
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
       const now = Date.now();
       const windowStart = now - 1000;
       const usage = (this.tokenUsage.get(slotKey) || []).filter((ts) => ts > windowStart);
@@ -53,6 +54,8 @@ export class NotionClient {
       const waitMs = 1000 - (now - usage[0]) + 5;
       await sleep(Math.max(1, waitMs));
     }
+    // Safety valve — allow request through rather than blocking forever
+    console.warn(`[_throttleSlot] hit ${MAX_ITERATIONS} iterations for ${slotKey}, allowing request through`);
   }
 
   async _requestWithSlot(slot, method, path, body, { tracer } = {}) {
@@ -73,6 +76,7 @@ export class NotionClient {
             'Content-Type': 'application/json',
           },
           body: body ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(30_000),
         });
 
         const text = await response.text();
@@ -197,6 +201,9 @@ export class NotionClient {
 
       if (!cursorFailed) return results;
     }
+    // All cursor retries exhausted — return empty rather than undefined
+    console.warn(`[queryDatabase] all ${maxRetries + 1} cursor retry attempts exhausted`);
+    return [];
   }
 
   /**

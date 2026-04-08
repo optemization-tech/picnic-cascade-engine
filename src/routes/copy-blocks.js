@@ -1,14 +1,8 @@
 import { config } from '../config.js';
-import { NotionClient } from '../notion/client.js';
+import { provisionClient as notionClient } from '../notion/clients.js';
 import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
-
-const tokens = config.notion.provisionTokens.length > 0
-  ? config.notion.provisionTokens
-  : config.notion.tokens;
-
-const notionClient = new NotionClient({ tokens });
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,

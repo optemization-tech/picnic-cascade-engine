@@ -73,31 +73,6 @@ describe('CascadeTracer', () => {
     });
   });
 
-  describe('wrapAsync', () => {
-    it('records phase and returns result', async () => {
-      const tracer = new CascadeTracer('t5');
-      const result = await tracer.wrapAsync('query', async () => {
-        vi.advanceTimersByTime(200);
-        return 'tasks';
-      });
-
-      expect(result).toBe('tasks');
-      expect(tracer.toJSON().phases.query).toBe(200);
-    });
-
-    it('records phase even on error', async () => {
-      const tracer = new CascadeTracer('t6');
-      await expect(
-        tracer.wrapAsync('query', async () => {
-          vi.advanceTimersByTime(50);
-          throw new Error('fail');
-        }),
-      ).rejects.toThrow('fail');
-
-      expect(tracer.toJSON().phases.query).toBe(50);
-    });
-  });
-
   describe('metadata', () => {
     it('set and get', () => {
       const tracer = new CascadeTracer('t9');

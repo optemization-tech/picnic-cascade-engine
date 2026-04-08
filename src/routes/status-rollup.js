@@ -1,11 +1,9 @@
 import { config } from '../config.js';
 import { parseWebhookPayload } from '../gates/guards.js';
 import { computeStatusRollup } from '../engine/status-rollup.js';
-import { NotionClient } from '../notion/client.js';
+import { cascadeClient as notionClient } from '../notion/clients.js';
 import { normalizeTask } from '../notion/properties.js';
 import { ActivityLogService } from '../services/activity-log.js';
-
-const notionClient = new NotionClient({ tokens: config.notion.tokens });
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -20,15 +18,20 @@ async function processStatusRollup(payload) {
   const parsed = parseWebhookPayload(payload);
   if (parsed.skip) return;
 
-  // Fetch changed task to ensure parent/study are current.
-  const changedTaskPage = await notionClient.getPage(parsed.taskId);
+  // Fetch task and study in parallel (both are independent lookups)
+  const [changedTaskPage, study] = await Promise.all([
+    notionClient.getPage(parsed.taskId),
+    parsed.studyId ? notionClient.getPage(parsed.studyId) : Promise.resolve(null),
+  ]);
+
   const changedTask = normalizeTask(changedTaskPage);
   if (!changedTask.parentId || !changedTask.studyId) return;
   const hasSubtasks = (changedTaskPage?.properties?.['Subtask(s)']?.relation || []).length > 0;
   if (hasSubtasks) return;
 
-  const study = await notionClient.getPage(changedTask.studyId);
-  if (study?.properties?.['Import Mode']?.checkbox === true) return;
+  // Use pre-fetched study, or fetch if studyId wasn't in the parsed payload
+  const studyPage = study || await notionClient.getPage(changedTask.studyId);
+  if (studyPage?.properties?.['Import Mode']?.checkbox === true) return;
 
   const [parent, siblingPages] = await Promise.all([
     notionClient.getPage(changedTask.parentId),

@@ -136,6 +136,33 @@ export class CascadeQueue {
     };
   }
 
+  /**
+   * Drain in-flight work for graceful shutdown.
+   * Clears all debounce timers, then waits for any currently-running study to finish.
+   */
+  async drain() {
+    for (const entry of this._debounce.values()) {
+      clearTimeout(entry.timer);
+    }
+    this._debounce.clear();
+
+    const running = [...this._studyLocks.entries()]
+      .filter(([, lock]) => lock.running);
+    if (running.length === 0) return;
+
+    console.log(`Draining ${running.length} in-flight study cascade(s)...`);
+    await Promise.all(
+      running.map(([studyId]) => new Promise((resolve) => {
+        const check = () => {
+          const lock = this._studyLocks.get(studyId);
+          if (!lock || !lock.running) return resolve();
+          setTimeout(check, 100);
+        };
+        check();
+      })),
+    );
+  }
+
   _clearAll() {
     for (const entry of this._debounce.values()) {
       clearTimeout(entry.timer);

@@ -1,5 +1,3 @@
-import { config as dotenvConfig } from 'dotenv';
-
 // Load .env in development
 if (process.env.NODE_ENV !== 'production') {
   const { config } = await import('dotenv');
@@ -42,7 +40,6 @@ export const config = {
     studyTasksDbId: required('STUDY_TASKS_DB_ID'),
     studiesDbId: required('STUDIES_DB_ID'),
     blueprintDbId: process.env.BLUEPRINT_DB_ID || null,
-    blueprintV2DbId: process.env.BLUEPRINT_V2_DB_ID || null,
     activityLogDbId: process.env.ACTIVITY_LOG_DB_ID || null,
   },
 };

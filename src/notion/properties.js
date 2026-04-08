@@ -30,6 +30,5 @@ export function normalizeTask(notionPage) {
     refStart: p['Reference Start Date']?.date?.start || startStr,
     refEnd: p['Reference End Date']?.date?.start || endStr,
     importMode: p['Import Mode']?.checkbox === true,
-    notionPage,
   };
 }
