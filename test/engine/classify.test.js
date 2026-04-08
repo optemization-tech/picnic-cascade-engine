@@ -24,9 +24,11 @@ describe('classify', () => {
   });
 
   // @behavior BEH-MODE-PULL-LEFT
+  // @behavior BEH-MODE-START-LEFT
+  // @behavior BEH-MODE-DRAG-LEFT
   // @behavior BEH-MODE-DRAG-RIGHT
-  it('maps pull-left and drag-right deltas correctly', () => {
-    const pullLeft = classify(
+  it('maps leftward and drag deltas correctly', () => {
+    const endLeft = classify(
       {
         taskId: 't1',
         taskName: 'Task 1',
@@ -40,7 +42,39 @@ describe('classify', () => {
       0,
       -2,
     );
-    expect(pullLeft.cascadeMode).toBe('pull-left');
+    expect(endLeft.cascadeMode).toBe('pull-left');
+
+    const startLeft = classify(
+      {
+        taskId: 't1',
+        taskName: 'Task 1',
+        newStart: '2026-03-31',
+        newEnd: '2026-04-02',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-02',
+        hasParent: false,
+      },
+      [],
+      -1,
+      0,
+    );
+    expect(startLeft.cascadeMode).toBe('start-left');
+
+    const dragLeft = classify(
+      {
+        taskId: 't1',
+        taskName: 'Task 1',
+        newStart: '2026-03-31',
+        newEnd: '2026-04-02',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-03',
+        hasParent: false,
+      },
+      [],
+      -1,
+      -1,
+    );
+    expect(dragLeft.cascadeMode).toBe('drag-left');
 
     const dragRight = classify(
       {
@@ -173,7 +207,7 @@ describe('classify', () => {
     expect(result.staleRefCorrected).toBe(true);
     expect(result.startDelta).not.toBe(0); // start was recalculated against DB ref
     expect(result.endDelta).toBe(0);       // end must stay 0 — user didn't change it
-    expect(result.cascadeMode).toBe('pull-left'); // start-only left, not drag
+    expect(result.cascadeMode).toBe('start-left'); // start-only left, not drag
     expect(result.newEnd).toBe('2026-04-04'); // end date must NOT change
   });
 

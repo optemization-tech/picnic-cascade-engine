@@ -1,7 +1,6 @@
 import {
   parseDate,
   formatDate,
-  nextBusinessDay,
   addBusinessDays,
   countBDInclusive,
   signedBDDelta,
@@ -11,6 +10,29 @@ const FROZEN_STATUSES = new Set(['Done', 'N/A']);
 
 function isFrozen(task) {
   return FROZEN_STATUSES.has(task.status);
+}
+
+function collectConnectedTaskIds(seedIds, taskById) {
+  const stack = [...seedIds];
+  const connected = new Set();
+
+  while (stack.length > 0) {
+    const taskId = stack.pop();
+    if (connected.has(taskId)) continue;
+    connected.add(taskId);
+
+    const task = taskById[taskId];
+    if (!task) continue;
+
+    for (const blockerId of (task.blockedByIds || [])) {
+      if (!connected.has(blockerId) && taskById[blockerId]) stack.push(blockerId);
+    }
+    for (const dependentId of (task.blockingIds || [])) {
+      if (!connected.has(dependentId) && taskById[dependentId]) stack.push(dependentId);
+    }
+  }
+
+  return connected;
 }
 
 /**
@@ -156,78 +178,26 @@ export function runParentSubtask({
       }
 
       if (shiftedIds.size > 0) {
-        const reachable = new Set();
-        const stack = [...shiftedIds];
-        while (stack.length > 0) {
-          const cur = stack.pop();
-          if (reachable.has(cur)) continue;
-          reachable.add(cur);
-          for (const bid of (taskById[cur]?.blockingIds || [])) {
-            if (!reachable.has(bid) && taskById[bid]) stack.push(bid);
-          }
-        }
-
-        const inDeg = {};
-        for (const id of reachable) inDeg[id] = 0;
-        for (const id of reachable) {
-          for (const bid of (taskById[id]?.blockedByIds || [])) {
-            if (reachable.has(bid)) inDeg[id]++;
-          }
-        }
-
-        const queue = [];
-        for (const id of reachable) {
-          if (inDeg[id] === 0) queue.push(id);
-        }
-        const topoOrder = [];
-        while (queue.length > 0) {
-          const cur = queue.shift();
-          topoOrder.push(cur);
-          for (const bid of (taskById[cur]?.blockingIds || [])) {
-            if (reachable.has(bid)) {
-              inDeg[bid]--;
-              if (inDeg[bid] === 0) queue.push(bid);
-            }
-          }
-        }
-
-        const effectiveEnds = {};
-        for (const id of shiftedIds) {
-          if (taskById[id]) effectiveEnds[id] = taskById[id].end;
-        }
-
-        for (const taskId of topoOrder) {
-          if (shiftedIds.has(taskId)) continue;
+        const connected = collectConnectedTaskIds([...shiftedIds], taskById);
+        for (const taskId of connected) {
+          if (shiftedIds.has(taskId) || taskId === sourceTaskId) continue;
           const task = taskById[taskId];
           if (!task || !task.start || !task.end) continue;
           if (isFrozen(task)) continue;
 
-          let maxStart = task.start;
-          for (const blockerId of task.blockedByIds) {
-            const blocker = taskById[blockerId];
-            if (!blocker) continue;
-            if (isFrozen(blocker)) continue;
-            const bEnd = effectiveEnds[blockerId] || blocker.end;
-            if (!bEnd) continue;
-            const cand = nextBusinessDay(bEnd);
-            if (cand > maxStart) maxStart = cand;
-          }
-
-          if (maxStart > task.start) {
-            const newTaskEnd = addBusinessDays(maxStart, task.duration - 1);
-            effectiveEnds[taskId] = newTaskEnd;
-            taskById[taskId].start = maxStart;
-            taskById[taskId].end = newTaskEnd;
-            updates.set(taskId, {
-              taskId,
-              taskName: task.name,
-              newStart: formatDate(maxStart),
-              newEnd: formatDate(newTaskEnd),
-              newReferenceStartDate: formatDate(maxStart),
-              newReferenceEndDate: formatDate(newTaskEnd),
-              _logEntry: `[${ts}] Dep cascade from parent shift`,
-            });
-          }
+          const ns = addBusinessDays(task.start, delta);
+          const ne = addBusinessDays(task.end, delta);
+          taskById[taskId].start = ns;
+          taskById[taskId].end = ne;
+          updates.set(taskId, {
+            taskId,
+            taskName: task.name,
+            newStart: formatDate(ns),
+            newEnd: formatDate(ne),
+            newReferenceStartDate: formatDate(ns),
+            newReferenceEndDate: formatDate(ne),
+            _logEntry: `[${ts}] Connected cascade from parent shift`,
+          });
         }
       }
     }

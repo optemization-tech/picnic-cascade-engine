@@ -63,7 +63,7 @@ describe('runCascade fixed-point and safety diagnostics', () => {
 
   // @behavior BEH-SAFETY-CAP
   // @behavior BEH-RESIDUE-REPORTING
-  it('reports residue when pull-left iterative pass hits safety cap', () => {
+  it('reports residue when start-left iterative pass hits safety cap', () => {
     const tasks = [
       makeTask('a', 'A', '2026-04-01', '2026-04-02', { blockedByIds: ['c'], blockingIds: ['b'] }),
       makeTask('b', 'B', '2026-04-03', '2026-04-04', { blockedByIds: ['a'], blockingIds: ['c'] }),
@@ -74,12 +74,12 @@ describe('runCascade fixed-point and safety diagnostics', () => {
       sourceTaskId: 'a',
       sourceTaskName: 'A',
       newStart: '2026-03-31',
-      newEnd: '2026-04-01',
+      newEnd: '2026-04-02',
       refStart: '2026-04-01',
       refEnd: '2026-04-02',
       startDelta: -1,
-      endDelta: -1,
-      cascadeMode: 'pull-left',
+      endDelta: 0,
+      cascadeMode: 'start-left',
       tasks,
     });
 
@@ -96,24 +96,24 @@ describe('runCascade fixed-point and safety diagnostics', () => {
     ];
     const byId = new Map(tasks.map((t) => [t.id, t]));
 
-    const pullLeft = runCascade({
+    const startLeft = runCascade({
       sourceTaskId: 'c',
       sourceTaskName: 'C',
       newStart: '2026-04-02',
-      newEnd: '2026-04-03',
+      newEnd: '2026-04-06',
       refStart: '2026-04-03',
       refEnd: '2026-04-06',
       startDelta: -1,
-      endDelta: -1,
-      cascadeMode: 'pull-left',
+      endDelta: 0,
+      cascadeMode: 'start-left',
       tasks,
     });
 
-    for (const update of pullLeft.updates) {
+    for (const update of startLeft.updates) {
       const orig = byId.get(update.taskId);
       expect(parseDate(update.newStart) <= orig.start).toBe(true);
       expect(parseDate(update.newEnd) <= orig.end).toBe(true);
     }
-    expect(pullLeft.diagnostics.monotonicSafe).toBe(true);
+    expect(startLeft.diagnostics.monotonicSafe).toBe(true);
   });
 });

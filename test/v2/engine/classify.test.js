@@ -23,9 +23,9 @@ describe('V2 classify', () => {
       expect(result.cascadeMode).toBe('pull-left');
     });
 
-    it('start-only left → pull-left', () => {
+    it('start-only left → start-left', () => {
       const result = classify(baseTask, [], -2, 0);
-      expect(result.cascadeMode).toBe('pull-left');
+      expect(result.cascadeMode).toBe('start-left');
     });
 
     it('start-only right → pull-right', () => {
@@ -38,9 +38,9 @@ describe('V2 classify', () => {
       expect(result.cascadeMode).toBe('drag-right');
     });
 
-    it('both negative → pull-left', () => {
+    it('both negative → drag-left', () => {
       const result = classify(baseTask, [], -2, -2);
-      expect(result.cascadeMode).toBe('pull-left');
+      expect(result.cascadeMode).toBe('drag-left');
     });
 
     it('zero/zero → null mode', () => {

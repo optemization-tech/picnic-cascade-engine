@@ -9,10 +9,10 @@ import {
 function computeCascadeMode(startDelta, endDelta) {
   if (startDelta === 0 && endDelta > 0) return 'push-right';
   if (startDelta === 0 && endDelta < 0) return 'pull-left';
-  if (startDelta < 0 && endDelta === 0) return 'pull-left';
+  if (startDelta < 0 && endDelta === 0) return 'start-left';
   if (startDelta > 0 && endDelta === 0) return 'pull-right';
   if (startDelta > 0 && endDelta > 0) return 'drag-right';
-  if (startDelta < 0 && endDelta < 0) return 'pull-left';
+  if (startDelta < 0 && endDelta < 0) return 'drag-left';
   return null;
 }
 

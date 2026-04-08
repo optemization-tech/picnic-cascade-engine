@@ -59,6 +59,36 @@ describe('runParentSubtask', () => {
     expect(result.rolledUpEnd).toBe('2026-04-03');
   });
 
+  it('case-a left shift drags connected dependencies with the subtree', () => {
+    const tasks = [
+      task('p', 'Parent', '2026-03-30', '2026-04-02'),
+      task('s1', 'Sub 1', '2026-03-30', '2026-03-31', { parentId: 'p' }),
+      task('s2', 'Sub 2', '2026-04-01', '2026-04-02', { parentId: 'p', blockingIds: ['d'] }),
+      task('d', 'Downstream', '2026-04-03', '2026-04-06', { blockedByIds: ['s2'] }),
+    ];
+
+    const result = runParentSubtask({
+      sourceTaskId: 'p',
+      sourceTaskName: 'Parent',
+      newStart: '2026-03-27',
+      newEnd: '2026-04-01',
+      parentTaskId: null,
+      parentMode: 'case-a',
+      tasks,
+    });
+
+    const s2 = result.updates.find((u) => u.taskId === 's2');
+    const d = result.updates.find((u) => u.taskId === 'd');
+    const p = result.updates.find((u) => u.taskId === 'p');
+
+    expect(s2?.newStart).toBe('2026-03-31');
+    expect(s2?.newEnd).toBe('2026-04-01');
+    expect(d?.newStart).toBe('2026-04-02');
+    expect(d?.newEnd).toBe('2026-04-03');
+    expect(p?.newStart).toBe('2026-03-27');
+    expect(p?.newEnd).toBe('2026-04-01');
+  });
+
   it('case-b rolls up parent after subtask edit', () => {
     const tasks = [
       task('p', 'Parent', '2026-03-30', '2026-04-02'),
