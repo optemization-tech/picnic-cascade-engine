@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { runCascade } from '../../src/engine/cascade.js';
-import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream, fanOutFromUpstream, preExistingViolation, transitiveViolations } from '../fixtures/cascade-tasks.js';
-import { twoChainSharedTask, crossChainClampedByOtherBlocker } from '../fixtures/cross-chain-tasks.js';
+import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream, fanOutFromUpstream, preExistingViolation, transitiveViolations, multiBlockerStationary, multiBlockerAllMoved, multiBlockerTightStationary } from '../fixtures/cascade-tasks.js';
+import { twoChainSharedTask, crossChainClampedByOtherBlocker, parentWithAccidentalDep } from '../fixtures/cross-chain-tasks.js';
 
 describe('runCascade', () => {
   // @behavior BEH-MODE-PUSH-RIGHT
@@ -861,6 +861,122 @@ describe('runCascade', () => {
       expect(typeof result.diagnostics.constraintFixCount).toBe('number');
       expect(Array.isArray(result.diagnostics.constraintFixTaskIds)).toBe(true);
       expect(result.diagnostics.constraintFixCount).toBeGreaterThan(0);
+    });
+  });
+
+  // @behavior BEH-BL-H4g
+  describe('BL-H4g: stationary blocker gap guard', () => {
+    it('multi-blocker: stationary predecessor with gap prevents downstream shift', () => {
+      const tasks = multiBlockerStationary();
+      // A's end shrinks by 2 BD: Apr 02 → Mar 31
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-30',
+        newEnd: '2026-03-31',
+        refStart: '2026-03-30',
+        refEnd: '2026-04-02',
+        startDelta: 0,
+        endDelta: -2,
+        cascadeMode: 'pull-left',
+        tasks,
+      });
+
+      // B should shift left (only blocker is A, which is a seed)
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-04-01');
+      expect(bUpdate.newEnd).toBe('2026-04-02');
+
+      // D should NOT move — C is stationary with a gap
+      const dUpdate = result.updates.find(u => u.taskId === 'd');
+      expect(dUpdate).toBeUndefined();
+    });
+
+    it('multi-blocker: all blockers moved allows downstream shift', () => {
+      const tasks = multiBlockerAllMoved();
+      // A's end shrinks by 2 BD: Apr 02 → Mar 31
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-30',
+        newEnd: '2026-03-31',
+        refStart: '2026-03-30',
+        refEnd: '2026-04-02',
+        startDelta: 0,
+        endDelta: -2,
+        cascadeMode: 'pull-left',
+        tasks,
+      });
+
+      // Both B and C should shift (both downstream of A)
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+
+      // D should also shift (all blockers moved)
+      const dUpdate = result.updates.find(u => u.taskId === 'd');
+      expect(dUpdate).toBeDefined();
+    });
+
+    it('multi-blocker: tight stationary blocker allows cross-chain resolution (no gap)', () => {
+      const tasks = multiBlockerTightStationary();
+      // A's end shrinks by 2 BD: Apr 02 → Mar 31
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-30',
+        newEnd: '2026-03-31',
+        refStart: '2026-03-30',
+        refEnd: '2026-04-02',
+        startDelta: 0,
+        endDelta: -2,
+        cascadeMode: 'pull-left',
+        tasks,
+      });
+
+      // B should shift left
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+
+      // D is tight with C (no gap) — gap guard does NOT skip.
+      // Frustration resolver shifts C left to make room, then D moves.
+      // This is correct cross-chain propagation behavior.
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+      const dUpdate = result.updates.find(u => u.taskId === 'd');
+      expect(dUpdate).toBeDefined();
+      expect(dUpdate.newStart).toBe('2026-04-07');
+      expect(dUpdate.newEnd).toBe('2026-04-08');
+    });
+  });
+
+  // @behavior BEH-BL-H5g
+  describe('BL-H5g: ignore parent-level dependency edges', () => {
+    it('parent-level dependency edges are ignored', () => {
+      const tasks = parentWithAccidentalDep();
+      // Push-right on X: end moves right by 2 BD
+      const result = runCascade({
+        sourceTaskId: 'x',
+        sourceTaskName: 'Task X',
+        newStart: '2026-03-30',
+        newEnd: '2026-04-02',
+        refStart: '2026-03-30',
+        refEnd: '2026-03-31',
+        startDelta: 0,
+        endDelta: 2,
+        cascadeMode: 'push-right',
+        tasks,
+      });
+
+      // P's dep edges should have been stripped — X's push should NOT cascade to P, S1, or S2
+      const pUpdate = result.updates.find(u => u.taskId === 'p');
+      expect(pUpdate).toBeUndefined();
+      const s1Update = result.updates.find(u => u.taskId === 's1');
+      expect(s1Update).toBeUndefined();
+      const s2Update = result.updates.find(u => u.taskId === 's2');
+      expect(s2Update).toBeUndefined();
     });
   });
 });

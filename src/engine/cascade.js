@@ -274,6 +274,23 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
     if (!t || !t.start || !t.end) continue;
     if (isFrozen(t)) continue;
 
+    // BL-H4g: Skip if held by a stationary blocker with a gap.
+    // Stationary = not moved by cascade (not in updatesMap or seed set).
+    // Gap = task starts after nextBD(blocker.end).
+    // Preserves existing gaps; tight constraints still handled by clamp + frustration resolver.
+    let heldByStationaryGap = false;
+    for (const blockerId of (t.blockedByIds || [])) {
+      const blocker = taskById[blockerId];
+      if (!blocker || !blocker.end) continue;
+      if (isFrozen(blocker)) continue;
+      if (updatesMap[blockerId] || seedExclusions.has(blockerId)) continue;
+      if (t.start > nextBusinessDay(blocker.end)) {
+        heldByStationaryGap = true;
+        break;
+      }
+    }
+    if (heldByStationaryGap) continue;
+
     const shiftedStart = addBusinessDays(t.start, deltaBD);
 
     // Compute earliest allowed start from blocker constraints
@@ -408,6 +425,20 @@ function resolveCrossChainFrustrations(
       if (!orig) continue;
       const task = taskById[tid];
       if (!task || isFrozen(task)) continue;
+
+      // BL-H4g: Skip if held by a stationary blocker with a gap.
+      let heldByStationaryGap = false;
+      for (const bid of (task.blockedByIds || [])) {
+        const b = taskById[bid];
+        if (!b || !b.end) continue;
+        if (isFrozen(b)) continue;
+        if (updatesMap[bid] || seedExclusions.has(bid)) continue;
+        if (orig.start > nextBusinessDay(b.end)) {
+          heldByStationaryGap = true;
+          break;
+        }
+      }
+      if (heldByStationaryGap) continue;
 
       const desiredStart = addBusinessDays(orig.start, deltaBD);
       if (task.start <= desiredStart) continue; // not frustrated
@@ -614,6 +645,28 @@ export function runCascade({
   const taskById = {};
   for (const task of tasks) {
     taskById[task.id] = { ...task };
+  }
+
+  // BL-H5g: Ignore parent-level dependency edges.
+  // Parent tasks (those with subtasks) should not participate
+  // in dependency-driven cascading.
+  const parentIds = new Set();
+  for (const t of tasks) {
+    if (t.parentId && taskById[t.parentId]) {
+      parentIds.add(t.parentId);
+    }
+  }
+  if (parentIds.size > 0) {
+    for (const id of Object.keys(taskById)) {
+      const t = taskById[id];
+      if (parentIds.has(id)) {
+        t.blockedByIds = [];
+        t.blockingIds = [];
+      } else {
+        t.blockedByIds = (t.blockedByIds || []).filter(bid => !parentIds.has(bid));
+        t.blockingIds = (t.blockingIds || []).filter(bid => !parentIds.has(bid));
+      }
+    }
   }
 
   const sourceTask = taskById[sourceTaskId];
