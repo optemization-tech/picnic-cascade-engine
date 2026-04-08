@@ -9,6 +9,8 @@ import { handleUndoCascade } from './routes/undo-cascade.js';
 import { handleDateCascade as handleDateCascadeV2 } from './v2/routes/date-cascade.js';
 import { handleInception as handleInceptionV2 } from './v2/routes/inception.js';
 import { handleAddTaskSet as handleAddTaskSetV2 } from './v2/routes/add-task-set.js';
+import { config } from './config.js';
+import { createWebhookAuthMiddleware } from './middleware/webhook-auth.js';
 
 export function createServer() {
   const app = express();
@@ -30,6 +32,8 @@ export function createServer() {
   app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
+
+  app.use('/webhook', createWebhookAuthMiddleware({ webhookSecret: config.webhookSecret }));
 
   // Cascade webhook endpoints (use cascade token pool)
   app.post('/webhook/date-cascade', handleDateCascade);

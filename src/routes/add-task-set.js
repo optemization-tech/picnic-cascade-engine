@@ -436,7 +436,10 @@ async function processAddTaskSet(req) {
       })(),
       fetch(selfUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(config.webhookSecret ? { 'X-Webhook-Secret': config.webhookSecret } : {}),
+        },
         body: JSON.stringify({
           idMapping: newIdMapping,
           studyPageId,

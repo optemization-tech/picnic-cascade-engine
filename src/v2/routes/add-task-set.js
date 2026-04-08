@@ -118,7 +118,6 @@ async function processAddTaskSet(req) {
   tracer.set('engine_version', 'v2');
 
   let studyPage;
-
   try {
     tracer.startPhase('enableImportMode');
     await notionClient.request('PATCH', `/pages/${studyPageId}`, {
@@ -347,7 +346,10 @@ async function processAddTaskSet(req) {
     const selfUrl = `http://localhost:${config.port}/webhook/copy-blocks`;
     fetch(selfUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.webhookSecret ? { 'X-Webhook-Secret': config.webhookSecret } : {}),
+      },
       body: JSON.stringify({
         idMapping: newIdMapping,
         studyPageId,

@@ -1,4 +1,5 @@
 import { config as dotenvConfig } from 'dotenv';
+import { REPO_WEBHOOK_SECRET } from './webhook-secret.js';
 
 // Load .env in development
 if (process.env.NODE_ENV !== 'production') {
@@ -32,6 +33,7 @@ export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   cascadeDebounceMs: parseInt(process.env.CASCADE_DEBOUNCE_MS || '5000', 10),
+  webhookSecret: REPO_WEBHOOK_SECRET,
   notion: {
     // Cascade pool — date-cascade, status-rollup (user-facing, latency-sensitive)
     tokens: collectTokensRequired('NOTION_TOKEN'),

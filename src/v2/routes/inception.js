@@ -40,7 +40,6 @@ async function processInception(body) {
   tracer.set('engine_version', 'v2');
 
   let studyPage;
-
   try {
     // Enable Import Mode
     tracer.startPhase('enableImportMode');
@@ -137,7 +136,10 @@ async function processInception(body) {
     const selfUrl = `http://localhost:${config.port}/webhook/copy-blocks`;
     fetch(selfUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.webhookSecret ? { 'X-Webhook-Secret': config.webhookSecret } : {}),
+      },
       body: JSON.stringify({
         idMapping: createResult.idMapping,
         studyPageId,
