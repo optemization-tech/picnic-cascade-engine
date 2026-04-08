@@ -211,6 +211,11 @@ describe('V2 date-cascade route', () => {
     expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(1);
     const patchPayload = mocks.mockClient.patchBatch.mock.calls[0][0];
     expect(patchPayload.every((u) => u.properties['Last Modified By System'] === undefined)).toBe(true);
+    // Patch payload sorted by ascending start date (top-of-timeline first)
+    const starts = patchPayload.map((u) => u.properties['Dates'].date.start);
+    for (let i = 1; i < starts.length; i++) {
+      expect(starts[i] >= starts[i - 1]).toBe(true);
+    }
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         workflow: 'V2 Date Cascade',

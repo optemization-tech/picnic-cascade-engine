@@ -293,6 +293,8 @@ async function processDateCascade(payload) {
     });
 
     const updates = Array.from(updatesByTaskId.values());
+    // Sort by ascending start date so top-of-timeline tasks patch first
+    updates.sort((a, b) => (a.newStart || '').localeCompare(b.newStart || ''));
     tracer.endPhase('merge');
 
     if (updates.length === 0) {
