@@ -311,7 +311,7 @@ async function processDateCascade(payload) {
     }));
 
     tracer.startPhase('patchUpdates');
-    const patched = await notionClient.patchBatch(patchPayload, { tracer });
+    const patched = await notionClient.patchPages(patchPayload, { tracer });
     tracer.endPhase('patchUpdates');
 
     // Phase 9: Report + Log

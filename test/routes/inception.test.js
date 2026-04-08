@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
     getPage: vi.fn(),
     patchPage: vi.fn(),
     reportStatus: vi.fn(),
-    patchBatch: vi.fn(),
+    patchPages: vi.fn(),
     queryDatabase: vi.fn(),
     request: vi.fn(),
   },
@@ -13,10 +13,11 @@ const mocks = vi.hoisted(() => ({
   buildTaskTree: vi.fn(),
   createStudyTasks: vi.fn(),
   wireRemainingRelations: vi.fn(),
+  copyBlocks: vi.fn(),
+  prefetchTemplateBlocks: vi.fn(),
   activityLogService: {
     logTerminalEvent: vi.fn(),
   },
-  mockFetch: vi.fn(),
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -54,6 +55,11 @@ vi.mock('../../src/provisioning/wire-relations.js', () => ({
   wireRemainingRelations: mocks.wireRemainingRelations,
 }));
 
+vi.mock('../../src/provisioning/copy-blocks.js', () => ({
+  copyBlocks: mocks.copyBlocks,
+  prefetchTemplateBlocks: mocks.prefetchTemplateBlocks,
+}));
+
 import { handleInception } from '../../src/routes/inception.js';
 
 function makeReqRes(body = {}) {
@@ -75,23 +81,21 @@ async function flush() {
 }
 
 describe('inception route', () => {
-  let originalFetch;
-
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.request.mockResolvedValue({});
-
-    // Mock global fetch for copy-blocks fire-and-forget
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = mocks.mockFetch;
-    mocks.mockFetch.mockResolvedValue({ ok: true });
+    mocks.prefetchTemplateBlocks.mockResolvedValue({});
+    mocks.copyBlocks.mockResolvedValue({
+      blocksWrittenCount: 0,
+      pagesProcessed: 0,
+      pagesSkipped: 0,
+    });
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     vi.useRealTimers();
   });
 
@@ -313,6 +317,14 @@ describe('inception route', () => {
       parentsPatchedCount: 1,
       depsPatchedCount: 0,
     });
+    mocks.prefetchTemplateBlocks.mockResolvedValue({
+      'bp-1': [{ type: 'paragraph', paragraph: { rich_text: [] } }],
+    });
+    mocks.copyBlocks.mockResolvedValue({
+      blocksWrittenCount: 1,
+      pagesProcessed: 1,
+      pagesSkipped: 1,
+    });
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
     await handleInception(req, res);
@@ -347,19 +359,24 @@ describe('inception route', () => {
       }),
     );
 
-    // Success report sent
     expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
       'study-1',
       'success',
       'Inception complete: 2 tasks created, 1 parents wired, 0 deps wired',
       expect.any(Object),
     );
+    expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
+      'study-1',
+      'success',
+      'Content blocks copied: 1 pages, 1 blocks',
+      expect.any(Object),
+    );
   });
 
   // ────────────────────────────────────────────────────────────────────
-  // Copy-blocks self-POST is fired after success
+  // Copy-blocks is executed in-process after success
   // ────────────────────────────────────────────────────────────────────
-  it('fires copy-blocks self-POST after successful inception', async () => {
+  it('prefetches and copies blocks after successful inception', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
       properties: {
         'Contract Sign Date': { date: { start: '2026-03-01' } },
@@ -373,24 +390,35 @@ describe('inception route', () => {
       idMapping: { 'bp-1': 'new-1' }, totalCreated: 1, depTracking: [], parentTracking: [],
     });
     mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+    mocks.prefetchTemplateBlocks.mockResolvedValue({
+      'bp-1': [{ type: 'paragraph', paragraph: { rich_text: [] } }],
+    });
+    mocks.copyBlocks.mockResolvedValue({
+      blocksWrittenCount: 1,
+      pagesProcessed: 1,
+      pagesSkipped: 0,
+    });
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
     await handleInception(req, res);
     await flush();
 
-    expect(mocks.mockFetch).toHaveBeenCalledWith(
-      'http://localhost:3000/webhook/copy-blocks',
+    expect(mocks.prefetchTemplateBlocks).toHaveBeenCalledWith(
+      expect.anything(),
+      ['bp-1'],
+      expect.objectContaining({ tracer: expect.any(Object), workersPerToken: 3 }),
+    );
+    expect(mocks.copyBlocks).toHaveBeenCalledWith(
+      expect.anything(),
+      { 'bp-1': 'new-1' },
       expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: expect.stringContaining('"studyPageId":"study-1"'),
+        studyPageId: 'study-1',
+        studyName: 'Acme Study',
+        preparedBlocksByTemplate: { 'bp-1': [{ type: 'paragraph', paragraph: { rich_text: [] } }] },
+        concurrency: 10,
+        workersPerToken: 10,
       }),
     );
-
-    // Verify study name is passed
-    const fetchBody = JSON.parse(mocks.mockFetch.mock.calls[0][1].body);
-    expect(fetchBody.studyName).toBe('Acme Study');
-    expect(fetchBody.idMapping).toEqual({ 'bp-1': 'new-1' });
   });
 
   // ────────────────────────────────────────────────────────────────────
@@ -405,6 +433,11 @@ describe('inception route', () => {
       idMapping: {}, totalCreated: 0, depTracking: [], parentTracking: [],
     });
     mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+    mocks.copyBlocks.mockResolvedValue({
+      blocksWrittenCount: 0,
+      pagesProcessed: 0,
+      pagesSkipped: 0,
+    });
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
     await handleInception(req, res);
@@ -472,6 +505,11 @@ describe('inception route', () => {
       idMapping: {}, totalCreated: 0, depTracking: [], parentTracking: [],
     });
     mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+    mocks.copyBlocks.mockResolvedValue({
+      blocksWrittenCount: 0,
+      pagesProcessed: 0,
+      pagesSkipped: 0,
+    });
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
     await handleInception(req, res);

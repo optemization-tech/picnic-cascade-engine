@@ -37,59 +37,59 @@ async function processDeletion(body) {
     tracer.set('archived_count', result.archivedCount);
     console.log(tracer.toConsoleLog());
 
-    await activityLogService.logTerminalEvent({
-      workflow: 'Deletion',
-      status: 'success',
-      triggerType: 'Manual',
-      executionId: tracer.cascadeId,
-      timestamp: new Date().toISOString(),
-      cascadeMode: 'N/A',
-      studyId,
-      summary: `Deletion complete: archived ${result.archivedCount} task(s)`,
-      details: {
-        archivedCount: result.archivedCount,
-        ...(tracer.toActivityLogDetails()),
-      },
-    });
-
-    await notionClient.reportStatus(
-      studyId,
-      'success',
-      `Deletion complete: archived ${result.archivedCount} task(s)`,
-      { tracer },
-    );
-  } catch (error) {
-    console.error('[deletion] processing failed:', error);
-    console.log(tracer.toConsoleLog());
-
-    try {
-      await notionClient.reportStatus(
-        studyId,
-        'error',
-        `Deletion failed: ${String(error.message || error).slice(0, 200)}`,
-        { tracer },
-      );
-    } catch { /* don't mask original error */ }
-
-    try {
-      await activityLogService.logTerminalEvent({
+    await Promise.all([
+      activityLogService.logTerminalEvent({
         workflow: 'Deletion',
-        status: 'failed',
+        status: 'success',
         triggerType: 'Manual',
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
         studyId,
-        summary: `Deletion failed: ${String(error.message || error).slice(0, 180)}`,
+        summary: `Deletion complete: archived ${result.archivedCount} task(s)`,
         details: {
-          error: {
-            errorCode: error.code || null,
-            errorMessage: String(error.message || error).slice(0, 400),
-            phase: 'deletion',
-          },
+          archivedCount: result.archivedCount,
           ...(tracer.toActivityLogDetails()),
         },
-      });
+      }),
+      notionClient.reportStatus(
+        studyId,
+        'success',
+        `Deletion complete: archived ${result.archivedCount} task(s)`,
+        { tracer },
+      ),
+    ]);
+  } catch (error) {
+    console.error('[deletion] processing failed:', error);
+    console.log(tracer.toConsoleLog());
+
+    try {
+      await Promise.all([
+        notionClient.reportStatus(
+          studyId,
+          'error',
+          `Deletion failed: ${String(error.message || error).slice(0, 200)}`,
+          { tracer },
+        ),
+        activityLogService.logTerminalEvent({
+          workflow: 'Deletion',
+          status: 'failed',
+          triggerType: 'Manual',
+          executionId: tracer.cascadeId,
+          timestamp: new Date().toISOString(),
+          cascadeMode: 'N/A',
+          studyId,
+          summary: `Deletion failed: ${String(error.message || error).slice(0, 180)}`,
+          details: {
+            error: {
+              errorCode: error.code || null,
+              errorMessage: String(error.message || error).slice(0, 400),
+              phase: 'deletion',
+            },
+            ...(tracer.toActivityLogDetails()),
+          },
+        }),
+      ]);
     } catch { /* don't mask original error */ }
   }
 }

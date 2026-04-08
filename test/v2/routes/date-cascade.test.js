@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   mockClient: {
     patchPage: vi.fn(),
     reportStatus: vi.fn(),
-    patchBatch: vi.fn().mockResolvedValue({ updatedCount: 0 }),
+    patchPages: vi.fn().mockResolvedValue({ updatedCount: 0 }),
     request: vi.fn(),
   },
   parseWebhookPayload: vi.fn(),
@@ -89,7 +89,7 @@ describe('V2 date-cascade route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    mocks.mockClient.patchBatch.mockResolvedValue({ updatedCount: 3 });
+    mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 3 });
     mocks.mockClient.reportStatus.mockResolvedValue({});
   });
 
@@ -208,8 +208,8 @@ describe('V2 date-cascade route', () => {
         movedParentIds: expect.arrayContaining(['parent-1', 'parent-2']),
       }),
     );
-    expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(1);
-    const patchPayload = mocks.mockClient.patchBatch.mock.calls[0][0];
+    expect(mocks.mockClient.patchPages).toHaveBeenCalledTimes(1);
+    const patchPayload = mocks.mockClient.patchPages.mock.calls[0][0];
     expect(patchPayload.every((u) => u.properties['Last Modified By System'] === undefined)).toBe(true);
     // Patch payload sorted by ascending start date (top-of-timeline first)
     const starts = patchPayload.map((u) => u.properties['Dates'].date.start);

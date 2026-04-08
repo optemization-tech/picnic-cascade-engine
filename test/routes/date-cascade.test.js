@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   mockClient: {
     patchPage: vi.fn(),
     reportStatus: vi.fn(),
-    patchBatch: vi.fn(),
+    patchPages: vi.fn(),
     request: vi.fn(),
   },
   parseWebhookPayload: vi.fn(),
@@ -96,7 +96,7 @@ describe('date-cascade route safety', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
     expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
-    expect(mocks.mockClient.patchBatch).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
@@ -121,7 +121,7 @@ describe('date-cascade route safety', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
     expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
-    expect(mocks.mockClient.patchBatch).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
@@ -146,7 +146,7 @@ describe('date-cascade route safety', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
     expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
-    expect(mocks.mockClient.patchBatch).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
       status: 'no_action',
       details: expect.objectContaining({ noActionReason: 'frozen_status' }),
@@ -240,7 +240,7 @@ describe('date-cascade route safety', () => {
       merged: false,
     });
     mocks.mockClient.reportStatus.mockResolvedValue({});
-    mocks.mockClient.patchBatch.mockResolvedValueOnce({
+    mocks.mockClient.patchPages.mockResolvedValueOnce({
       updatedCount: 3,
       taskIds: ['a', 'parent-rollup', 'source'],
     });
@@ -251,13 +251,13 @@ describe('date-cascade route safety', () => {
     await Promise.resolve();
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mocks.mockClient.patchBatch).toHaveBeenCalledTimes(1);
-    expect(mocks.mockClient.patchBatch).toHaveBeenCalledWith([
+    expect(mocks.mockClient.patchPages).toHaveBeenCalledTimes(1);
+    expect(mocks.mockClient.patchPages).toHaveBeenCalledWith([
       expect.objectContaining({ taskId: 'parent-rollup' }),
       expect.objectContaining({ taskId: 'source' }),
       expect.objectContaining({ taskId: 'a' }),
     ], expect.any(Object));
-    const patchPayload = mocks.mockClient.patchBatch.mock.calls[0][0];
+    const patchPayload = mocks.mockClient.patchPages.mock.calls[0][0];
     expect(patchPayload.every((u) => u.properties['Last Modified By System'] === undefined)).toBe(true);
     // Patch payload sorted by ascending start date (top-of-timeline first)
     const starts = patchPayload.map((u) => u.properties['Dates'].date.start);

@@ -59,10 +59,10 @@ async function processUndoCascade(payload) {
     restorePayload.sort((a, b) =>
       (a.properties['Dates'].date.start || '').localeCompare(b.properties['Dates'].date.start || ''),
     );
-    await notionClient.patchBatch(restorePayload);
+    await notionClient.patchPages(restorePayload);
 
     // Only consume the undo entry after successful restore.
-    // If patchBatch fails mid-batch, the entry stays available for retry.
+    // If patchPages fails mid-batch, the entry stays available for retry.
     undoStore.pop(studyId);
 
     await notionClient.reportStatus(

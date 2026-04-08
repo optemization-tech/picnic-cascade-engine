@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { copyBlocks, stripNullValues, cleanBlock } from '../../src/provisioning/copy-blocks.js';
+import { copyBlocks, prefetchTemplateBlocks, stripNullValues, cleanBlock } from '../../src/provisioning/copy-blocks.js';
 
 // --- Helpers ---
 
@@ -10,7 +10,7 @@ function makeBlock(type, data = {}, overrides = {}) {
 function mockClient({ blocksByPage = {}, appendErrors = {} } = {}) {
   const calls = { request: [], reportStatus: [] };
 
-  return {
+  const client = {
     calls,
     request: vi.fn(async (method, path, body) => {
       calls.request.push({ method, path, body });
@@ -37,6 +37,10 @@ function mockClient({ blocksByPage = {}, appendErrors = {} } = {}) {
       calls.reportStatus.push({ studyId, level, message });
     }),
   };
+  client.runParallel = vi.fn(async (items, processItem) => Promise.all(
+    items.map((item, index) => processItem(item, { key: `token_${index + 1}`, index }, index)),
+  ));
+  return client;
 }
 
 // --- stripNullValues ---
@@ -498,6 +502,9 @@ describe('copyBlocks', () => {
       }),
       reportStatus: vi.fn(),
     };
+    client.runParallel = vi.fn(async (items, processItem) => Promise.all(
+      items.map((item, index) => processItem(item, { key: `token_${index + 1}`, index }, index)),
+    ));
 
     const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
       studyPageId: 'study-1',
@@ -571,5 +578,45 @@ describe('copyBlocks', () => {
 
     expect(result.pagesProcessed).toBe(10);
     expect(result.blocksWrittenCount).toBe(10);
+  });
+
+  it('reuses prefetched block payloads instead of re-reading template pages', async () => {
+    const client = mockClient();
+
+    const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
+      studyPageId: 'study-1',
+      studyName: 'Test',
+      preparedBlocksByTemplate: {
+        'tpl-1': [cleanBlock(makeBlock('paragraph', { rich_text: [{ text: { content: 'Prefetched' } }] }))],
+      },
+    });
+
+    expect(result.blocksWrittenCount).toBe(1);
+    expect(result.pagesProcessed).toBe(1);
+    expect(client.calls.request.filter((c) => c.method === 'GET')).toHaveLength(0);
+  });
+});
+
+describe('prefetchTemplateBlocks', () => {
+  it('reads and prepares blocks ahead of the append phase', async () => {
+    const client = mockClient({
+      blocksByPage: {
+        'tpl-1': [makeBlock('paragraph', { rich_text: [{ text: { content: 'Hello' } }] })],
+      },
+    });
+
+    const prepared = await prefetchTemplateBlocks(client, ['tpl-1'], {
+      concurrency: 3,
+    });
+
+    expect(prepared).toEqual({
+      'tpl-1': [
+        {
+          type: 'paragraph',
+          paragraph: { rich_text: [{ text: { content: 'Hello' } }] },
+        },
+      ],
+    });
+    expect(client.calls.request.filter((c) => c.method === 'GET')).toHaveLength(1);
   });
 });

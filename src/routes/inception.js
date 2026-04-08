@@ -5,6 +5,7 @@ import { CascadeTracer } from '../services/cascade-tracer.js';
 import { fetchBlueprint, buildTaskTree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
+import { copyBlocks, prefetchTemplateBlocks } from '../provisioning/copy-blocks.js';
 
 const tokens = config.notion.provisionTokens.length > 0
   ? config.notion.provisionTokens
@@ -36,36 +37,50 @@ async function processInception(body) {
     }, { tracer });
     tracer.endPhase('enableImportMode');
 
-    // Report kicked off
-    await notionClient.reportStatus(studyPageId, 'info', 'Inception started...', { tracer });
+    const fetchStudyPromise = (async () => {
+      tracer.startPhase('fetchStudy');
+      try {
+        return await notionClient.getPage(studyPageId);
+      } finally {
+        tracer.endPhase('fetchStudy');
+      }
+    })();
 
-    // Fetch study details to get Contract Sign Date
-    tracer.startPhase('fetchStudy');
-    studyPage = await notionClient.getPage(studyPageId);
-    tracer.endPhase('fetchStudy');
+    const existingTasksPromise = (async () => {
+      tracer.startPhase('doubleInceptionCheck');
+      try {
+        return await notionClient.queryDatabase(
+          config.notion.studyTasksDbId,
+          { property: 'Study', relation: { contains: studyPageId } },
+          1,
+          { tracer },
+        );
+      } finally {
+        tracer.endPhase('doubleInceptionCheck');
+      }
+    })();
+
+    const [, fetchedStudyPage, existingTasks] = await Promise.all([
+      notionClient.reportStatus(studyPageId, 'info', 'Inception started...', { tracer }),
+      fetchStudyPromise,
+      existingTasksPromise,
+    ]);
+    studyPage = fetchedStudyPage;
 
     const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start
       || new Date().toISOString().split('T')[0];
 
-    // Guard against double-inception: check for existing tasks
-    tracer.startPhase('doubleInceptionCheck');
-    const existingTasks = await notionClient.queryDatabase(
-      config.notion.studyTasksDbId,
-      { property: 'Study', relation: { contains: studyPageId } },
-      1,
-      { tracer },
-    );
-    tracer.endPhase('doubleInceptionCheck');
-
     if (existingTasks.length > 0) {
-      await notionClient.reportStatus(studyPageId, 'error', 'Study already has tasks — aborting inception', { tracer });
-      await activityLogService.logTerminalEvent({
-        workflow: 'Inception',
-        status: 'failed',
-        triggerType: 'Automation',
-        studyId: studyPageId,
-        summary: 'Study already has tasks — double-inception blocked',
-      });
+      await Promise.all([
+        notionClient.reportStatus(studyPageId, 'error', 'Study already has tasks — aborting inception', { tracer }),
+        activityLogService.logTerminalEvent({
+          workflow: 'Inception',
+          status: 'failed',
+          triggerType: 'Automation',
+          studyId: studyPageId,
+          summary: 'Study already has tasks — double-inception blocked',
+        }),
+      ]);
       return;
     }
 
@@ -75,90 +90,108 @@ async function processInception(body) {
     tracer.endPhase('fetchBlueprint');
 
     if (!blueprintTasks || blueprintTasks.length === 0) {
-      await notionClient.reportStatus(studyPageId, 'error', 'No blueprint tasks found', { tracer });
-      await activityLogService.logTerminalEvent({
-        workflow: 'Inception',
-        status: 'failed',
-        triggerType: 'Automation',
-        studyId: studyPageId,
-        summary: 'No blueprint tasks found',
-      });
+      await Promise.all([
+        notionClient.reportStatus(studyPageId, 'error', 'No blueprint tasks found', { tracer }),
+        activityLogService.logTerminalEvent({
+          workflow: 'Inception',
+          status: 'failed',
+          triggerType: 'Automation',
+          studyId: studyPageId,
+          summary: 'No blueprint tasks found',
+        }),
+      ]);
       return;
     }
 
-    // Build task tree (BFS + topo sort)
+    const blockPrefetchPromise = prefetchTemplateBlocks(
+      notionClient,
+      blueprintTasks.map((task) => task.id),
+      { tracer, workersPerToken: 3 },
+    );
+
+    // Build task tree (used for task parsing/subtree structure only)
     const levels = buildTaskTree(blueprintTasks);
 
-    // Create tasks level by level
-    const createResult = await createStudyTasks(notionClient, levels, {
-      studyPageId,
-      contractSignDate,
-      blueprintDbId: config.notion.blueprintDbId,
-      studyTasksDbId: config.notion.studyTasksDbId,
-      tracer,
-    });
+    const [createResult, preparedBlocksByTemplate] = await Promise.all([
+      createStudyTasks(notionClient, levels, {
+        studyPageId,
+        contractSignDate,
+        blueprintDbId: config.notion.blueprintDbId,
+        studyTasksDbId: config.notion.studyTasksDbId,
+        tracer,
+      }),
+      blockPrefetchPromise,
+    ]);
 
-    // Report progress
-    await notionClient.reportStatus(
-      studyPageId,
-      'info',
-      `Tasks created: ${createResult.totalCreated}. Wiring relations...`,
-      { tracer },
-    );
-
-    // Wire remaining relations (cross-level parents + deps that couldn't resolve inline)
-    const wireResult = await wireRemainingRelations(notionClient, {
-      idMapping: createResult.idMapping,
-      depTracking: createResult.depTracking,
-      parentTracking: createResult.parentTracking,
-      tracer,
-    });
-
-    // Disable Import Mode before copy-blocks
-    tracer.startPhase('disableImportMode');
-    await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-      properties: { 'Import Mode': { checkbox: false } },
-    }, { tracer });
-    tracer.endPhase('disableImportMode');
-
-    // Fire copy-blocks (self-POST, fire-and-forget)
-    const studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
-    const selfUrl = `http://localhost:${config.port}/webhook/copy-blocks`;
-    fetch(selfUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const [wireResult] = await Promise.all([
+      wireRemainingRelations(notionClient, {
         idMapping: createResult.idMapping,
+        depTracking: createResult.depTracking,
+        parentTracking: createResult.parentTracking,
+        tracer,
+      }),
+      notionClient.reportStatus(
+        studyPageId,
+        'info',
+        `Tasks created: ${createResult.totalCreated}. Wiring relations...`,
+        { tracer },
+      ),
+    ]);
+
+    const studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
+    const completionMessage = `Inception complete: ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`;
+
+    const disableImportModePromise = (async () => {
+      tracer.startPhase('disableImportMode');
+      try {
+        return await notionClient.request('PATCH', `/pages/${studyPageId}`, {
+          properties: { 'Import Mode': { checkbox: false } },
+        }, { tracer });
+      } finally {
+        tracer.endPhase('disableImportMode');
+      }
+    })();
+
+    const [, , copyResult] = await Promise.all([
+      disableImportModePromise,
+      notionClient.reportStatus(studyPageId, 'success', completionMessage, { tracer }),
+      copyBlocks(notionClient, createResult.idMapping, {
         studyPageId,
         studyName,
+        preparedBlocksByTemplate,
+        concurrency: 10,
+        workersPerToken: 10,
+        tracer,
       }),
-    }).catch(err => console.warn('[inception] copy-blocks fire-and-forget failed:', err.message));
+    ]);
 
-    // Log to activity log
-    await activityLogService.logTerminalEvent({
-      workflow: 'Inception',
-      status: 'success',
-      triggerType: 'Automation',
-      executionId: tracer.cascadeId,
-      timestamp: new Date().toISOString(),
-      cascadeMode: 'N/A',
-      studyId: studyPageId,
-      summary: `Inception complete: ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`,
-      details: {
-        totalCreated: createResult.totalCreated,
-        parentsPatchedCount: wireResult.parentsPatchedCount,
-        depsPatchedCount: wireResult.depsPatchedCount,
-        ...(tracer.toActivityLogDetails()),
-      },
-    });
-
-    // Report success
-    await notionClient.reportStatus(
-      studyPageId,
-      'success',
-      `Inception complete: ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`,
-      { tracer },
-    );
+    await Promise.all([
+      activityLogService.logTerminalEvent({
+        workflow: 'Inception',
+        status: 'success',
+        triggerType: 'Automation',
+        executionId: tracer.cascadeId,
+        timestamp: new Date().toISOString(),
+        cascadeMode: 'N/A',
+        studyId: studyPageId,
+        summary: completionMessage,
+        details: {
+          totalCreated: createResult.totalCreated,
+          parentsPatchedCount: wireResult.parentsPatchedCount,
+          depsPatchedCount: wireResult.depsPatchedCount,
+          blocksWrittenCount: copyResult.blocksWrittenCount,
+          pagesProcessed: copyResult.pagesProcessed,
+          pagesSkipped: copyResult.pagesSkipped,
+          ...(tracer.toActivityLogDetails()),
+        },
+      }),
+      notionClient.reportStatus(
+        studyPageId,
+        'success',
+        `Content blocks copied: ${copyResult.pagesProcessed} pages, ${copyResult.blocksWrittenCount} blocks`,
+        { tracer },
+      ),
+    ]);
 
     console.log(tracer.toConsoleLog());
   } catch (error) {
@@ -166,22 +199,21 @@ async function processInception(body) {
     console.log(tracer.toConsoleLog());
 
     try {
-      await notionClient.reportStatus(
-        studyPageId,
-        'error',
-        `Inception failed: ${String(error.message || error).slice(0, 200)}`,
-        { tracer },
-      );
-    } catch { /* don't mask original error */ }
-
-    try {
-      await activityLogService.logTerminalEvent({
-        workflow: 'Inception',
-        status: 'failed',
-        triggerType: 'Automation',
-        studyId: studyPageId,
-        summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
-      });
+      await Promise.all([
+        notionClient.reportStatus(
+          studyPageId,
+          'error',
+          `Inception failed: ${String(error.message || error).slice(0, 200)}`,
+          { tracer },
+        ),
+        activityLogService.logTerminalEvent({
+          workflow: 'Inception',
+          status: 'failed',
+          triggerType: 'Automation',
+          studyId: studyPageId,
+          summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
+        }),
+      ]);
     } catch { /* don't mask original error */ }
 
     throw error;

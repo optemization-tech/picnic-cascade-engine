@@ -1,19 +1,16 @@
 /**
- * create-tasks — creates study tasks from Blueprint templates with inline
- * dependency resolution, level by level.
+ * create-tasks — creates study tasks from Blueprint templates in one parallel
+ * pass, then leaves internal parent/dependency relations for a later patch
+ * phase.
  *
  * Ported from n8n Code nodes in PH1 Inception WF-1: Create & Wire.
- *   "Build task bodies"       — date calculation, inline dep/parent resolution, property mapping
+ *   "Build task bodies"       — date calculation, property mapping
  *   "Accumulate ID mappings"  — content-based join via Template Source ID
  */
 
 import { addBusinessDays, formatDate, parseDate } from '../utils/business-days.js';
 
 // ── helpers ────────────────────────────────────────────────────────────────
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Timestamp for Automation Reporting log entries.
@@ -27,7 +24,7 @@ function timestamp() {
  * Build a Notion page body for a single task.
  *
  * Returns null if the task should be skipped (null offsets).
- * Also returns inline resolution metadata used for tracking.
+ * Also returns relation-tracking metadata used for the later patch phase.
  */
 function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMapping }) {
   const props = task.properties || {};
@@ -55,7 +52,10 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
     endDateStr = formatDate(endDate);
   }
 
-  // ── Inline dependency resolution ────────────────────────────────────────
+  // ── Dependency resolution ───────────────────────────────────────────────
+  // Only relations already present in idMapping are written inline. This is
+  // used for external existing tasks (for example add-task-set), while
+  // relations between newly created blueprint tasks are patched afterward.
   const templateBlockedBy = task._templateBlockedBy || [];
   const resolvedBlockedByIds = [];
   const unresolvedBlockedByTemplateIds = [];
@@ -69,7 +69,7 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
     }
   }
 
-  // ── Inline parent resolution ────────────────────────────────────────────
+  // ── Parent resolution ───────────────────────────────────────────────────
   const templateParentId = task._templateParentId;
   const resolvedParentId = templateParentId ? (idMapping[templateParentId] || null) : null;
 
@@ -134,29 +134,18 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
 }
 
 /**
- * Create pages in parallel batches, similar to NotionClient.patchBatch().
+ * Create pages in parallel using the client's per-token worker queue.
  *
  * @param {import('../notion/client.js').NotionClient} client
  * @param {object[]} entries - array of { pageBody, _templateId, ... } from buildTaskBody
- * @param {{ batchSize?: number, interval?: number, tracer?: object }} options
+ * @param {{ tracer?: object }} options
  * @returns {Promise<object[]>} created Notion page objects
  */
-async function createBatch(client, entries, { batchSize, interval = 1000, tracer } = {}) {
-  batchSize = batchSize ?? client.optimalBatchSize;
-  const created = [];
-
-  for (let i = 0; i < entries.length; i += batchSize) {
-    const batch = entries.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map((entry) => client.request('POST', '/pages', entry.pageBody, { tracer })),
-    );
-    created.push(...batchResults);
-
-    // Inter-batch cooldown (skip after last batch)
-    if (i + batchSize < entries.length) await sleep(interval);
-  }
-
-  return created;
+async function createBatch(client, entries, { tracer } = {}) {
+  return client.createPages(entries.map((entry) => entry.pageBody), {
+    tracer,
+    workersPerToken: 5,
+  });
 }
 
 /**
@@ -213,7 +202,7 @@ function accumulateIdMappings(createdPages, entries, idMapping, depTracking, par
 // ── main export ────────────────────────────────────────────────────────────
 
 /**
- * Create study tasks from Blueprint templates, level by level.
+ * Create study tasks from Blueprint templates in one parallel pass.
  *
  * @param {import('../notion/client.js').NotionClient} client
  * @param {Array<{ level: number, tasks: object[], isLastLevel: boolean }>} levels - from buildTaskTree()
@@ -224,34 +213,27 @@ export async function createStudyTasks(client, levels, { studyPageId, contractSi
   if (tracer) tracer.startPhase('createStudyTasks');
 
   const anchorDate = contractSignDate ? parseDate(contractSignDate) : new Date();
-  // Seed with existing production task mappings (for add-task-set external deps)
   const idMapping = { ...(existingIdMapping || {}) };
   const depTracking = [];
   const parentTracking = [];
+  const tasks = (levels || []).flatMap(({ tasks: levelTasks = [] }) => levelTasks);
+  const entries = [];
+
+  for (const task of tasks) {
+    const entry = buildTaskBody(task, {
+      anchorDate,
+      studyPageId,
+      studyTasksDbId,
+      idMapping,
+    });
+    if (entry) entries.push(entry);
+  }
+
   let totalCreated = 0;
-
-  for (const { level, tasks } of levels) {
-    // Build page bodies for all tasks at this level
-    const entries = [];
-    for (const task of tasks) {
-      const entry = buildTaskBody(task, {
-        anchorDate,
-        studyPageId,
-        studyTasksDbId,
-        idMapping,
-      });
-      if (entry) entries.push(entry);
-    }
-
-    if (entries.length === 0) continue;
-
-    // Create pages in parallel batches
+  if (entries.length > 0) {
     const createdPages = await createBatch(client, entries, { tracer });
-
-    // Accumulate ID mappings (content-based join via Template Source ID)
     accumulateIdMappings(createdPages, entries, idMapping, depTracking, parentTracking);
-
-    totalCreated += createdPages.length;
+    totalCreated = createdPages.length;
   }
 
   if (tracer) tracer.endPhase('createStudyTasks');

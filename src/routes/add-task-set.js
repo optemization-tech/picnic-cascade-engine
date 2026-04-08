@@ -20,14 +20,7 @@ const activityLogService = new ActivityLogService({
  * For repeat-delivery buttons, scan existing production tasks for the max
  * delivery number and return nextNum. Returns 1 if no existing deliveries found.
  */
-async function resolveNextDeliveryNumber(studyPageId, tracer) {
-  const existingTasks = await notionClient.queryDatabase(
-    config.notion.studyTasksDbId,
-    { property: 'Study', relation: { contains: studyPageId } },
-    100,
-    { tracer },
-  );
-
+function resolveNextDeliveryNumber(existingTasks) {
   let maxNum = 0;
   const pattern = /Data Delivery #(\d+)/;
 
@@ -67,7 +60,7 @@ function applyDeliveryNumbering(filteredLevels, nextNum) {
  * Uses the already-fetched existingTasks array (from dep resolution) rather
  * than a separate query — both query the same DB with the same filter.
  */
-function resolveTaskSetNumbers(existingTasks, filteredLevels) {
+function resolveTaskSetNumbers(existingTasks = [], filteredLevels) {
   const numbers = new Map();
   if (filteredLevels.length === 0 || filteredLevels[0].tasks.length === 0) return numbers;
 
@@ -133,45 +126,61 @@ async function processAddTaskSet(req) {
     }, { tracer });
     tracer.endPhase('enableImportMode');
 
-    // Report kicked off
-    await notionClient.reportStatus(
-      studyPageId,
-      'info',
-      `Add Task Set started (${buttonType})...`,
-      { tracer },
-    );
+    const fetchStudyPromise = (async () => {
+      tracer.startPhase('fetchStudy');
+      try {
+        return await notionClient.getPage(studyPageId);
+      } finally {
+        tracer.endPhase('fetchStudy');
+      }
+    })();
 
-    // Fetch study details for contract sign date and study name
-    tracer.startPhase('fetchStudy');
-    studyPage = await notionClient.getPage(studyPageId);
-    tracer.endPhase('fetchStudy');
+    const fetchBlueprintAndExistingPromise = (async () => {
+      tracer.startPhase('fetchBlueprintAndExisting');
+      try {
+        return await Promise.all([
+          fetchBlueprint(notionClient, config.notion.blueprintDbId, { tracer }),
+          notionClient.queryDatabase(
+            config.notion.studyTasksDbId,
+            { property: 'Study', relation: { contains: studyPageId } },
+            100,
+            { tracer },
+          ),
+        ]);
+      } finally {
+        tracer.endPhase('fetchBlueprintAndExisting');
+      }
+    })();
+
+    const [, fetchedStudyPage, [blueprintTasksRaw, existingTasksRaw]] = await Promise.all([
+      notionClient.reportStatus(
+        studyPageId,
+        'info',
+        `Add Task Set started (${buttonType})...`,
+        { tracer },
+      ),
+      fetchStudyPromise,
+      fetchBlueprintAndExistingPromise,
+    ]);
+    studyPage = fetchedStudyPage;
+    const blueprintTasks = blueprintTasksRaw || [];
+    const existingTasks = existingTasksRaw || [];
 
     const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start
       || new Date().toISOString().split('T')[0];
     const studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
 
-    // Fetch blueprint + existing tasks in parallel (independent queries)
-    tracer.startPhase('fetchBlueprintAndExisting');
-    const [blueprintTasks, existingTasks] = await Promise.all([
-      fetchBlueprint(notionClient, config.notion.blueprintDbId, { tracer }),
-      notionClient.queryDatabase(
-        config.notion.studyTasksDbId,
-        { property: 'Study', relation: { contains: studyPageId } },
-        100,
-        { tracer },
-      ),
-    ]);
-    tracer.endPhase('fetchBlueprintAndExisting');
-
     if (!blueprintTasks || blueprintTasks.length === 0) {
-      await notionClient.reportStatus(studyPageId, 'error', 'No blueprint tasks found', { tracer });
-      await activityLogService.logTerminalEvent({
-        workflow: 'Add Task Set',
-        status: 'failed',
-        triggerType: 'Automation',
-        studyId: studyPageId,
-        summary: 'No blueprint tasks found',
-      });
+      await Promise.all([
+        notionClient.reportStatus(studyPageId, 'error', 'No blueprint tasks found', { tracer }),
+        activityLogService.logTerminalEvent({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          triggerType: 'Automation',
+          studyId: studyPageId,
+          summary: 'No blueprint tasks found',
+        }),
+      ]);
       return;
     }
 
@@ -181,19 +190,21 @@ async function processAddTaskSet(req) {
     tracer.endPhase('filterSubtree');
 
     if (filteredLevels.length === 0) {
-      await notionClient.reportStatus(
-        studyPageId,
-        'error',
-        `No matching blueprint tasks found for: ${parentTaskNames.join(', ')}`,
-        { tracer },
-      );
-      await activityLogService.logTerminalEvent({
-        workflow: 'Add Task Set',
-        status: 'failed',
-        triggerType: 'Automation',
-        studyId: studyPageId,
-        summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
-      });
+      await Promise.all([
+        notionClient.reportStatus(
+          studyPageId,
+          'error',
+          `No matching blueprint tasks found for: ${parentTaskNames.join(', ')}`,
+          { tracer },
+        ),
+        activityLogService.logTerminalEvent({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          triggerType: 'Automation',
+          studyId: studyPageId,
+          summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
+        }),
+      ]);
       return;
     }
 
@@ -201,7 +212,7 @@ async function processAddTaskSet(req) {
     let nextNum = null;
     if (isRepeatDelivery) {
       tracer.startPhase('resolveDeliveryNumber');
-      nextNum = await resolveNextDeliveryNumber(studyPageId, tracer);
+      nextNum = resolveNextDeliveryNumber(existingTasks);
       tracer.endPhase('resolveDeliveryNumber');
       tracer.set('next_delivery_num', nextNum);
       applyDeliveryNumbering(filteredLevels, nextNum);
@@ -346,21 +357,20 @@ async function processAddTaskSet(req) {
       tracer,
     });
 
-    // Report progress
-    await notionClient.reportStatus(
-      studyPageId,
-      'info',
-      `Tasks created: ${createResult.totalCreated}. Wiring relations...`,
-      { tracer },
-    );
-
-    // Wire remaining relations
-    const wireResult = await wireRemainingRelations(notionClient, {
-      idMapping: createResult.idMapping,
-      depTracking: createResult.depTracking,
-      parentTracking: createResult.parentTracking,
-      tracer,
-    });
+    const [wireResult] = await Promise.all([
+      wireRemainingRelations(notionClient, {
+        idMapping: createResult.idMapping,
+        depTracking: createResult.depTracking,
+        parentTracking: createResult.parentTracking,
+        tracer,
+      }),
+      notionClient.reportStatus(
+        studyPageId,
+        'info',
+        `Tasks created: ${createResult.totalCreated}. Wiring relations...`,
+        { tracer },
+      ),
+    ]);
 
     // ── Post-create task set numbering ───────────────────────────────────
     // Applied AFTER creation + wiring because Notion's DB query has eventual
@@ -375,7 +385,7 @@ async function processAddTaskSet(req) {
         { property: 'Study', relation: { contains: studyPageId } },
         100,
         { tracer },
-      );
+      ) || [];
 
       const numberMap = resolveTaskSetNumbers(freshTasks, filteredLevels);
 
@@ -394,18 +404,11 @@ async function processAddTaskSet(req) {
         }
       }
       if (renames.length > 0) {
-        await notionClient.patchBatch(renames, { tracer });
+        await notionClient.patchPages(renames, { tracer });
       }
       tracer.set('task_set_numbers', JSON.stringify(Object.fromEntries(numberMap)));
       tracer.endPhase('applyTaskSetNumbering');
     }
-
-    // Disable Import Mode
-    tracer.startPhase('disableImportMode');
-    await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-      properties: { 'Import Mode': { checkbox: false } },
-    }, { tracer });
-    tracer.endPhase('disableImportMode');
 
     // Fire copy-blocks only for newly created tasks (exclude pre-existing ones).
     // Template IDs (keys) repeat across operations — filter by production IDs (values).
@@ -417,46 +420,56 @@ async function processAddTaskSet(req) {
       }
     }
 
+    const successSummary = `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`;
     const selfUrl = `http://localhost:${config.port}/webhook/copy-blocks`;
-    fetch(selfUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        idMapping: newIdMapping,
-        studyPageId,
-        studyName,
+
+    await Promise.all([
+      (async () => {
+        tracer.startPhase('disableImportMode');
+        try {
+          return await notionClient.request('PATCH', `/pages/${studyPageId}`, {
+            properties: { 'Import Mode': { checkbox: false } },
+          }, { tracer });
+        } finally {
+          tracer.endPhase('disableImportMode');
+        }
+      })(),
+      fetch(selfUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idMapping: newIdMapping,
+          studyPageId,
+          studyName,
+        }),
+      }).catch(err => console.warn('[add-task-set] copy-blocks fire-and-forget failed:', err.message)),
+      activityLogService.logTerminalEvent({
+        workflow: 'Add Task Set',
+        status: 'success',
+        triggerType: 'Automation',
+        executionId: tracer.cascadeId,
+        timestamp: new Date().toISOString(),
+        cascadeMode: 'N/A',
+        studyId: studyPageId,
+        summary: successSummary,
+        details: {
+          buttonType,
+          parentTaskNames,
+          isTlfButton,
+          isRepeatDelivery,
+          totalCreated: createResult.totalCreated,
+          parentsPatchedCount: wireResult.parentsPatchedCount,
+          depsPatchedCount: wireResult.depsPatchedCount,
+          ...(tracer.toActivityLogDetails()),
+        },
       }),
-    }).catch(err => console.warn('[add-task-set] copy-blocks fire-and-forget failed:', err.message));
-
-    // Log to activity log
-    await activityLogService.logTerminalEvent({
-      workflow: 'Add Task Set',
-      status: 'success',
-      triggerType: 'Automation',
-      executionId: tracer.cascadeId,
-      timestamp: new Date().toISOString(),
-      cascadeMode: 'N/A',
-      studyId: studyPageId,
-      summary: `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`,
-      details: {
-        buttonType,
-        parentTaskNames,
-        isTlfButton,
-        isRepeatDelivery,
-        totalCreated: createResult.totalCreated,
-        parentsPatchedCount: wireResult.parentsPatchedCount,
-        depsPatchedCount: wireResult.depsPatchedCount,
-        ...(tracer.toActivityLogDetails()),
-      },
-    });
-
-    // Report success
-    await notionClient.reportStatus(
-      studyPageId,
-      'success',
-      `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created`,
-      { tracer },
-    );
+      notionClient.reportStatus(
+        studyPageId,
+        'success',
+        `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created`,
+        { tracer },
+      ),
+    ]);
 
     console.log(tracer.toConsoleLog());
   } catch (error) {
@@ -464,34 +477,33 @@ async function processAddTaskSet(req) {
     console.log(tracer.toConsoleLog());
 
     try {
-      await notionClient.reportStatus(
-        studyPageId,
-        'error',
-        `Add Task Set failed: ${String(error.message || error).slice(0, 200)}`,
-        { tracer },
-      );
-    } catch { /* don't mask original error */ }
-
-    try {
-      await activityLogService.logTerminalEvent({
-        workflow: 'Add Task Set',
-        status: 'failed',
-        triggerType: 'Automation',
-        executionId: tracer.cascadeId,
-        timestamp: new Date().toISOString(),
-        cascadeMode: 'N/A',
-        studyId: studyPageId,
-        summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
-        details: {
-          buttonType,
-          error: {
-            errorCode: error.code || null,
-            errorMessage: String(error.message || error).slice(0, 400),
-            phase: 'add-task-set',
+      await Promise.all([
+        notionClient.reportStatus(
+          studyPageId,
+          'error',
+          `Add Task Set failed: ${String(error.message || error).slice(0, 200)}`,
+          { tracer },
+        ),
+        activityLogService.logTerminalEvent({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          triggerType: 'Automation',
+          executionId: tracer.cascadeId,
+          timestamp: new Date().toISOString(),
+          cascadeMode: 'N/A',
+          studyId: studyPageId,
+          summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
+          details: {
+            buttonType,
+            error: {
+              errorCode: error.code || null,
+              errorMessage: String(error.message || error).slice(0, 400),
+              phase: 'add-task-set',
+            },
+            ...(tracer.toActivityLogDetails()),
           },
-          ...(tracer.toActivityLogDetails()),
-        },
-      });
+        }),
+      ]);
     } catch { /* don't mask original error */ }
 
     throw error;

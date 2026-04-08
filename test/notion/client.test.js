@@ -91,6 +91,64 @@ describe('NotionClient', () => {
     });
   });
 
+  it('createPages preserves input order while distributing work across tokens', async () => {
+    const fetchMock = vi.fn(async (url, options) => {
+      const body = JSON.parse(options.body);
+      const templateId = body.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+      const delayMs = templateId === 'b' ? 1 : 10;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return {
+        ok: true,
+        text: async () => JSON.stringify({ id: `page-${templateId}` }),
+        status: 200,
+        statusText: 'OK',
+        headers: { get: () => null },
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1', 't2'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+
+    const pages = await client.createPages([
+      { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'a' } }] } } },
+      { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'b' } }] } } },
+    ]);
+
+    expect(pages.map((page) => page.id)).toEqual(['page-a', 'page-b']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('patchPages returns task IDs in input order', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'ok' }),
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1', 't2'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+
+    const result = await client.patchPages([
+      { taskId: 'task-1', properties: { Status: { status: { name: 'Done' } } } },
+      { taskId: 'task-2', properties: { Status: { status: { name: 'In Progress' } } } },
+    ]);
+
+    expect(result).toEqual({
+      updatedCount: 2,
+      taskIds: ['task-1', 'task-2'],
+    });
+  });
+
   // @behavior BEH-AUTOMATION-REPORTING
   it('reportStatus patches Automation Reporting with formatted rich text', async () => {
     const fetchMock = vi.fn().mockResolvedValue({

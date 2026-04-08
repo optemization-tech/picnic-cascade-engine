@@ -298,20 +298,22 @@ async function processDateCascade(payload) {
     tracer.endPhase('merge');
 
     if (updates.length === 0) {
-      await notionClient.reportStatus(parsed.studyId, 'info', `No updates needed for ${parsed.taskName}`, { tracer });
       tracer.set('update_count', 0);
       console.log(tracer.toConsoleLog());
-      await logTerminalEvent({
-        parsed,
-        classified,
-        status: 'no_action',
-        summary: `No action: no updates needed for ${parsed.taskName}`,
-        patched: { updatedCount: 0 },
-        constrainedSource,
-        cascadeResult,
-        noActionReason: 'zero_updates',
-        tracer,
-      });
+      await Promise.all([
+        notionClient.reportStatus(parsed.studyId, 'info', `No updates needed for ${parsed.taskName}`, { tracer }),
+        logTerminalEvent({
+          parsed,
+          classified,
+          status: 'no_action',
+          summary: `No action: no updates needed for ${parsed.taskName}`,
+          patched: { updatedCount: 0 },
+          constrainedSource,
+          cascadeResult,
+          noActionReason: 'zero_updates',
+          tracer,
+        }),
+      ]);
       return;
     }
 
@@ -321,17 +323,8 @@ async function processDateCascade(payload) {
     }));
 
     tracer.startPhase('patchUpdates');
-    const patched = await notionClient.patchBatch(patchPayload, { tracer });
+    const patched = await notionClient.patchPages(patchPayload, { tracer });
     tracer.endPhase('patchUpdates');
-
-    tracer.startPhase('reportComplete');
-    await notionClient.reportStatus(
-      parsed.studyId,
-      'success',
-      `Cascade complete for ${parsed.taskName}: ${classified.cascadeMode} (${patched.updatedCount} task updates)`,
-      { tracer },
-    );
-    tracer.endPhase('reportComplete');
 
     const capReached = Boolean(cascadeResult?.diagnostics?.capReached);
     const residueCount = Array.isArray(cascadeResult?.diagnostics?.unresolvedResidue)
@@ -341,21 +334,41 @@ async function processDateCascade(payload) {
     tracer.set('update_count', patched.updatedCount);
     console.log(tracer.toConsoleLog());
 
+    tracer.startPhase('reportComplete');
     tracer.startPhase('logTerminal');
-    await logTerminalEvent({
-      parsed,
-      classified,
-      status: capReached ? 'failed' : 'success',
-      summary: capReached
-        ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
-        : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
-      patched,
-      constrainedSource,
-      cascadeResult,
-      noActionReason: null,
-      tracer,
-    });
-    tracer.endPhase('logTerminal');
+    await Promise.all([
+      (async () => {
+        try {
+          await notionClient.reportStatus(
+            parsed.studyId,
+            'success',
+            `Cascade complete for ${parsed.taskName}: ${classified.cascadeMode} (${patched.updatedCount} task updates)`,
+            { tracer },
+          );
+        } finally {
+          tracer.endPhase('reportComplete');
+        }
+      })(),
+      (async () => {
+        try {
+          await logTerminalEvent({
+            parsed,
+            classified,
+            status: capReached ? 'failed' : 'success',
+            summary: capReached
+              ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
+              : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
+            patched,
+            constrainedSource,
+            cascadeResult,
+            noActionReason: null,
+            tracer,
+          });
+        } finally {
+          tracer.endPhase('logTerminal');
+        }
+      })(),
+    ]);
 
     // Save undo manifest — only for successful cascades that actually moved tasks
     if (!capReached && updates.length > 0) {
@@ -382,22 +395,22 @@ async function processDateCascade(payload) {
   } catch (error) {
     console.log(tracer.toConsoleLog());
     try {
-      await notionClient.reportStatus(
-        parsed.studyId,
-        'error',
-        `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
-        { tracer },
-      );
-    } catch { /* don't mask original error */ }
-    try {
-      await logTerminalEvent({
-        parsed,
-        status: 'failed',
-        summary: summarizeFailure(error),
-        noActionReason: null,
-        error,
-        tracer,
-      });
+      await Promise.all([
+        notionClient.reportStatus(
+          parsed.studyId,
+          'error',
+          `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
+          { tracer },
+        ),
+        logTerminalEvent({
+          parsed,
+          status: 'failed',
+          summary: summarizeFailure(error),
+          noActionReason: null,
+          error,
+          tracer,
+        }),
+      ]);
     } catch { /* don't mask original error */ }
     throw error;
   }

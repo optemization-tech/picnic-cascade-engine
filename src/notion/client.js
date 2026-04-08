@@ -2,6 +2,7 @@ import { buildReportingText } from '../utils/reporting.js';
 
 const NOTION_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28';
+const DEFAULT_WORKERS_PER_TOKEN = 3;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -13,53 +14,61 @@ export class NotionClient {
       throw new Error('NotionClient requires at least one token');
     }
     this.tokens = tokens;
-    this.tokenIndex = 0;
+    this.slots = tokens.map((token, index) => ({
+      token,
+      key: `token_${index + 1}`,
+      index,
+    }));
+    this.slotIndex = 0;
     this.rateLimit = rateLimit;
     this.retry = retry;
-    this.tokenUsage = new Map(tokens.map((t) => [t, []]));
+    this.tokenUsage = new Map(this.slots.map((slot) => [slot.key, []]));
+    this.workersPerToken = Math.max(1, Math.min(
+      DEFAULT_WORKERS_PER_TOKEN,
+      this.rateLimit.maxPerSecond || DEFAULT_WORKERS_PER_TOKEN,
+    ));
     // Optimal batch size: all tokens firing at max rate per second
     this.optimalBatchSize = tokens.length * (rateLimit.maxPerSecond || 9);
   }
 
-  _nextToken() {
-    const token = this.tokens[this.tokenIndex % this.tokens.length];
-    this.tokenIndex = (this.tokenIndex + 1) % this.tokens.length;
-    return token;
+  _nextSlot() {
+    const slot = this.slots[this.slotIndex % this.slots.length];
+    this.slotIndex = (this.slotIndex + 1) % this.slots.length;
+    return slot;
   }
 
-  async _throttleToken(token) {
+  async _throttleSlot(slotKey) {
     const maxPerSecond = this.rateLimit.maxPerSecond || 9;
-    const now = Date.now();
-    const windowStart = now - 1000;
-    const usage = (this.tokenUsage.get(token) || []).filter((ts) => ts > windowStart);
+    for (;;) {
+      const now = Date.now();
+      const windowStart = now - 1000;
+      const usage = (this.tokenUsage.get(slotKey) || []).filter((ts) => ts > windowStart);
 
-    if (usage.length >= maxPerSecond) {
+      if (usage.length < maxPerSecond) {
+        usage.push(now);
+        this.tokenUsage.set(slotKey, usage);
+        return;
+      }
+
       const waitMs = 1000 - (now - usage[0]) + 5;
-      if (waitMs > 0) await sleep(waitMs);
+      await sleep(Math.max(1, waitMs));
     }
-
-    const refreshedNow = Date.now();
-    const refreshedWindow = refreshedNow - 1000;
-    const updated = (this.tokenUsage.get(token) || []).filter((ts) => ts > refreshedWindow);
-    updated.push(refreshedNow);
-    this.tokenUsage.set(token, updated);
   }
 
-  async request(method, path, body, { tracer } = {}) {
+  async _requestWithSlot(slot, method, path, body, { tracer } = {}) {
     const maxAttempts = this.retry.maxAttempts || 5;
     const baseMs = this.retry.baseMs || 500;
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const token = this._nextToken();
-      const tokenIndex = (this.tokenIndex + this.tokens.length - 1) % this.tokens.length;
-      await this._throttleToken(token);
+      const tokenIndex = slot.index;
+      await this._throttleSlot(slot.key);
 
       try {
         const response = await fetch(`${NOTION_BASE}${path}`, {
           method,
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${slot.token}`,
             'Notion-Version': NOTION_VERSION,
             'Content-Type': 'application/json',
           },
@@ -101,12 +110,59 @@ export class NotionClient {
     throw lastError || new Error('Notion request failed');
   }
 
+  async request(method, path, body, { tracer } = {}) {
+    return this._requestWithSlot(this._nextSlot(), method, path, body, { tracer });
+  }
+
+  async runParallel(items, processItem, { workersPerToken = this.workersPerToken, maxWorkers } = {}) {
+    if (!Array.isArray(items) || items.length === 0) return [];
+
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    const worker = async (slot) => {
+      for (;;) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= items.length) return;
+        results[index] = await processItem(items[index], slot, index);
+      }
+    };
+
+    const workers = [];
+    const availableWorkers = this.slots.length * workersPerToken;
+    const totalWorkers = Math.max(1, Math.min(maxWorkers ?? availableWorkers, availableWorkers));
+    for (let i = 0; i < totalWorkers; i++) {
+      workers.push(worker(this.slots[i % this.slots.length]));
+    }
+
+    await Promise.all(workers);
+    return results;
+  }
+
   async getPage(pageId) {
     return this.request('GET', `/pages/${pageId}`);
   }
 
   async patchPage(pageId, properties, { tracer } = {}) {
     return this.request('PATCH', `/pages/${pageId}`, { properties }, { tracer });
+  }
+
+  async createPages(pageBodies, { tracer, workersPerToken } = {}) {
+    return this.requestBatch(
+      pageBodies.map((pageBody) => ({ method: 'POST', path: '/pages', body: pageBody })),
+      { tracer, workersPerToken },
+    );
+  }
+
+  async requestBatch(operations, { tracer, workersPerToken, maxWorkers } = {}) {
+    return this.runParallel(
+      operations,
+      async (operation, slot) => this._requestWithSlot(slot, operation.method, operation.path, operation.body, {
+        tracer: operation.tracer ?? tracer,
+      }),
+      { workersPerToken, maxWorkers },
+    );
   }
 
   async queryDatabase(dbId, filter, pageSize = 100, { tracer } = {}) {
@@ -146,22 +202,21 @@ export class NotionClient {
   /**
    * updates: [{ taskId, properties }]
    */
-  async patchBatch(updates, { batchSize, interval = 1000, tracer } = {}) {
-    batchSize = batchSize ?? this.optimalBatchSize;
-    const applied = [];
-    for (let i = 0; i < updates.length; i += batchSize) {
-      const batch = updates.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map(async (u) => {
-          const res = await this.patchPage(u.taskId, u.properties, { tracer });
-          applied.push(u.taskId);
-          return res;
-        }),
-      );
-      if (i + batchSize < updates.length) await sleep(interval);
-      void batchResults;
+  async patchPages(updates, { tracer, workersPerToken } = {}) {
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return { updatedCount: 0, taskIds: [] };
     }
-    return { updatedCount: applied.length, taskIds: applied };
+
+    await this.requestBatch(
+      updates.map((update) => ({
+        method: 'PATCH',
+        path: `/pages/${update.taskId}`,
+        body: { properties: update.properties },
+      })),
+      { tracer, workersPerToken },
+    );
+
+    return { updatedCount: updates.length, taskIds: updates.map((update) => update.taskId) };
   }
 
   async reportStatus(studyId, level, message, { tracer } = {}) {
