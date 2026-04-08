@@ -974,7 +974,7 @@ describe('runCascade', () => {
     });
   });
 
-  // @behavior BEH-BL-H5g
+  // @behavior BEH-BL-H5G
   describe('BL-H5g: ignore parent-level dependency edges', () => {
     it('parent-level dependency edges are ignored', () => {
       const tasks = parentWithAccidentalDep();

@@ -53,11 +53,11 @@ The cascade mode is determined by which dates change. How you edit in Notion mat
 | Edit Type | How to Edit in Notion | startDelta | endDelta | Cascade Mode |
 |---|---|---|---|---|
 | Start-only right | Timeline: drag **left edge** right | > 0 | 0 | `pull-right` |
-| Start-only left | Timeline: drag **left edge** left | < 0 | 0 | `pull-left` |
+| Start-only left | Timeline: drag **left edge** left | < 0 | 0 | `start-left` |
 | End-only right | Timeline: drag **right edge** right | 0 | > 0 | `push-right` |
 | End-only left | Timeline: drag **right edge** left | 0 | < 0 | `pull-left` |
 | Drag right | Timeline: drag **whole bar** right | > 0 | > 0 | `drag-right` |
-| Drag left | Timeline: drag **whole bar** left | < 0 | < 0 | `pull-left` |
+| Drag left | Timeline: drag **whole bar** left | < 0 | < 0 | `drag-left` |
 
 ### Pitfalls
 - **Date picker edits are unreliable for testing.** Changing the start in the date picker may cause Notion to reinterpret the range (e.g., shortening the end instead of moving the start). Always use the **timeline view** for test edits.
@@ -70,8 +70,9 @@ The cascade mode is determined by which dates change. How you edit in Notion mat
 
 1. **Record the source task's current dates** (start, end) and reference dates (Reference Start, Reference End).
 2. **Record current dates of all expected affected tasks:**
-   - For pull-right/drag-right: all upstream blockers (follow "Blocked by" chain)
-   - For pull-left (end-only/drag): all downstream dependents (follow "Blocking" chain)
+   - For `start-left` and `pull-right`: all upstream blockers (follow "Blocked by" chain)
+   - For `pull-left`: all downstream dependents on the edited chain (follow "Blocking" chain)
+   - For `drag-left` and `drag-right`: the full dependency-connected component (both "Blocked by" and "Blocking")
    - For push-right: all downstream dependents
 3. **Record the parent task's dates** if the source is a subtask (Case B) or has subtasks (Case A).
 4. **Note any cross-chain blockers** on downstream tasks (tasks with 2+ entries in "Blocked by" from different chains).
@@ -107,13 +108,13 @@ With 254 tasks in a standard study, there is no reason to reuse tasks within a s
 
 **Activity Log check:** Cascade Mode = `push-right`, Status = Success.
 
-### 4.2 pull-left — start-only (`startDelta < 0, endDelta == 0`)
+### 4.2 start-left (`startDelta < 0, endDelta == 0`)
 **Trigger:** Start date moves earlier (left edge drag left).
 
 | Direction | Rule | Verification |
 |---|---|---|
 | Upstream | Conflict-only | Blockers move earlier only if `nextBD(blocker.end) > source.newStart`. Gaps collapse to 0. |
-| Downstream | No movement | End didn't change, so `gapPreservingDownstream` computes delta=0 (no-op). |
+| Downstream | No movement | End didn't change, so no downstream pull runs. |
 
 ### 4.3 pull-left — end-only (`startDelta == 0, endDelta < 0`)
 **Trigger:** End date moves earlier (right edge drag left).
@@ -121,20 +122,20 @@ With 254 tasks in a standard study, there is no reason to reuse tasks within a s
 | Direction | Rule | Verification |
 |---|---|---|
 | Upstream | No movement | Start didn't change, so `pullLeftUpstream` finds no conflicts. |
-| Downstream | ALL shift uniformly | Every downstream task shifts by the same BD delta, gap-preserving. Clamped to blocker constraints. |
-| Cross-chain | Frustration resolution | If a downstream task is clamped by a cross-chain blocker, the engine may shift that blocker left (unless frozen). |
+| Downstream | Local pull-left | Reachable downstream tasks shift left by the same BD delta, clamped to blocker constraints. |
+| Cross-chain | Clamp only | Stationary cross-chain blockers do not move in end-only-left; they clamp how far the edited chain can move. |
 
-**Key check:** Count the BD gap between each pair of downstream tasks before and after. Gaps should be identical (preserved).
+**Key check:** Compare each moved task against its latest blocker after the edit. The task should move left when it can, but it should stop at the latest non-frozen blocker instead of moving that blocker chain.
 
-### 4.4 pull-left — drag (`startDelta < 0, endDelta < 0`)
+### 4.4 drag-left (`startDelta < 0, endDelta < 0`)
 **Trigger:** Drag whole bar left.
 
-Combines 4.2 upstream + 4.3 downstream rules:
+This is a true whole-graph translation:
 
 | Direction | Rule |
 |---|---|
-| Upstream | Conflict-only (from start component) |
-| Downstream | ALL shift uniformly (from end component) |
+| Connected graph | Every non-frozen task in the dependency-connected graph shifts left by the same BD delta. |
+| Cross-chain blockers | If they are in the connected graph and not frozen, they move too. |
 
 ### 4.5 pull-right (`startDelta > 0, endDelta == 0`)
 **Trigger:** Start date moves later (left edge drag right).
@@ -150,12 +151,11 @@ Combines 4.2 upstream + 4.3 downstream rules:
 ### 4.6 drag-right (`startDelta > 0, endDelta > 0`)
 **Trigger:** Drag whole bar right.
 
-Same behavior as pull-right (unified in code):
+This is the rightward mirror of drag-left:
 
 | Direction | Rule |
 |---|---|
-| Upstream | ALL shift unconditionally (same as 4.5) |
-| Downstream | Conflict-only with expanded seeds (same as 4.5) |
+| Connected graph | Every non-frozen task in the dependency-connected graph shifts right by the same BD delta. |
 
 ### 4.7 Complete Freeze
 **Rule:** Tasks with Status = "Done" or "N/A" never move during cascades and are excluded from blocker constraints.
@@ -163,13 +163,15 @@ Same behavior as pull-right (unified in code):
 **Verification:**
 - Frozen tasks remain at original dates after any cascade.
 - Non-frozen tasks downstream of a frozen task can still be shifted.
-- In cross-chain frustration resolution, frozen cross-chain blockers prevent propagation (downstream stays clamped).
+- Frozen tasks are skipped even during whole-graph drags.
 
 ## 5) Parent-Subtask Verification
 
 ### Case A: Parent Edited (source has subtasks)
 - **Guard:** If cascade mode is `push-right` or `pull-right` AND source is a top-level parent (no parent of its own), the cascade is **rejected** with Error 1. No tasks move.
-- **If allowed (drag-left, pull-left, drag-right on nested parent):** All non-frozen subtasks shift by the same delta. Parent dates recompute to cover all subtask dates (roll-up).
+- **V1 current behavior:** All non-frozen subtasks shift by the inferred parent delta. Dependency-connected tasks reachable from those shifted subtasks move by the same delta too. Parent dates then recompute to cover the subtasks.
+- **Current limitation:** V1 still infers one delta from the parent envelope; it does not yet distinguish parent start-left, end-left, and drag edits as separate modes.
+- **V2 difference:** V2 has no `case-a`. It recomputes direct subtask offsets from the moved parent start date and does not currently drag dependency-connected tasks beyond those subtasks.
 
 ### Case B: Subtask Edited (source has a parent)
 - After cascade completes, parent dates expand or contract to cover the natural span of all its subtasks.
@@ -178,24 +180,17 @@ Same behavior as pull-right (unified in code):
 - When cascade moves tasks that have parents, those parents' date envelopes auto-adjust.
 - This is expected and not a bug — parent expansion after a cascade is normal Case B/roll-up behavior.
 
-## 6) Cross-Chain Propagation Verification
+## 6) Cross-Chain / Connected Graph Verification
 
-**Applies only to pull-left mode** (end-only-left, drag-left).
-
-### When It Fires
-After `gapPreservingDownstream` runs, a downstream task may be **clamped** by a cross-chain blocker (a blocker from a different dependency chain that didn't move). The `resolveCrossChainFrustrations` function detects this and:
-
-1. Identifies the limiting non-frozen cross-chain blocker.
-2. Shifts it left to unblock the frustrated downstream task.
-3. Cascades through the blocker's own upstream via `pullLeftUpstream`.
-4. Restores downstream positions and re-runs `gapPreservingDownstream`.
-5. Repeats until stable (max 5 rounds).
-
-### Verification
+### End-only-left (`pull-left`)
 - Check if any downstream task has 2+ entries in "Blocked by" from different chains.
-- After cascade: if the cross-chain blocker shifted, cross-chain propagation fired correctly.
-- If the blocker is frozen (Done/N/A): downstream task stays clamped — correct.
-- Activity Log `crossChain.capHit` should be `false` for normal cascades.
+- After cascade: stationary cross-chain blockers should stay put.
+- The edited chain may move left until it reaches the latest non-frozen blocker, then stop.
+
+### Drag-left / drag-right
+- Trace the full dependency-connected graph from the edited task.
+- Every non-frozen task in that connected graph should shift by the same business-day delta.
+- If a cross-chain blocker is part of that connected graph, it should move with the drag.
 
 ## 7) Webhook Echo Pattern
 
@@ -234,7 +229,7 @@ Every cascade produces an Activity Log entry in Notion with:
 - `Unresolved residue count: 0` — should be 0 for success
 - `Original source dates: YYYY-MM-DD -> YYYY-MM-DD` — refStart → refEnd
 - `Modified source dates: YYYY-MM-DD -> YYYY-MM-DD` — newStart → newEnd
-- JSON diagnostics with `movedTaskIds[]`, `parentMode`, `crossChain` details
+- JSON diagnostics with `movedTaskIds[]`, `parentMode`, and safety details
 
 ## 9) Test Matrix
 
@@ -248,10 +243,10 @@ Each test maps to a behavior row from `ENGINE-BEHAVIOR-REFERENCE.md` Section 1.
 | 2A.1 | Start-only right | Left edge drag right +5 BD | `pull-right` | ALL upstream shift unconditionally, gap-preserving |
 | 2A.2 | Start-only right | Left edge drag right on gapped chain | `pull-right` | No gap absorption — gaps preserved exactly |
 | 2A.3 | Start-only right | Start-only right on top-level parent | Rejected | Error 1 guard blocks direct parent edit |
-| 2B.1 | Start-only left | Left edge drag left | `pull-left` | Upstream conflict-only, no downstream change |
-| 2B.2 | End-only left | Right edge drag left | `pull-left` | ALL downstream shift uniformly, gap-preserving |
-| 2B.3 | Drag left | Whole bar drag left | `pull-left` | Upstream conflict + downstream uniform |
-| 2D.1 | — | Drag parent +5 BD | Case A | All subtasks shift uniformly |
+| 2B.1 | Start-only left | Left edge drag left | `start-left` | Upstream conflict-only, no downstream change |
+| 2B.2 | End-only left | Right edge drag left | `pull-left` | Downstream tasks pull left until they hit their latest blocker |
+| 2B.3 | Drag left | Whole bar drag left | `drag-left` | Full dependency-connected graph shifts uniformly |
+| 2D.1 | — | Drag parent +5 BD | Case A | Subtasks and connected dependencies shift uniformly |
 | 2D.2 | — | Subtask end past parent | Case B | Parent envelope expands |
 | 2D.3 | — | Drag parent with frozen subtask | Case A + Freeze | Frozen subtask stays, others shift |
 | 2D.4 | — | Subtask start before parent | Case B | Parent expands, no secondary case-a loop |
@@ -262,8 +257,8 @@ Each test maps to a behavior row from `ENGINE-BEHAVIOR-REFERENCE.md` Section 1.
 | 3.2 | — | Double-click button | No cascade | Concurrent guard rejects second click |
 | C1.1 | — | Two edits within 5s | Queue | Task B queued, auto-processed after A |
 | C1.2 | — | Same task edited twice during cascade | Queue + dedup | Latest kept, queue auto-fires |
-| 2H.1 | Cross-chain propagation | End-only-left on fan-in chain | `pull-left` | Cross-chain blocker shifts, downstream unblocked |
-| 2H.2 | Cross-chain + Freeze | End-only-left with frozen cross-chain blocker | `pull-left` | Frozen blocker untouched, downstream clamped |
+| 2H.1 | Cross-chain clamp | End-only-left on fan-in chain | `pull-left` | Stationary cross-chain blocker stays put and clamps movement |
+| 2H.2 | Cross-chain drag | Drag-left on fan-in chain | `drag-left` | Connected cross-chain blocker shifts with the dragged graph |
 
 ## 10) Notion AI Session Prompt Template
 
@@ -301,7 +296,7 @@ The following rules must be present in every session prompt:
 > - "drag the WHOLE BAR" for drag-right or drag-left
 > Do NOT use the date picker for cascade tests.
 
-**Expanded seeds rule (for pull-right/drag-right tests):**
+**Expanded seeds rule (for pull-right tests):**
 > In pull-right mode, downstream tasks may shift even if the source's end didn't change. This is because ALL shifted upstream tasks are used as seeds for downstream conflict detection. If a shifted upstream task's new end conflicts with a downstream task's start, the downstream shifts. This is correct behavior.
 
 **Parent roll-up rule:**
@@ -317,9 +312,12 @@ The following rules must be present in every session prompt:
 | Webhook echo flood in server terminal | Looks like something is wrong | Normal — one real hit (>100ms), rest are 0ms zero-delta exits |
 | Expanded seeds in downstream pass | Unexpected downstream movement in pull-right | Trace ALL blockers of the moved downstream task, not just the source |
 | Parent expansion after cascade | Parent dates change unexpectedly | Normal Case B roll-up — parent envelope covers all subtask dates |
-| Cross-chain clamping in pull-left | Downstream task doesn't reach full delta | Check if a non-moving cross-chain blocker is limiting it |
+| Cross-chain clamping in pull-left | Downstream task doesn't reach full delta | Check the latest non-frozen blocker on the affected task |
 
 ## Change Log
 
 ### 2026-04-01 — Initial version
-Created from v7 engine implementation (Meg-confirmed 2026-03-31 rules). Covers all cascade modes, parent-subtask, cross-chain propagation, and infrastructure setup. Derived from `ENGINE-BEHAVIOR-REFERENCE.md`, `cascade.js` (v7), `classify.js`, `date-cascade.js`, `guards.js`, and Round 15 testing experience.
+Created from the v7 engine implementation and original testing workflows. Derived from `ENGINE-BEHAVIOR-REFERENCE.md`, `cascade.js`, `classify.js`, `date-cascade.js`, `guards.js`, and Round 15 testing experience.
+
+### 2026-04-08 — Mode split refresh
+Updated for explicit `start-left`, `drag-left`, and whole-graph drag semantics. Also notes the current V1/V2 parent behavior split.

@@ -9,7 +9,7 @@
     "dev": "nodemon src/index.js",
     "test": "vitest",
     "test:traceability": "node scripts/check-behavior-traceability.js",
-    "test:ci": "npm run test:traceability && npm run test",
+    "test:ci": "npm run test:traceability && npm run test -- --run",
     "test:watch": "vitest --watch",
     "tunnel": "npx ngrok http 3000",
     "patch:task-date": "node scripts/patch-task-date.js",
