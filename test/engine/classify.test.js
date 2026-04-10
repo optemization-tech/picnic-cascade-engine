@@ -114,7 +114,7 @@ describe('classify', () => {
     expect(result.cascadeMode).toBe('pull-right');
   });
 
-  it('sets case-a when source has subtasks in graph', () => {
+  it('sets case-a when a nested parent has subtasks in graph', () => {
     const result = classify(
       {
         taskId: 'parent',
@@ -123,7 +123,8 @@ describe('classify', () => {
         newEnd: '2026-04-01',
         refStart: '2026-04-01',
         refEnd: '2026-04-02',
-        hasParent: false,
+        hasParent: true,
+        parentTaskId: 'grandparent',
       },
       [
         { id: 'child-1', parentId: 'parent' },
@@ -157,26 +158,55 @@ describe('classify', () => {
   });
 
   // @behavior BEH-PARENT-DIRECT-EDIT-BLOCK
-  it('blocks direct right-shift edits on top-level parent tasks', () => {
-    const result = classify(
+  it('blocks direct date edits on top-level parent tasks', () => {
+    const cases = [
       {
-        taskId: 'parent',
-        taskName: 'Parent',
         newStart: '2026-04-01',
         newEnd: '2026-04-03',
-        refStart: '2026-04-01',
-        refEnd: '2026-04-02',
-        hasParent: false,
+        startDelta: 0,
+        endDelta: 1,
       },
-      [{ id: 'child', parentId: 'parent' }],
-      0,
-      1,
-    );
+      {
+        newStart: '2026-03-31',
+        newEnd: '2026-04-02',
+        startDelta: -1,
+        endDelta: 0,
+      },
+      {
+        newStart: '2026-03-31',
+        newEnd: '2026-04-01',
+        startDelta: -1,
+        endDelta: -1,
+      },
+      {
+        newStart: '2026-03-31',
+        newEnd: '2026-04-03',
+        startDelta: -1,
+        endDelta: 1,
+      },
+    ];
 
-    expect(result.skip).toBe(true);
-    expect(result.cascadeMode).toBeNull();
-    expect(result.parentMode).toBeNull();
-    expect(result.reason).toContain('Direct parent edit blocked');
+    for (const testCase of cases) {
+      const result = classify(
+        {
+          taskId: 'parent',
+          taskName: 'Parent',
+          newStart: testCase.newStart,
+          newEnd: testCase.newEnd,
+          refStart: '2026-04-01',
+          refEnd: '2026-04-02',
+          hasParent: false,
+        },
+        [{ id: 'child', parentId: 'parent' }],
+        testCase.startDelta,
+        testCase.endDelta,
+      );
+
+      expect(result.skip).toBe(true);
+      expect(result.cascadeMode).toBeNull();
+      expect(result.parentMode).toBeNull();
+      expect(result.reason).toContain('Direct parent edit blocked');
+    }
   });
 
   it('preserves start-only edit when stale refs would create false drag', () => {

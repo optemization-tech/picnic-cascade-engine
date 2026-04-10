@@ -168,7 +168,7 @@ This is the rightward mirror of drag-left:
 ## 5) Parent-Subtask Verification
 
 ### Case A: Parent Edited (source has subtasks)
-- **Guard:** If cascade mode is `push-right` or `pull-right` AND source is a top-level parent (no parent of its own), the cascade is **rejected** with Error 1. No tasks move.
+- **Guard:** If a top-level parent (no parent of its own) is edited directly, the cascade is **rejected** with Error 1 and the source task is reverted to its reference dates. No tasks move.
 - **V1 current behavior:** All non-frozen subtasks shift by the inferred parent delta. Dependency-connected tasks reachable from those shifted subtasks move by the same delta too. Parent dates then recompute to cover the subtasks.
 - **Current limitation:** V1 still infers one delta from the parent envelope; it does not yet distinguish parent start-left, end-left, and drag edits as separate modes.
 - **V2 difference:** V2 has no `case-a`. It recomputes direct subtask offsets from the moved parent start date and does not currently drag dependency-connected tasks beyond those subtasks.
@@ -242,7 +242,7 @@ Each test maps to a behavior row from `ENGINE-BEHAVIOR-REFERENCE.md` Section 1.
 | H.2 | — | — | — | Reference dates aligned with current dates |
 | 2A.1 | Start-only right | Left edge drag right +5 BD | `pull-right` | ALL upstream shift unconditionally, gap-preserving |
 | 2A.2 | Start-only right | Left edge drag right on gapped chain | `pull-right` | No gap absorption — gaps preserved exactly |
-| 2A.3 | Start-only right | Start-only right on top-level parent | Rejected | Error 1 guard blocks direct parent edit |
+| 2A.3 | — | Any date edit on top-level parent | Rejected | Error 1 guard blocks and reverts direct parent edit |
 | 2B.1 | Start-only left | Left edge drag left | `start-left` | Upstream conflict-only, no downstream change |
 | 2B.2 | End-only left | Right edge drag left | `pull-left` | Downstream tasks pull left until they hit their latest blocker |
 | 2B.3 | Drag left | Whole bar drag left | `drag-left` | Full dependency-connected graph shifts uniformly |

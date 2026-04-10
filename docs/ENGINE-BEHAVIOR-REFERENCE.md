@@ -27,7 +27,7 @@ This document is the in-repo behavior reference for the cascade engine. It is th
 
 - `BEH-COMPLETE-FREEZE`: Tasks with status `Done` or `N/A` never move during cascades and are ignored as blocking constraints.
 - `BEH-BL-H5G`: Parent tasks do not participate in dependency-driven cascading; parent-level dependency edges are stripped before the engine runs.
-- `BEH-PARENT-DIRECT-EDIT-BLOCK`: A top-level parent task cannot be directly shifted right; the classifier rejects that edit.
+- `BEH-PARENT-DIRECT-EDIT-BLOCK`: A top-level parent task cannot be directly date-edited; the classifier rejects that edit and the route reverts the parent back to its reference dates.
 
 ## 4) Route And Automation Rules
 

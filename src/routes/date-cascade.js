@@ -4,6 +4,7 @@ import { classify } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { enforceConstraints } from '../engine/constraints.js';
+import { buildReportingText } from '../utils/reporting.js';
 import { NotionClient } from '../notion/client.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
@@ -17,6 +18,7 @@ const activityLogService = new ActivityLogService({
   activityLogDbId: config.notion.activityLogDbId,
 });
 const DIRECT_PARENT_WARNING = '⚠️ This task has subtasks — edit a subtask directly to shift dates and trigger cascading.';
+const DIRECT_PARENT_REVERT_WARNING = 'Parent date edit reverted — edit a subtask directly to shift dates and trigger cascading.';
 
 function summarizeFailure(error) {
   return `Cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
@@ -102,20 +104,37 @@ async function logTerminalEvent({
   });
 }
 
-async function applyError1SideEffects(studyId) {
-  if (!studyId) return;
-  await notionClient.request('PATCH', `/pages/${studyId}`, {
-    properties: {
-      'Import Mode': { checkbox: false },
-      'Automation Reporting': {
-        rich_text: [{
-          type: 'text',
-          text: { content: DIRECT_PARENT_WARNING },
-          annotations: { bold: true, color: 'red' },
-        }],
+async function applyError1SideEffects({ studyId, sourceTaskId, refStart, refEnd, tracer }) {
+  const ops = [];
+
+  if (studyId) {
+    ops.push(notionClient.request('PATCH', `/pages/${studyId}`, {
+      properties: {
+        'Import Mode': { checkbox: false },
+        'Automation Reporting': {
+          rich_text: [{
+            type: 'text',
+            text: { content: DIRECT_PARENT_WARNING },
+            annotations: { bold: true, color: 'red' },
+          }],
+        },
       },
-    },
-  });
+    }, { tracer }));
+  }
+
+  if (sourceTaskId && refStart && refEnd) {
+    ops.push(notionClient.patchPage(sourceTaskId, {
+      'Dates': { date: { start: refStart, end: refEnd } },
+      'Reference Start Date': { date: { start: refStart } },
+      'Reference End Date': { date: { start: refEnd } },
+      'Automation Reporting': {
+        rich_text: buildReportingText('warning', DIRECT_PARENT_REVERT_WARNING),
+      },
+    }, { tracer }));
+  }
+
+  if (ops.length === 0) return;
+  await Promise.all(ops);
 }
 
 function buildUpdateProperties(update, sourceTaskName, cascadeMode) {
@@ -211,7 +230,13 @@ async function processDateCascade(payload) {
 
     if (classified.skip || !classified.cascadeMode) {
       if (classified.reason?.includes('Direct parent edit blocked')) {
-        await applyError1SideEffects(parsed.studyId);
+        await applyError1SideEffects({
+          studyId: parsed.studyId,
+          sourceTaskId: classified.sourceTaskId || parsed.taskId,
+          refStart: classified.refStart || parsed.refStart,
+          refEnd: classified.refEnd || parsed.refEnd,
+          tracer,
+        });
       } else {
         await notionClient.reportStatus(parsed.studyId, 'warning', classified.reason || 'No cascade mode determined', { tracer });
       }

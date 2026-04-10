@@ -61,8 +61,9 @@ export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
   if (hasSubtasksFromGraph) parentMode = 'case-a';
   else if (hasParent) parentMode = 'case-b';
 
-  // Error 1 guard: top-level parent tasks cannot be shifted right directly.
-  if ((cascadeMode === 'push-right' || cascadeMode === 'pull-right') && hasSubtasksFromGraph && !hasParent) {
+  // Error 1 guard: top-level parent tasks cannot be date-edited directly.
+  // The route will revert the edited parent back to its reference dates.
+  if (hasSubtasksFromGraph && !hasParent && (startDelta !== 0 || endDelta !== 0)) {
     return {
       skip: true,
       reason: 'Direct parent edit blocked - edit subtasks directly',

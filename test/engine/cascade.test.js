@@ -287,7 +287,7 @@ describe('runCascade', () => {
       expect(cUpdate).toBeUndefined();
     });
 
-    it('frozen upstream blocker does not move in pull-left propagation', () => {
+    it('frozen upstream blocker does not move during drag-left propagation', () => {
       const tasks = chainWithFrozen();
       const result = runCascade({
         sourceTaskId: 'c',
@@ -298,7 +298,7 @@ describe('runCascade', () => {
         refEnd: '2026-04-06',
         startDelta: -1,
         endDelta: -1,
-        cascadeMode: 'pull-left',
+        cascadeMode: 'drag-left',
         tasks,
       });
 
@@ -634,6 +634,32 @@ describe('runCascade', () => {
       expect(xUpdate).toBeDefined();
       expect(xUpdate.newStart).toBe('2026-03-27');
       expect(xUpdate.newEnd).toBe('2026-03-31');
+
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-04-01');
+      expect(bUpdate.newEnd).toBe('2026-04-02');
+
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+      expect(cUpdate.newStart).toBe('2026-04-03');
+      expect(cUpdate.newEnd).toBe('2026-04-06');
+    });
+
+    it('drag-left shifts gapped downstream tasks by the same amount', () => {
+      const tasks = linearGappedChain();
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-27',
+        newEnd: '2026-03-30',
+        refStart: '2026-03-30',
+        refEnd: '2026-03-31',
+        startDelta: -1,
+        endDelta: -1,
+        cascadeMode: 'drag-left',
+        tasks,
+      });
 
       const bUpdate = result.updates.find(u => u.taskId === 'b');
       expect(bUpdate).toBeDefined();
