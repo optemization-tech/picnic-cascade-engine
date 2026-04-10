@@ -153,15 +153,17 @@ describe('date-cascade route safety', () => {
     }));
   });
 
-  it('applies Error 1 side effects with exact warning text', async () => {
+  it('applies Error 1 side effects, reverts the source task, and preserves the warning text', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
       taskId: 'source',
       taskName: 'Source',
       studyId: 'study-1',
       hasDates: true,
-      startDelta: 0,
-      endDelta: 1,
+      startDelta: -1,
+      endDelta: 0,
+      refStart: '2026-04-01',
+      refEnd: '2026-04-02',
     });
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(false);
@@ -170,9 +172,13 @@ describe('date-cascade route safety', () => {
       skip: true,
       reason: 'Direct parent edit blocked - edit subtasks directly',
       cascadeMode: null,
+      sourceTaskId: 'source',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-02',
     });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.request.mockResolvedValue({});
+    mocks.mockClient.patchPage.mockResolvedValue({});
 
     const { req, res } = makeReqRes({ payload: true });
     await handleDateCascade(req, res);
@@ -191,7 +197,12 @@ describe('date-cascade route safety', () => {
           }],
         },
       },
-    });
+    }, expect.any(Object));
+    expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('source', expect.objectContaining({
+      'Dates': { date: { start: '2026-04-01', end: '2026-04-02' } },
+      'Reference Start Date': { date: { start: '2026-04-01' } },
+      'Reference End Date': { date: { start: '2026-04-02' } },
+    }), expect.any(Object));
   });
 
   it('patches updates once and reports success', async () => {

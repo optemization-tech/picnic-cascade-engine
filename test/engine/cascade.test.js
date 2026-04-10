@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runCascade } from '../../src/engine/cascade.js';
-import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream, fanOutFromUpstream, preExistingViolation, transitiveViolations, multiBlockerStationary, multiBlockerAllMoved, multiBlockerTightStationary } from '../fixtures/cascade-tasks.js';
+import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream, fanOutFromUpstream, preExistingViolation, transitiveViolations, multiBlockerAllMoved } from '../fixtures/cascade-tasks.js';
 import { twoChainSharedTask, crossChainClampedByOtherBlocker, parentWithAccidentalDep } from '../fixtures/cross-chain-tasks.js';
 
 describe('runCascade', () => {
@@ -88,33 +88,45 @@ describe('runCascade', () => {
     });
   });
 
-  // @behavior BEH-MODE-PULL-LEFT
-  describe('pull-left', () => {
-    it('pulls upstream blockers earlier when end moves left', () => {
+  // @behavior BEH-MODE-START-LEFT
+  describe('start-left', () => {
+    it('pushes upstream blockers earlier on conflict when start moves left', () => {
       const tasks = linearTightChain();
-      // Task D (last in chain) end moves from Wed Apr 08 → Mon Apr 06 (2 BD left)
-      // This means D start also moves: was Tue Apr 07 → Fri Apr 03
+      // Task D start moves from Tue Apr 07 → Mon Apr 06 (1 BD left), end unchanged.
       const result = runCascade({
         sourceTaskId: 'd',
         sourceTaskName: 'Task D',
-        newStart: '2026-04-03', // Fri (was Tue Apr 07)
-        newEnd: '2026-04-06',   // Mon (was Wed Apr 08)
+        newStart: '2026-04-06', // Mon (was Tue Apr 07)
+        newEnd: '2026-04-08',   // unchanged
         refStart: '2026-04-07',
         refEnd: '2026-04-08',
-        startDelta: -2,
-        endDelta: -2,
-        cascadeMode: 'pull-left',
+        startDelta: -1,
+        endDelta: 0,
+        cascadeMode: 'start-left',
         tasks,
       });
 
-      // C was Fri-Mon, D now starts Fri → C must end Thu (prevBD(Fri))
-      // C (2 BD): new end = Thu Apr 02, new start = Wed Apr 01
+      // C now needs to finish before Mon Apr 06, so it shifts left by 1 BD.
       const cUpdate = result.updates.find(u => u.taskId === 'c');
       expect(cUpdate).toBeDefined();
-      expect(cUpdate.newEnd).toBe('2026-04-02');   // Thu
-      expect(cUpdate.newStart).toBe('2026-04-01'); // Wed
-    });
+      expect(cUpdate.newStart).toBe('2026-04-02');
+      expect(cUpdate.newEnd).toBe('2026-04-03');
 
+      // B and A should also move left to stay tight with their dependents.
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-03-31');
+      expect(bUpdate.newEnd).toBe('2026-04-01');
+
+      const aUpdate = result.updates.find(u => u.taskId === 'a');
+      expect(aUpdate).toBeDefined();
+      expect(aUpdate.newStart).toBe('2026-03-27');
+      expect(aUpdate.newEnd).toBe('2026-03-30');
+    });
+  });
+
+  // @behavior BEH-MODE-PULL-LEFT
+  describe('pull-left', () => {
     it('preserves gaps when pulling downstream (gapped chain)', () => {
       const tasks = linearGappedChain();
       // A end moves from Tue Mar 31 → Mon Mar 30 (duration shrinks to 1)
@@ -201,6 +213,32 @@ describe('runCascade', () => {
       expect(cUpdate.newStart).toBe('2026-04-06'); // Mon
       expect(cUpdate.newEnd).toBe('2026-04-07');   // Tue
     });
+
+    it('drag-right shifts gapped downstream tasks by the same amount', () => {
+      const tasks = linearGappedChain();
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-31',
+        newEnd: '2026-04-01',
+        refStart: '2026-03-30',
+        refEnd: '2026-03-31',
+        startDelta: 1,
+        endDelta: 1,
+        cascadeMode: 'drag-right',
+        tasks,
+      });
+
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-04-03');
+      expect(bUpdate.newEnd).toBe('2026-04-06');
+
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+      expect(cUpdate.newStart).toBe('2026-04-07');
+      expect(cUpdate.newEnd).toBe('2026-04-08');
+    });
   });
 
   // @behavior BEH-COMPLETE-FREEZE
@@ -249,7 +287,7 @@ describe('runCascade', () => {
       expect(cUpdate).toBeUndefined();
     });
 
-    it('frozen upstream blocker does not move in pull-left propagation', () => {
+    it('frozen upstream blocker does not move during drag-left propagation', () => {
       const tasks = chainWithFrozen();
       const result = runCascade({
         sourceTaskId: 'c',
@@ -260,7 +298,7 @@ describe('runCascade', () => {
         refEnd: '2026-04-06',
         startDelta: -1,
         endDelta: -1,
-        cascadeMode: 'pull-left',
+        cascadeMode: 'drag-left',
         tasks,
       });
 
@@ -521,7 +559,7 @@ describe('runCascade', () => {
 
   // @behavior BEH-CROSSCHAIN-PROPAGATION
   describe('cross-chain propagation', () => {
-    it('end-only-left: shifts cross-chain blocker to propagate downstream cascade', () => {
+    it('end-only-left stays local when a stationary cross-chain blocker still constrains the path', () => {
       const tasks = twoChainSharedTask();
       // A end moves left by 1 BD: Tue Mar 31 → Mon Mar 30
       const result = runCascade({
@@ -537,29 +575,18 @@ describe('runCascade', () => {
         tasks,
       });
 
-      // X shifts left by 1 BD (cross-chain: unblocking B)
-      // X: Mon Mar 30 - Wed Apr 01 → Fri Mar 27 - Tue Mar 31
       const xUpdate = result.updates.find(u => u.taskId === 'x');
-      expect(xUpdate).toBeDefined();
-      expect(xUpdate.newStart).toBe('2026-03-27'); // Fri (was Mon)
-      expect(xUpdate.newEnd).toBe('2026-03-31');   // Tue (was Wed)
+      expect(xUpdate).toBeUndefined();
 
-      // B shifts left by 1 BD (now unblocked by shifted X)
-      // B: Thu Apr 02 - Fri Apr 03 → Wed Apr 01 - Thu Apr 02
       const bUpdate = result.updates.find(u => u.taskId === 'b');
-      expect(bUpdate).toBeDefined();
-      expect(bUpdate.newStart).toBe('2026-04-01'); // Wed (was Thu)
-      expect(bUpdate.newEnd).toBe('2026-04-02');   // Thu (was Fri)
+      expect(bUpdate).toBeUndefined();
 
-      // C shifts left by 1 BD (downstream of B)
-      // C: Mon Apr 06 - Tue Apr 07 → Fri Apr 03 - Mon Apr 06
       const cUpdate = result.updates.find(u => u.taskId === 'c');
-      expect(cUpdate).toBeDefined();
-      expect(cUpdate.newStart).toBe('2026-04-03'); // Fri (was Mon)
-      expect(cUpdate.newEnd).toBe('2026-04-06');   // Mon (was Tue)
+      expect(cUpdate).toBeUndefined();
+      expect(result.updates).toHaveLength(0);
     });
 
-    it('end-only-left: shifts cross-chain blocker so clamped downstream task can move', () => {
+    it('end-only-left clamps against stationary cross-chain blockers instead of moving them', () => {
       const tasks = crossChainClampedByOtherBlocker();
       // A end moves left by 1 BD: Tue Mar 31 → Mon Mar 30
       const result = runCascade({
@@ -581,19 +608,68 @@ describe('runCascade', () => {
       expect(bUpdate.newStart).toBe('2026-03-31'); // Tue
       expect(bUpdate.newEnd).toBe('2026-04-01');   // Wed
 
-      // C shifts left by 1 BD (cross-chain: unblocking D)
-      // C: Wed Apr 01 - Fri Apr 03 → Tue Mar 31 - Thu Apr 02
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeUndefined();
+
+      const dUpdate = result.updates.find(u => u.taskId === 'd');
+      expect(dUpdate).toBeUndefined();
+    });
+
+    it('drag-left shifts the whole connected graph, including cross-chain blockers', () => {
+      const tasks = twoChainSharedTask();
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-27',
+        newEnd: '2026-03-30',
+        refStart: '2026-03-30',
+        refEnd: '2026-03-31',
+        startDelta: -1,
+        endDelta: -1,
+        cascadeMode: 'drag-left',
+        tasks,
+      });
+
+      const xUpdate = result.updates.find(u => u.taskId === 'x');
+      expect(xUpdate).toBeDefined();
+      expect(xUpdate.newStart).toBe('2026-03-27');
+      expect(xUpdate.newEnd).toBe('2026-03-31');
+
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-04-01');
+      expect(bUpdate.newEnd).toBe('2026-04-02');
+
       const cUpdate = result.updates.find(u => u.taskId === 'c');
       expect(cUpdate).toBeDefined();
-      expect(cUpdate.newStart).toBe('2026-03-31'); // Tue (was Wed)
-      expect(cUpdate.newEnd).toBe('2026-04-02');   // Thu (was Fri)
+      expect(cUpdate.newStart).toBe('2026-04-03');
+      expect(cUpdate.newEnd).toBe('2026-04-06');
+    });
 
-      // D shifts left by 1 BD (now unblocked by shifted C)
-      // D: Mon Apr 06 - Tue Apr 07 → Fri Apr 03 - Mon Apr 06
-      const dUpdate = result.updates.find(u => u.taskId === 'd');
-      expect(dUpdate).toBeDefined();
-      expect(dUpdate.newStart).toBe('2026-04-03'); // Fri (was Mon)
-      expect(dUpdate.newEnd).toBe('2026-04-06');   // Mon (was Tue)
+    it('drag-left shifts gapped downstream tasks by the same amount', () => {
+      const tasks = linearGappedChain();
+      const result = runCascade({
+        sourceTaskId: 'a',
+        sourceTaskName: 'Task A',
+        newStart: '2026-03-27',
+        newEnd: '2026-03-30',
+        refStart: '2026-03-30',
+        refEnd: '2026-03-31',
+        startDelta: -1,
+        endDelta: -1,
+        cascadeMode: 'drag-left',
+        tasks,
+      });
+
+      const bUpdate = result.updates.find(u => u.taskId === 'b');
+      expect(bUpdate).toBeDefined();
+      expect(bUpdate.newStart).toBe('2026-04-01');
+      expect(bUpdate.newEnd).toBe('2026-04-02');
+
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+      expect(cUpdate.newStart).toBe('2026-04-03');
+      expect(cUpdate.newEnd).toBe('2026-04-06');
     });
   });
 
@@ -661,14 +737,10 @@ describe('runCascade', () => {
     });
   });
 
-  // @behavior BEH-PULL-LEFT-FANOUT
-  describe('pull-left fan-out: upstream shifts propagate to other downstream tasks', () => {
-    it('shifts upstream task X other downstream D when source B pulls left', () => {
+  // @behavior BEH-DRAG-LEFT-FANOUT
+  describe('fan-out behavior', () => {
+    it('drag-left shifts every connected branch by the same amount', () => {
       const tasks = fanOutFromUpstream();
-      // B: Apr 01-02. Pull-left: entire task moves left by 1 BD.
-      // B becomes Mar 31 - Apr 01. startDelta=-1, endDelta=-1.
-      // pullLeftUpstream: B.newStart=Mar 31. X.end=Mar 31. nextBD(Mar 31)=Apr 01 > Mar 31.
-      // X must shift left so it finishes before B's new start.
       const result = runCascade({
         sourceTaskId: 'b',
         sourceTaskName: 'Task B',
@@ -678,43 +750,28 @@ describe('runCascade', () => {
         refEnd: '2026-04-02',
         startDelta: -1,
         endDelta: -1,
-        cascadeMode: 'pull-left',
+        cascadeMode: 'drag-left',
         tasks,
       });
 
-      // X should have been shifted left by pullLeftUpstream
       const xUpdate = result.updates.find(u => u.taskId === 'x');
       expect(xUpdate).toBeDefined();
+      expect(xUpdate.newStart).toBe('2026-03-27');
+      expect(xUpdate.newEnd).toBe('2026-03-30');
 
-      // D should also shift left (fan-out from X) — this is the Bug 1 fix
       const dUpdate = result.updates.find(u => u.taskId === 'd');
       expect(dUpdate).toBeDefined();
-      // D's new start should be earlier than its original (Apr 01)
-      expect(dUpdate.newStart < '2026-04-01').toBe(true);
+      expect(dUpdate.newStart).toBe('2026-03-31');
+      expect(dUpdate.newEnd).toBe('2026-04-01');
 
-      // C (downstream of B) should also shift
       const cUpdate = result.updates.find(u => u.taskId === 'c');
       expect(cUpdate).toBeDefined();
+      expect(cUpdate.newStart).toBe('2026-04-02');
+      expect(cUpdate.newEnd).toBe('2026-04-03');
     });
 
-    it('does not shift fan-out task if clamped by unshifted predecessor', () => {
-      // D has two predecessors: X (shifted) and Q (unshifted, ends later).
-      // D should stay put because Q's constraint prevents D from moving.
+    it('end-only-left keeps unrelated fan-out branches stationary', () => {
       const tasks = fanOutFromUpstream();
-      // Add a second predecessor Q for D that ends later than X
-      tasks.push({
-        id: 'q',
-        name: 'Task Q',
-        start: new Date('2026-03-30T00:00:00Z'),
-        end: new Date('2026-04-02T00:00:00Z'), // ends Thu Apr 02
-        duration: 4,
-        status: 'Not Started',
-        blockedByIds: [],
-        blockingIds: ['d'],
-      });
-      // Update D to also be blocked by Q
-      const d = tasks.find(t => t.id === 'd');
-      d.blockedByIds.push('q');
 
       const result = runCascade({
         sourceTaskId: 'b',
@@ -729,19 +786,16 @@ describe('runCascade', () => {
         tasks,
       });
 
-      // D should NOT move earlier — Q (ends Apr 02) clamps D to start at nextBD(Apr 02) = Apr 03.
-      // D's original start was Apr 01. Q's constraint means D cannot go earlier.
-      // D may be pushed right by validation (to Apr 03) since it violates Q's constraint,
-      // but it must NOT move left of its original position.
+      const xUpdate = result.updates.find(u => u.taskId === 'x');
+      expect(xUpdate).toBeUndefined();
+
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+      expect(cUpdate.newStart).toBe('2026-04-02');
+      expect(cUpdate.newEnd).toBe('2026-04-03');
+
       const dUpdate = result.updates.find(u => u.taskId === 'd');
-      if (dUpdate) {
-        expect(dUpdate.newStart >= '2026-04-01').toBe(true);
-      }
-      // Also verify D is NOT in the movedTaskIds with a leftward shift
-      const dInMoved = result.movedTaskMap['d'];
-      if (dInMoved) {
-        expect(dInMoved.newStart >= '2026-04-01').toBe(true);
-      }
+      expect(dUpdate).toBeUndefined();
     });
   });
 
@@ -864,36 +918,61 @@ describe('runCascade', () => {
     });
   });
 
-  // @behavior BEH-BL-H4g
-  describe('BL-H4g: stationary blocker gap guard', () => {
-    it('multi-blocker: stationary predecessor with gap prevents downstream shift', () => {
-      const tasks = multiBlockerStationary();
-      // A's end shrinks by 2 BD: Apr 02 → Mar 31
+  describe('pull-left with multiple blockers', () => {
+    it('moves a task when its latest predecessor moved earlier, even if an earlier blocker stayed put', () => {
+      const tasks = [
+        {
+          id: 'a',
+          name: 'Task A',
+          start: new Date('2026-03-31T00:00:00Z'),
+          end: new Date('2026-03-31T00:00:00Z'),
+          duration: 1,
+          status: 'Not Started',
+          blockedByIds: [],
+          blockingIds: ['b', 'c'],
+        },
+        {
+          id: 'b',
+          name: 'Task B',
+          start: new Date('2026-04-01T00:00:00Z'),
+          end: new Date('2026-04-03T00:00:00Z'),
+          duration: 3,
+          status: 'Not Started',
+          blockedByIds: ['a'],
+          blockingIds: ['c'],
+        },
+        {
+          id: 'c',
+          name: 'Task C',
+          start: new Date('2026-04-06T00:00:00Z'),
+          end: new Date('2026-04-08T00:00:00Z'),
+          duration: 3,
+          status: 'Not Started',
+          blockedByIds: ['a', 'b'],
+          blockingIds: [],
+        },
+      ];
+
       const result = runCascade({
-        sourceTaskId: 'a',
-        sourceTaskName: 'Task A',
-        newStart: '2026-03-30',
-        newEnd: '2026-03-31',
-        refStart: '2026-03-30',
-        refEnd: '2026-04-02',
+        sourceTaskId: 'b',
+        sourceTaskName: 'Task B',
+        newStart: '2026-04-01',
+        newEnd: '2026-04-01',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-03',
         startDelta: 0,
         endDelta: -2,
         cascadeMode: 'pull-left',
         tasks,
       });
 
-      // B should shift left (only blocker is A, which is a seed)
-      const bUpdate = result.updates.find(u => u.taskId === 'b');
-      expect(bUpdate).toBeDefined();
-      expect(bUpdate.newStart).toBe('2026-04-01');
-      expect(bUpdate.newEnd).toBe('2026-04-02');
-
-      // D should NOT move — C is stationary with a gap
-      const dUpdate = result.updates.find(u => u.taskId === 'd');
-      expect(dUpdate).toBeUndefined();
+      const cUpdate = result.updates.find(u => u.taskId === 'c');
+      expect(cUpdate).toBeDefined();
+      expect(cUpdate.newStart).toBe('2026-04-02');
+      expect(cUpdate.newEnd).toBe('2026-04-06');
     });
 
-    it('multi-blocker: all blockers moved allows downstream shift', () => {
+    it('shifts downstream when all blockers moved together', () => {
       const tasks = multiBlockerAllMoved();
       // A's end shrinks by 2 BD: Apr 02 → Mar 31
       const result = runCascade({
@@ -919,40 +998,9 @@ describe('runCascade', () => {
       const dUpdate = result.updates.find(u => u.taskId === 'd');
       expect(dUpdate).toBeDefined();
     });
-
-    it('multi-blocker: tight stationary blocker allows cross-chain resolution (no gap)', () => {
-      const tasks = multiBlockerTightStationary();
-      // A's end shrinks by 2 BD: Apr 02 → Mar 31
-      const result = runCascade({
-        sourceTaskId: 'a',
-        sourceTaskName: 'Task A',
-        newStart: '2026-03-30',
-        newEnd: '2026-03-31',
-        refStart: '2026-03-30',
-        refEnd: '2026-04-02',
-        startDelta: 0,
-        endDelta: -2,
-        cascadeMode: 'pull-left',
-        tasks,
-      });
-
-      // B should shift left
-      const bUpdate = result.updates.find(u => u.taskId === 'b');
-      expect(bUpdate).toBeDefined();
-
-      // D is tight with C (no gap) — gap guard does NOT skip.
-      // Frustration resolver shifts C left to make room, then D moves.
-      // This is correct cross-chain propagation behavior.
-      const cUpdate = result.updates.find(u => u.taskId === 'c');
-      expect(cUpdate).toBeDefined();
-      const dUpdate = result.updates.find(u => u.taskId === 'd');
-      expect(dUpdate).toBeDefined();
-      expect(dUpdate.newStart).toBe('2026-04-07');
-      expect(dUpdate.newEnd).toBe('2026-04-08');
-    });
   });
 
-  // @behavior BEH-BL-H5g
+  // @behavior BEH-BL-H5G
   describe('BL-H5g: ignore parent-level dependency edges', () => {
     it('parent-level dependency edges are ignored', () => {
       const tasks = parentWithAccidentalDep();

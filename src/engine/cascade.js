@@ -1,10 +1,8 @@
 // ============================================================
 // Cascade Engine — Directional Date Cascade
 // Ported from WF-D: Resolve Cascade (n8n Code node)
-// Handles: push-right, pull-left, pull-right, drag-right
-// v7 2026-04-01: Meg-confirmed rules (pullRight shifts ALL upstream,
-//   no adjacency/absorption; uniform delta downstream;
-//   cross-chain frustration resolution for pull-left)
+// Handles: push-right, pull-left, start-left, pull-right, drag-left, drag-right
+// v8 2026-04-08: split leftward edit modes and treat drags as whole-graph translation
 // ============================================================
 
 import {
@@ -23,10 +21,61 @@ function isFrozen(task) {
   return FROZEN_STATUSES.has(task.status);
 }
 
+function collectConnectedTaskIds(seedIds, taskById) {
+  const queue = Array.isArray(seedIds) ? [...seedIds] : [seedIds];
+  const connected = new Set();
+
+  while (queue.length > 0) {
+    const taskId = queue.shift();
+    if (connected.has(taskId)) continue;
+    connected.add(taskId);
+
+    const task = taskById[taskId];
+    if (!task) continue;
+
+    for (const blockerId of (task.blockedByIds || [])) {
+      if (!connected.has(blockerId) && taskById[blockerId]) queue.push(blockerId);
+    }
+    for (const dependentId of (task.blockingIds || [])) {
+      if (!connected.has(dependentId) && taskById[dependentId]) queue.push(dependentId);
+    }
+  }
+
+  return connected;
+}
+
+function shiftConnectedComponent(seedIds, deltaBD, updatesMap, taskById, excludedIds = []) {
+  if (!deltaBD) return;
+
+  const excluded = new Set(excludedIds);
+  const connected = collectConnectedTaskIds(seedIds, taskById);
+
+  for (const taskId of connected) {
+    if (excluded.has(taskId)) continue;
+
+    const task = taskById[taskId];
+    if (!task || !task.start || !task.end) continue;
+    if (isFrozen(task)) continue;
+
+    const newStart = addBusinessDays(task.start, deltaBD);
+    const newEnd = addBusinessDays(task.end, deltaBD);
+    task.start = newStart;
+    task.end = newEnd;
+
+    updatesMap[taskId] = {
+      taskId,
+      taskName: task.name,
+      newStart: formatDate(newStart),
+      newEnd: formatDate(newEnd),
+      duration: task.duration,
+    };
+  }
+}
+
 // -----------------------------------------------------------
 // conflictOnlyDownstream: push downstream tasks right when
 // their start violates nextBD(blocker.newEnd).
-// Used by: push-right, pull-right, drag-right (Pass 2)
+// Used by: push-right
 // Seeds: set of task IDs whose ends have changed
 // -----------------------------------------------------------
 function conflictOnlyDownstream(seedTaskIds, updatesMap, taskById) {
@@ -123,7 +172,7 @@ function conflictOnlyDownstream(seedTaskIds, updatesMap, taskById) {
 // When a task moves earlier, pull its blockers earlier
 // to resolve conflicts. Gaps collapse to 0.
 // Uses Bellman-Ford relaxation (re-queue on improvement).
-// Used by: pull-left (Pass 1)
+// Used by: start-left
 // -----------------------------------------------------------
 function pullLeftUpstream(sourceId, newStart, updatesMap, taskById) {
   const queue = [sourceId];
@@ -198,9 +247,9 @@ function pullLeftUpstream(sourceId, newStart, updatesMap, taskById) {
 // Computes a single negative BD delta from the source end
 // change and shifts ALL downstream tasks by that same delta,
 // clamped to blocker constraints.
-// Used by: pull-left (Pass 2)
+// Used by: pull-left
 // -----------------------------------------------------------
-function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, taskById, extraSeedIds = []) {
+function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, taskById) {
   const sourceTask = taskById[sourceId];
   if (!sourceTask) return;
 
@@ -221,16 +270,15 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
   }
   if (deltaBD >= 0) return;
 
-  // BFS downstream from source + any shifted upstream tasks
-  const seedExclusions = new Set([sourceId, ...extraSeedIds]);
+  // BFS downstream from source
   const downstream = new Set();
-  const bfsQueue = [sourceId, ...extraSeedIds];
+  const bfsQueue = [sourceId];
   while (bfsQueue.length > 0) {
     const tid = bfsQueue.shift();
     const t = taskById[tid];
     if (!t) continue;
     for (const depId of (t.blockingIds || [])) {
-      if (!downstream.has(depId) && !seedExclusions.has(depId)) {
+      if (!downstream.has(depId) && depId !== sourceId) {
         downstream.add(depId);
         bfsQueue.push(depId);
       }
@@ -273,23 +321,6 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
     const t = taskById[tid];
     if (!t || !t.start || !t.end) continue;
     if (isFrozen(t)) continue;
-
-    // BL-H4g: Skip if held by a stationary blocker with a gap.
-    // Stationary = not moved by cascade (not in updatesMap or seed set).
-    // Gap = task starts after nextBD(blocker.end).
-    // Preserves existing gaps; tight constraints still handled by clamp + frustration resolver.
-    let heldByStationaryGap = false;
-    for (const blockerId of (t.blockedByIds || [])) {
-      const blocker = taskById[blockerId];
-      if (!blocker || !blocker.end) continue;
-      if (isFrozen(blocker)) continue;
-      if (updatesMap[blockerId] || seedExclusions.has(blockerId)) continue;
-      if (t.start > nextBusinessDay(blocker.end)) {
-        heldByStationaryGap = true;
-        break;
-      }
-    }
-    if (heldByStationaryGap) continue;
 
     const shiftedStart = addBusinessDays(t.start, deltaBD);
 
@@ -371,156 +402,6 @@ function pullRightUpstream(sourceId, refStart, deltaBD, updatesMap, taskById) {
         queue.push(blockerId);
       }
     }
-  }
-}
-
-// -----------------------------------------------------------
-// resolveCrossChainFrustrations: fixed-point loop.
-// After gapPreservingDownstream, some downstream tasks may have
-// been clamped by cross-chain blockers (blockers not in the
-// source's chain). This function shifts those blockers left,
-// then re-runs gapPreservingDownstream until stable or cap.
-// Meg-confirmed 2026-03-31: cascade propagates through all
-// affected chains ("if those tasks also adjust").
-// Used by: pull-left (after Pass 2)
-// -----------------------------------------------------------
-function resolveCrossChainFrustrations(
-  sourceId, sourceOldEnd, sourceNewEnd,
-  updatesMap, taskById, prePositions, maxRounds = 5, extraSeedIds = []
-) {
-  const oldEndD = parseDate(sourceOldEnd);
-  const srcNewEnd = updatesMap[sourceId]
-    ? parseDate(updatesMap[sourceId].newEnd) : parseDate(sourceNewEnd);
-  if (!oldEndD || !srcNewEnd || srcNewEnd >= oldEndD) return;
-
-  // Compute uniform BD delta (negative)
-  let deltaBD = 0;
-  const cur = new Date(srcNewEnd);
-  while (cur < oldEndD) {
-    cur.setUTCDate(cur.getUTCDate() + 1);
-    if (isBusinessDay(cur)) deltaBD--;
-  }
-  if (deltaBD >= 0) return;
-
-  // Collect downstream task IDs (BFS from source + shifted upstream)
-  const seedExclusions = new Set([sourceId, ...extraSeedIds]);
-  const downstream = new Set();
-  const q = [sourceId, ...extraSeedIds];
-  while (q.length > 0) {
-    const tid = q.shift();
-    for (const depId of (taskById[tid]?.blockingIds || [])) {
-      if (!downstream.has(depId) && !seedExclusions.has(depId)) {
-        downstream.add(depId);
-        q.push(depId);
-      }
-    }
-  }
-  if (downstream.size === 0) return;
-
-  for (let round = 0; round < maxRounds; round++) {
-    let anyBlockerShifted = false;
-
-    for (const tid of downstream) {
-      const orig = prePositions[tid];
-      if (!orig) continue;
-      const task = taskById[tid];
-      if (!task || isFrozen(task)) continue;
-
-      // BL-H4g: Skip if held by a stationary blocker with a gap.
-      let heldByStationaryGap = false;
-      for (const bid of (task.blockedByIds || [])) {
-        const b = taskById[bid];
-        if (!b || !b.end) continue;
-        if (isFrozen(b)) continue;
-        if (updatesMap[bid] || seedExclusions.has(bid)) continue;
-        if (orig.start > nextBusinessDay(b.end)) {
-          heldByStationaryGap = true;
-          break;
-        }
-      }
-      if (heldByStationaryGap) continue;
-
-      const desiredStart = addBusinessDays(orig.start, deltaBD);
-      if (task.start <= desiredStart) continue; // not frustrated
-
-      // Skip if a frozen blocker prevents reaching desired position
-      let frozenPrevents = false;
-      for (const bid of (task.blockedByIds || [])) {
-        const b = taskById[bid];
-        if (b && b.end && isFrozen(b) && nextBusinessDay(b.end) > desiredStart) {
-          frozenPrevents = true;
-          break;
-        }
-      }
-      if (frozenPrevents) continue;
-
-      // Find limiting non-frozen blocker (latest constraint past desired)
-      let limitId = null, latestC = null;
-      for (const bid of (task.blockedByIds || [])) {
-        const b = taskById[bid];
-        if (!b || !b.end || isFrozen(b)) continue;
-        const c = nextBusinessDay(b.end);
-        if (c > desiredStart && (!latestC || c > latestC)) {
-          limitId = bid;
-          latestC = c;
-        }
-      }
-      if (!limitId) continue;
-
-      const blocker = taskById[limitId];
-      const neededEnd = prevBusinessDay(desiredStart);
-      if (neededEnd >= blocker.end) continue;
-
-      // Shift the blocker left
-      const newBStart = addBusinessDays(neededEnd, -(blocker.duration - 1));
-      blocker.start = newBStart;
-      blocker.end = neededEnd;
-      updatesMap[limitId] = {
-        taskId: limitId,
-        taskName: blocker.name,
-        newStart: formatDate(newBStart),
-        newEnd: formatDate(neededEnd),
-        duration: blocker.duration,
-      };
-
-      // Cascade through blocker's upstream chain (resolve conflicts the shift created)
-      pullLeftUpstream(limitId, formatDate(newBStart), updatesMap, taskById);
-
-      // Re-validate: blocker may have been clamped by its own immovable upstream
-      let validStart = newBStart;
-      for (const bbId of (blocker.blockedByIds || [])) {
-        const bb = taskById[bbId];
-        if (!bb) continue;
-        const bbEnd = updatesMap[bbId] ? parseDate(updatesMap[bbId].newEnd) : bb.end;
-        if (!bbEnd) continue;
-        const minS = nextBusinessDay(bbEnd);
-        if (minS > validStart) validStart = minS;
-      }
-      if (validStart > newBStart) {
-        const validEnd = addBusinessDays(validStart, blocker.duration - 1);
-        blocker.start = validStart;
-        blocker.end = validEnd;
-        updatesMap[limitId].newStart = formatDate(validStart);
-        updatesMap[limitId].newEnd = formatDate(validEnd);
-      }
-
-      anyBlockerShifted = true;
-    }
-
-    if (!anyBlockerShifted) break;
-
-    // Restore downstream positions to pre-cascade originals and re-run
-    for (const tid of downstream) {
-      const orig = prePositions[tid];
-      if (!orig) continue;
-      const t = taskById[tid];
-      if (t) {
-        t.start = new Date(orig.start);
-        t.end = new Date(orig.end);
-      }
-      delete updatesMap[tid];
-    }
-    gapPreservingDownstream(sourceId, sourceOldEnd, sourceNewEnd, updatesMap, taskById, extraSeedIds);
   }
 }
 
@@ -632,7 +513,7 @@ function validateConstraints(updatesMap, taskById) {
  * @param {string} params.refEnd - YYYY-MM-DD (previous end)
  * @param {number} params.startDelta - signed BD delta
  * @param {number} params.endDelta - signed BD delta
- * @param {string} params.cascadeMode - push-right | pull-left | pull-right | drag-right
+ * @param {string} params.cascadeMode - push-right | pull-left | start-left | pull-right | drag-left | drag-right
  * @param {Array} params.tasks - pre-parsed task objects: { id, name, start, end, duration, status, blockedByIds, blockingIds }
  *                                start/end are Date objects (or null), duration is number
  * @returns {{ updates: Array, movedTaskMap: Object, movedTaskIds: string[], summary: string }}
@@ -694,36 +575,28 @@ export function runCascade({
       break;
     }
 
-    case 'pull-left': {
+    case 'start-left': {
       const upstreamDiag = pullLeftUpstream(sourceTaskId, newStart, updatesMap, taskById);
       diagnostics.iterations = upstreamDiag.iterations;
       diagnostics.capReached = upstreamDiag.capReached;
       diagnostics.unresolvedResidue = upstreamDiag.unresolvedResidue;
       diagnostics.monotonicSafe = upstreamDiag.monotonicSafe;
-
-      // Collect shifted upstream task IDs for fan-out propagation
-      const shiftedUpstreamIds = Object.keys(updatesMap);
-
-      // Save positions before gap-preserving pass (for cross-chain frustration detection)
-      const prePositions = {};
-      for (const id of Object.keys(taskById)) {
-        const t = taskById[id];
-        if (t && t.start && t.end) {
-          prePositions[id] = { start: new Date(t.start), end: new Date(t.end) };
-        }
-      }
-
-      gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById, shiftedUpstreamIds);
-      resolveCrossChainFrustrations(sourceTaskId, refEnd, newEnd, updatesMap, taskById, prePositions, 5, shiftedUpstreamIds);
       break;
     }
 
-    case 'pull-right':
-    case 'drag-right': {
+    case 'pull-left': {
+      gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById);
+      break;
+    }
+
+    case 'pull-right': {
       pullRightUpstream(sourceTaskId, refStart, startDelta, updatesMap, taskById);
-      const seeds = new Set([sourceTaskId]);
-      for (const tid of Object.keys(updatesMap)) { seeds.add(tid); }
-      conflictOnlyDownstream(seeds, updatesMap, taskById);
+      break;
+    }
+
+    case 'drag-left':
+    case 'drag-right': {
+      shiftConnectedComponent(sourceTaskId, startDelta, updatesMap, taskById, [sourceTaskId]);
       break;
     }
 
