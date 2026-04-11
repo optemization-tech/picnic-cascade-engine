@@ -54,7 +54,11 @@ export class NotionClient {
       const waitMs = 1000 - (now - usage[0]) + 5;
       await sleep(Math.max(1, waitMs));
     }
-    // Safety valve — allow request through rather than blocking forever
+    // Safety valve — allow request through rather than blocking forever, but record usage
+    const now = Date.now();
+    const usage = this.tokenUsage.get(slotKey) || [];
+    usage.push(now);
+    this.tokenUsage.set(slotKey, usage);
     console.warn(`[_throttleSlot] hit ${MAX_ITERATIONS} iterations for ${slotKey}, allowing request through`);
   }
 

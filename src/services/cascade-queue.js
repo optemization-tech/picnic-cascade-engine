@@ -150,8 +150,9 @@ export class CascadeQueue {
       .filter(([, lock]) => lock.running);
     if (running.length === 0) return;
 
-    console.log(`Draining ${running.length} in-flight study cascade(s)...`);
-    await Promise.all(
+    console.log(`[cascade-queue] Draining ${running.length} in-flight study cascade(s)...`);
+    const DRAIN_TIMEOUT_MS = 8000;
+    const watchers = Promise.all(
       running.map(([studyId]) => new Promise((resolve) => {
         const check = () => {
           const lock = this._studyLocks.get(studyId);
@@ -161,6 +162,13 @@ export class CascadeQueue {
         check();
       })),
     );
+    await Promise.race([
+      watchers,
+      new Promise((resolve) => setTimeout(() => {
+        console.warn(`[cascade-queue] Drain timeout after ${DRAIN_TIMEOUT_MS}ms, proceeding with shutdown`);
+        resolve();
+      }, DRAIN_TIMEOUT_MS)),
+    ]);
   }
 
   _clearAll() {

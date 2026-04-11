@@ -21,14 +21,19 @@ const server = app.listen(config.port, () => {
 });
 
 // Graceful shutdown — drain in-flight cascade before exit
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, draining in-flight work...');
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received, draining in-flight work...`);
   server.close();
   try {
     await cascadeQueue.drain();
-    console.log('Drain complete, exiting.');
+    console.log('[shutdown] Drain complete, exiting.');
   } catch (err) {
-    console.error('Drain failed:', err);
+    console.error('[shutdown] Drain failed:', err);
   }
   process.exit(0);
-});
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

@@ -1,16 +1,19 @@
-import crypto from 'crypto';
-
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || null;
+import crypto from 'node:crypto';
 
 function safeEqual(actual, expected) {
   const a = Buffer.from(actual || '', 'utf8');
   const b = Buffer.from(expected || '', 'utf8');
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
+  const maxLen = Math.max(a.length, b.length);
+  const pa = Buffer.alloc(maxLen);
+  const pb = Buffer.alloc(maxLen);
+  a.copy(pa);
+  b.copy(pb);
+  return a.length === b.length && crypto.timingSafeEqual(pa, pb);
 }
 
 export function webhookAuth(req, res, next) {
-  if (!WEBHOOK_SECRET) return next();
-  if (safeEqual(req.headers['x-webhook-secret'], WEBHOOK_SECRET)) return next();
+  const secret = process.env.WEBHOOK_SECRET || null;
+  if (!secret) return next();
+  if (safeEqual(req.headers['x-webhook-secret'], secret)) return next();
   res.status(401).json({ error: 'Unauthorized' });
 }
