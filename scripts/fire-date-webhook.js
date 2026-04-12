@@ -51,7 +51,10 @@ const payload = {
 
 const webhookResp = await fetch(url, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    ...(process.env.WEBHOOK_SECRET ? { 'X-Webhook-Secret': process.env.WEBHOOK_SECRET } : {}),
+  },
   body: JSON.stringify(payload),
 });
 

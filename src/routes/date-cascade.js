@@ -5,14 +5,12 @@ import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { enforceConstraints } from '../engine/constraints.js';
 import { buildReportingText } from '../utils/reporting.js';
-import { NotionClient } from '../notion/client.js';
+import { cascadeClient as notionClient } from '../notion/clients.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { cascadeQueue } from '../services/cascade-queue.js';
 import { undoStore } from '../services/undo-store.js';
-
-const notionClient = new NotionClient({ tokens: config.notion.tokens });
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,

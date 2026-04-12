@@ -9,7 +9,9 @@
  * Returns null for falsy input.
  */
 export function parseDate(s) {
-  return s ? new Date(s + 'T00:00:00Z') : null;
+  if (!s) return null;
+  const d = new Date(s + 'T00:00:00Z');
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /**

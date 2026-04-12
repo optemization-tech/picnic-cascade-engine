@@ -31,14 +31,6 @@ export class CascadeTracer {
     this.phases.set(name, (this.phases.get(name) || 0) + duration);
   }
 
-  async wrapAsync(name, fn) {
-    this.startPhase(name);
-    try {
-      return await fn();
-    } finally {
-      this.endPhase(name);
-    }
-  }
 
   count(key) {
     this.counters.set(key, (this.counters.get(key) || 0) + 1);

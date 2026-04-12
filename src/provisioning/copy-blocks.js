@@ -240,7 +240,7 @@ export async function prefetchTemplateBlocks(client, templateIds, {
  *
  * @returns {{ blocksWritten: number, success: boolean }}
  */
-async function processOnePage(client, templateId, productionId, syncCache, { studyName, tracer } = {}) {
+async function processOnePage(client, templateId, productionId, syncCache, { tracer } = {}) {
   const children = await prepareTemplateChildren(client, templateId, syncCache, { tracer });
   if (children.length === 0) return { blocksWritten: 0, success: false };
 

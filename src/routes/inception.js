@@ -1,16 +1,12 @@
 import { config } from '../config.js';
-import { NotionClient } from '../notion/client.js';
+import { provisionClient as notionClient } from '../notion/clients.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { fetchBlueprint, buildTaskTree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
 import { copyBlocks, prefetchTemplateBlocks } from '../provisioning/copy-blocks.js';
-
-const tokens = config.notion.provisionTokens.length > 0
-  ? config.notion.provisionTokens
-  : config.notion.tokens;
-const notionClient = new NotionClient({ tokens });
+import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -231,5 +227,5 @@ async function processInception(body) {
 
 export async function handleInception(req, res) {
   res.status(200).json({ ok: true });
-  void processInception(req.body).catch(err => console.error('[inception] unhandled:', err));
+  flightTracker.track(processInception(req.body).catch(err => console.error('[inception] unhandled:', err)), 'inception');
 }

@@ -349,4 +349,130 @@ describe('CascadeQueue', () => {
     expect(stats.debounceSize).toBe(2);
     expect(stats.studyLockCount).toBe(0); // not yet fired
   });
+
+  describe('_drainStudy error recovery (deadlock prevention)', () => {
+    it('resets lock.running and deletes study lock when _drainStudy throws', async () => {
+      const processFn = vi.fn().mockResolvedValue(undefined);
+      const parseFn = makeParseFn();
+
+      queue.enqueue({ taskId: 'task-1', studyId: 'study-1' }, parseFn, processFn);
+
+      // Before the debounce fires, sabotage _drainStudy so it throws on first call
+      const original = queue._drainStudy.bind(queue);
+      let callCount = 0;
+      queue._drainStudy = async (studyId) => {
+        callCount++;
+        if (callCount === 1) {
+          // Simulate a throw before the while loop — the try/finally inside
+          // _drainStudy won't help here because we bypass it entirely,
+          // but the outer .catch() on the call site will catch this.
+          throw new Error('simulated _drainStudy explosion');
+        }
+        return original(studyId);
+      };
+
+      // Fire the debounce timer — _drainStudy will throw
+      await vi.advanceTimersByTimeAsync(5000);
+      // Flush microtasks so the .catch() handler runs
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The outer .catch() should have cleaned up the lock
+      const lock = queue._studyLocks.get('study-1');
+      expect(lock).toBeUndefined();
+    });
+
+    it('processes new enqueue for the same study after _drainStudy error (no deadlock)', async () => {
+      const processFn1 = vi.fn().mockResolvedValue(undefined);
+      const processFn2 = vi.fn().mockResolvedValue(undefined);
+      const parseFn = makeParseFn();
+
+      queue.enqueue({ taskId: 'task-1', studyId: 'study-1' }, parseFn, processFn1);
+
+      // Sabotage _drainStudy to throw on first call, then restore normal behavior
+      const original = queue._drainStudy.bind(queue);
+      let callCount = 0;
+      queue._drainStudy = async (studyId) => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('simulated _drainStudy explosion');
+        }
+        return original(studyId);
+      };
+
+      // Fire first debounce — _drainStudy throws, .catch() cleans up lock
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // First processFn should NOT have been called (drain blew up before processing)
+      expect(processFn1).not.toHaveBeenCalled();
+
+      // Now enqueue a new task for the SAME study — this is the deadlock test.
+      // If lock.running was stuck at true, this enqueue would never drain.
+      queue.enqueue({ taskId: 'task-2', studyId: 'study-1' }, parseFn, processFn2);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Second processFn should have been called — study is NOT deadlocked
+      expect(processFn2).toHaveBeenCalledTimes(1);
+      expect(queue._studyLocks.size).toBe(0);
+    });
+  });
+
+  describe('drain()', () => {
+    it('clears pending debounce timers and waits for running cascades', async () => {
+      vi.useRealTimers();
+      const realQueue = new CascadeQueue({ debounceMs: 0 });
+      let resolve1;
+      const blocker = new Promise((r) => { resolve1 = r; });
+      const slowFn = vi.fn(async () => { await blocker; });
+      const parseFn = makeParseFn();
+
+      realQueue.enqueue({ taskId: 'task-1', studyId: 'study-1' }, parseFn, slowFn);
+      // Let the setTimeout(0) fire
+      await new Promise((r) => setTimeout(r, 10));
+
+      // task-1 is now running
+      expect(realQueue._studyLocks.get('study-1')?.running).toBe(true);
+
+      // Start drain in background
+      const drainPromise = realQueue.drain();
+
+      // All debounce timers should be cleared
+      expect(realQueue._debounce.size).toBe(0);
+
+      // Unblock the running cascade
+      resolve1();
+      await drainPromise;
+
+      // Study lock cleaned up
+      expect(realQueue._studyLocks.size).toBe(0);
+    });
+
+    it('resolves immediately when nothing is running', async () => {
+      vi.useRealTimers();
+      const emptyQueue = new CascadeQueue({ debounceMs: 5000 });
+      await emptyQueue.drain(); // should not hang
+    });
+
+    it('respects 8s timeout when cascade hangs', async () => {
+      vi.useRealTimers();
+      const realQueue = new CascadeQueue({ debounceMs: 0 });
+      // Create a cascade that never resolves
+      const neverFn = vi.fn(() => new Promise(() => {}));
+      const parseFn = makeParseFn();
+
+      realQueue.enqueue({ taskId: 'task-1', studyId: 'study-1' }, parseFn, neverFn);
+      await new Promise((r) => setTimeout(r, 10));
+
+      const start = Date.now();
+      await realQueue.drain();
+      const elapsed = Date.now() - start;
+
+      // Should complete around 8s (drain timeout), not hang forever
+      expect(elapsed).toBeGreaterThan(7000);
+      expect(elapsed).toBeLessThan(12000);
+      realQueue._clearAll();
+    }, 15000);
+  });
 });

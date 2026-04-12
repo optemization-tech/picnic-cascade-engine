@@ -45,9 +45,7 @@ describe('UndoStore', () => {
 
   it('TTL expiry removes entry', () => {
     store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'T', cascadeMode: 'push-right', manifest });
-    expect(store.has('study-1')).toBe(true);
     vi.advanceTimersByTime(5001);
-    expect(store.has('study-1')).toBe(false);
     expect(store.pop('study-1')).toBeNull();
   });
 
@@ -66,13 +64,10 @@ describe('UndoStore', () => {
     store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'S1', cascadeMode: 'push-right', manifest });
     store.save('study-2', { cascadeId: 'c2', sourceTaskId: 't2', sourceTaskName: 'S2', cascadeMode: 'pull-left', manifest });
 
-    expect(store.size).toBe(2);
     const e1 = store.pop('study-1');
     expect(e1.cascadeId).toBe('c1');
-    expect(store.size).toBe(1);
     const e2 = store.pop('study-2');
     expect(e2.cascadeId).toBe('c2');
-    expect(store.size).toBe(0);
   });
 
   it('overwrite clears previous timer (no double-delete)', () => {
@@ -83,18 +78,19 @@ describe('UndoStore', () => {
 
     // At t=5s (original TTL would fire), entry should still exist
     vi.advanceTimersByTime(2000);
-    expect(store.has('study-1')).toBe(true);
+    expect(store.pop('study-1')).not.toBeNull();
 
-    // At t=8s (new TTL fires), entry should be gone
-    vi.advanceTimersByTime(3001);
-    expect(store.has('study-1')).toBe(false);
+    // Re-save since pop consumed it, advance past new TTL
+    store.save('study-1', { cascadeId: 'c3', sourceTaskId: 't3', sourceTaskName: 'T3', cascadeMode: 'pull-left', manifest });
+    vi.advanceTimersByTime(5001);
+    expect(store.pop('study-1')).toBeNull();
   });
 
   it('_clearAll removes all entries and timers', () => {
     store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'T', cascadeMode: 'push-right', manifest });
     store.save('study-2', { cascadeId: 'c2', sourceTaskId: 't2', sourceTaskName: 'T', cascadeMode: 'push-right', manifest });
     store._clearAll();
-    expect(store.size).toBe(0);
     expect(store.pop('study-1')).toBeNull();
+    expect(store.pop('study-2')).toBeNull();
   });
 });

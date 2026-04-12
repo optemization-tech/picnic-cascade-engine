@@ -1,14 +1,9 @@
 import { config } from '../config.js';
-import { NotionClient } from '../notion/client.js';
+import { deletionClient as notionClient } from '../notion/clients.js';
 import { deleteStudyTasks } from '../provisioning/deletion.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
-
-const tokens = config.notion.deletionTokens.length > 0
-  ? config.notion.deletionTokens
-  : config.notion.tokens;
-
-const notionClient = new NotionClient({ tokens });
+import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -96,7 +91,7 @@ async function processDeletion(body) {
 
 export async function handleDeletion(req, res) {
   res.status(200).json({ ok: true });
-  void processDeletion(req.body).catch((error) => {
+  flightTracker.track(processDeletion(req.body).catch((error) => {
     console.error('[deletion] unhandled processing error:', error);
-  });
+  }), 'deletion');
 }

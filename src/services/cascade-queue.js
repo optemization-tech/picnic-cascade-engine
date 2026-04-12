@@ -80,7 +80,14 @@ export class CascadeQueue {
     }));
 
     if (!lock.running) {
-      this._drainStudy(studyId);
+      this._drainStudy(studyId).catch((err) => {
+        console.error(`[cascade-queue] _drainStudy failed for ${studyId}:`, err);
+        const lock = this._studyLocks.get(studyId);
+        if (lock) {
+          lock.running = false;
+          this._studyLocks.delete(studyId);
+        }
+      });
     }
   }
 
@@ -90,37 +97,39 @@ export class CascadeQueue {
 
     lock.running = true;
 
-    while (lock.queue.length > 0) {
-      const { payload, processFn, meta } = lock.queue.shift();
-      const startMs = Date.now();
+    try {
+      while (lock.queue.length > 0) {
+        const { payload, processFn, meta } = lock.queue.shift();
+        const startMs = Date.now();
 
-      console.log(JSON.stringify({
-        event: 'study_cascade_started',
-        studyId,
-        taskId: meta.taskId,
-        taskName: meta.taskName,
-        queueDepth: lock.queue.length,
-      }));
+        console.log(JSON.stringify({
+          event: 'study_cascade_started',
+          studyId,
+          taskId: meta.taskId,
+          taskName: meta.taskName,
+          queueDepth: lock.queue.length,
+        }));
 
-      try {
-        await processFn(payload);
-      } catch (err) {
-        console.error('[cascade-queue] processFn failed:', err);
+        try {
+          await processFn(payload);
+        } catch (err) {
+          console.error('[cascade-queue] processFn failed:', err);
+        }
+
+        console.log(JSON.stringify({
+          event: 'study_cascade_completed',
+          studyId,
+          taskId: meta.taskId,
+          taskName: meta.taskName,
+          durationMs: Date.now() - startMs,
+          queueDepth: lock.queue.length,
+        }));
       }
-
-      console.log(JSON.stringify({
-        event: 'study_cascade_completed',
-        studyId,
-        taskId: meta.taskId,
-        taskName: meta.taskName,
-        durationMs: Date.now() - startMs,
-        queueDepth: lock.queue.length,
-      }));
+    } finally {
+      lock.running = false;
+      this._studyLocks.delete(studyId);
+      console.log(JSON.stringify({ event: 'study_queue_drained', studyId }));
     }
-
-    lock.running = false;
-    this._studyLocks.delete(studyId);
-    console.log(JSON.stringify({ event: 'study_queue_drained', studyId }));
   }
 
   getStats() {
@@ -134,6 +143,41 @@ export class CascadeQueue {
         }]),
       ),
     };
+  }
+
+  /**
+   * Drain in-flight work for graceful shutdown.
+   * Clears all debounce timers, then waits for any currently-running study to finish.
+   */
+  async drain() {
+    for (const entry of this._debounce.values()) {
+      clearTimeout(entry.timer);
+    }
+    this._debounce.clear();
+
+    const running = [...this._studyLocks.entries()]
+      .filter(([, lock]) => lock.running);
+    if (running.length === 0) return;
+
+    console.log(`[cascade-queue] Draining ${running.length} in-flight study cascade(s)...`);
+    const DRAIN_TIMEOUT_MS = 8000;
+    const watchers = Promise.all(
+      running.map(([studyId]) => new Promise((resolve) => {
+        const check = () => {
+          const lock = this._studyLocks.get(studyId);
+          if (!lock || !lock.running) return resolve();
+          setTimeout(check, 100);
+        };
+        check();
+      })),
+    );
+    await Promise.race([
+      watchers,
+      new Promise((resolve) => setTimeout(() => {
+        console.warn(`[cascade-queue] Drain timeout after ${DRAIN_TIMEOUT_MS}ms, proceeding with shutdown`);
+        resolve();
+      }, DRAIN_TIMEOUT_MS)),
+    ]);
   }
 
   _clearAll() {

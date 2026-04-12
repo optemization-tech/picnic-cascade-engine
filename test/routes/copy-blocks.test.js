@@ -25,8 +25,10 @@ vi.mock('../../src/config.js', () => ({
   },
 }));
 
-vi.mock('../../src/notion/client.js', () => ({
-  NotionClient: vi.fn(() => mocks.mockClient),
+vi.mock('../../src/notion/clients.js', () => ({
+  cascadeClient: mocks.mockClient,
+  provisionClient: mocks.mockClient,
+  deletionClient: mocks.mockClient,
 }));
 
 vi.mock('../../src/provisioning/copy-blocks.js', () => ({

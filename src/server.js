@@ -1,4 +1,5 @@
 import express from 'express';
+import { webhookAuth } from './middleware/webhook-auth.js';
 import { handleDateCascade } from './routes/date-cascade.js';
 import { handleStatusRollup } from './routes/status-rollup.js';
 import { handleInception } from './routes/inception.js';
@@ -6,9 +7,6 @@ import { handleAddTaskSet } from './routes/add-task-set.js';
 import { handleCopyBlocks } from './routes/copy-blocks.js';
 import { handleDeletion } from './routes/deletion.js';
 import { handleUndoCascade } from './routes/undo-cascade.js';
-import { handleDateCascade as handleDateCascadeV2 } from './v2/routes/date-cascade.js';
-import { handleInception as handleInceptionV2 } from './v2/routes/inception.js';
-import { handleAddTaskSet as handleAddTaskSetV2 } from './v2/routes/add-task-set.js';
 
 export function createServer() {
   const app = express();
@@ -25,6 +23,9 @@ export function createServer() {
     });
     next();
   });
+
+  // Webhook auth — requires X-Webhook-Secret header (skipped if WEBHOOK_SECRET unset)
+  app.use('/webhook', webhookAuth);
 
   // Health check
   app.get('/health', (req, res) => {
@@ -45,11 +46,6 @@ export function createServer() {
 
   // Deletion webhook endpoint (use deletion token pool)
   app.post('/webhook/deletion', handleDeletion);
-
-  // V2 endpoints (parent-level-only, top-down subtask fan-out)
-  app.post('/webhook/v2/date-cascade', handleDateCascadeV2);
-  app.post('/webhook/v2/inception', handleInceptionV2);
-  app.post('/webhook/v2/add-task-set', handleAddTaskSetV2);
 
   return app;
 }

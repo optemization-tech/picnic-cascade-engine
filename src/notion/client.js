@@ -39,7 +39,8 @@ export class NotionClient {
 
   async _throttleSlot(slotKey) {
     const maxPerSecond = this.rateLimit.maxPerSecond || 9;
-    for (;;) {
+    const MAX_ITERATIONS = 100;
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
       const now = Date.now();
       const windowStart = now - 1000;
       const usage = (this.tokenUsage.get(slotKey) || []).filter((ts) => ts > windowStart);
@@ -53,6 +54,12 @@ export class NotionClient {
       const waitMs = 1000 - (now - usage[0]) + 5;
       await sleep(Math.max(1, waitMs));
     }
+    // Safety valve — allow request through rather than blocking forever, but record usage
+    const now = Date.now();
+    const usage = this.tokenUsage.get(slotKey) || [];
+    usage.push(now);
+    this.tokenUsage.set(slotKey, usage);
+    console.warn(`[_throttleSlot] hit ${MAX_ITERATIONS} iterations for ${slotKey}, allowing request through`);
   }
 
   async _requestWithSlot(slot, method, path, body, { tracer } = {}) {
@@ -73,6 +80,7 @@ export class NotionClient {
             'Content-Type': 'application/json',
           },
           body: body ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(30_000),
         });
 
         const text = await response.text();
@@ -99,6 +107,8 @@ export class NotionClient {
         if (attempt === maxAttempts) break;
         // Don't retry non-retryable HTTP errors (4xx except 429)
         if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) break;
+        // Timeout errors: retry once (transient), but not all 5 attempts (30s × 5 = 150s)
+        if ((err.name === 'TimeoutError' || err.name === 'AbortError') && attempt >= 2) break;
         const jitter = Math.floor(Math.random() * 100);
         const backoff = baseMs * (2 ** (attempt - 1)) + jitter;
         if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: err.status || 0, tokenIndex });
@@ -186,8 +196,10 @@ export class NotionClient {
         } catch (err) {
           // Notion can invalidate cursors when the dataset changes mid-pagination.
           // Retry the entire query from scratch rather than returning partial results.
-          if (cursor && err.message?.includes('start_cursor') && attempt < maxRetries) {
-            console.warn(`[queryDatabase] cursor invalidated after ${results.length} results (attempt ${attempt + 1}/${maxRetries + 1}), retrying from scratch`);
+          if (cursor && err.message?.includes('start_cursor')) {
+            if (attempt < maxRetries) {
+              console.warn(`[queryDatabase] cursor invalidated after ${results.length} results (attempt ${attempt + 1}/${maxRetries + 1}), retrying from scratch`);
+            }
             cursorFailed = true;
             break;
           }
@@ -197,6 +209,9 @@ export class NotionClient {
 
       if (!cursorFailed) return results;
     }
+    // All cursor retries exhausted — throw rather than returning [] which callers
+    // would misinterpret as "no tasks exist" (enables double-inception, phantom cascades)
+    throw new Error(`[queryDatabase] all ${maxRetries + 1} cursor retry attempts exhausted for db ${dbId}`);
   }
 
   /**

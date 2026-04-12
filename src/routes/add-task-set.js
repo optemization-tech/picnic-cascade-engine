@@ -1,16 +1,12 @@
 import { config } from '../config.js';
-import { NotionClient } from '../notion/client.js';
+import { provisionClient as notionClient } from '../notion/clients.js';
+import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
+import { flightTracker } from '../services/flight-tracker.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { fetchBlueprint, buildTaskTree, filterBlueprintSubtree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
-
-const tokens = config.notion.provisionTokens.length > 0
-  ? config.notion.provisionTokens
-  : config.notion.tokens;
-
-const notionClient = new NotionClient({ tokens });
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -421,7 +417,6 @@ async function processAddTaskSet(req) {
     }
 
     const successSummary = `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`;
-    const selfUrl = `http://localhost:${config.port}/webhook/copy-blocks`;
 
     await Promise.all([
       (async () => {
@@ -434,15 +429,6 @@ async function processAddTaskSet(req) {
           tracer.endPhase('disableImportMode');
         }
       })(),
-      fetch(selfUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          idMapping: newIdMapping,
-          studyPageId,
-          studyName,
-        }),
-      }).catch(err => console.warn('[add-task-set] copy-blocks fire-and-forget failed:', err.message)),
       activityLogService.logTerminalEvent({
         workflow: 'Add Task Set',
         status: 'success',
@@ -470,6 +456,13 @@ async function processAddTaskSet(req) {
         { tracer },
       ),
     ]);
+
+    // Fire copy-blocks independently — don't block Import Mode disable or activity logging
+    void copyBlocks(notionClient, newIdMapping, {
+      studyPageId,
+      studyName,
+      tracer,
+    }).catch(err => console.warn('[add-task-set] copy-blocks failed:', err.message));
 
     console.log(tracer.toConsoleLog());
   } catch (error) {
@@ -521,5 +514,5 @@ async function processAddTaskSet(req) {
 
 export async function handleAddTaskSet(req, res) {
   res.status(200).json({ ok: true });
-  void processAddTaskSet(req).catch(err => console.error('[add-task-set] unhandled:', err));
+  flightTracker.track(processAddTaskSet(req).catch(err => console.error('[add-task-set] unhandled:', err)), 'add-task-set');
 }
