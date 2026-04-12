@@ -6,6 +6,7 @@ import { fetchBlueprint, buildTaskTree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
 import { copyBlocks, prefetchTemplateBlocks } from '../provisioning/copy-blocks.js';
+import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -226,5 +227,5 @@ async function processInception(body) {
 
 export async function handleInception(req, res) {
   res.status(200).json({ ok: true });
-  void processInception(req.body).catch(err => console.error('[inception] unhandled:', err));
+  flightTracker.track(processInception(req.body).catch(err => console.error('[inception] unhandled:', err)), 'inception');
 }

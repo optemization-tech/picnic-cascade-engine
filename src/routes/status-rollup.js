@@ -4,6 +4,7 @@ import { computeStatusRollup } from '../engine/status-rollup.js';
 import { cascadeClient as notionClient } from '../notion/clients.js';
 import { normalizeTask } from '../notion/properties.js';
 import { ActivityLogService } from '../services/activity-log.js';
+import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -76,7 +77,7 @@ async function processStatusRollup(payload) {
 
 export async function handleStatusRollup(req, res) {
   res.status(200).json({ ok: true });
-  void processStatusRollup(req.body).catch(async (error) => {
+  flightTracker.track(processStatusRollup(req.body).catch(async (error) => {
     console.error('[status-rollup] processing failed:', error);
     try {
       const parsed = parseWebhookPayload(req.body);
@@ -90,5 +91,5 @@ export async function handleStatusRollup(req, res) {
     } catch {
       // Swallow nested reporting failures.
     }
-  });
+  }), 'status-rollup');
 }

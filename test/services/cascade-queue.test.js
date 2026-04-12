@@ -350,6 +350,75 @@ describe('CascadeQueue', () => {
     expect(stats.studyLockCount).toBe(0); // not yet fired
   });
 
+  describe('_drainStudy error recovery (deadlock prevention)', () => {
+    it('resets lock.running and deletes study lock when _drainStudy throws', async () => {
+      const processFn = vi.fn().mockResolvedValue(undefined);
+      const parseFn = makeParseFn();
+
+      queue.enqueue({ taskId: 'task-1', studyId: 'study-1' }, parseFn, processFn);
+
+      // Before the debounce fires, sabotage _drainStudy so it throws on first call
+      const original = queue._drainStudy.bind(queue);
+      let callCount = 0;
+      queue._drainStudy = async (studyId) => {
+        callCount++;
+        if (callCount === 1) {
+          // Simulate a throw before the while loop — the try/finally inside
+          // _drainStudy won't help here because we bypass it entirely,
+          // but the outer .catch() on the call site will catch this.
+          throw new Error('simulated _drainStudy explosion');
+        }
+        return original(studyId);
+      };
+
+      // Fire the debounce timer — _drainStudy will throw
+      await vi.advanceTimersByTimeAsync(5000);
+      // Flush microtasks so the .catch() handler runs
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The outer .catch() should have cleaned up the lock
+      const lock = queue._studyLocks.get('study-1');
+      expect(lock).toBeUndefined();
+    });
+
+    it('processes new enqueue for the same study after _drainStudy error (no deadlock)', async () => {
+      const processFn1 = vi.fn().mockResolvedValue(undefined);
+      const processFn2 = vi.fn().mockResolvedValue(undefined);
+      const parseFn = makeParseFn();
+
+      queue.enqueue({ taskId: 'task-1', studyId: 'study-1' }, parseFn, processFn1);
+
+      // Sabotage _drainStudy to throw on first call, then restore normal behavior
+      const original = queue._drainStudy.bind(queue);
+      let callCount = 0;
+      queue._drainStudy = async (studyId) => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('simulated _drainStudy explosion');
+        }
+        return original(studyId);
+      };
+
+      // Fire first debounce — _drainStudy throws, .catch() cleans up lock
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // First processFn should NOT have been called (drain blew up before processing)
+      expect(processFn1).not.toHaveBeenCalled();
+
+      // Now enqueue a new task for the SAME study — this is the deadlock test.
+      // If lock.running was stuck at true, this enqueue would never drain.
+      queue.enqueue({ taskId: 'task-2', studyId: 'study-1' }, parseFn, processFn2);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Second processFn should have been called — study is NOT deadlocked
+      expect(processFn2).toHaveBeenCalledTimes(1);
+      expect(queue._studyLocks.size).toBe(0);
+    });
+  });
+
   describe('drain()', () => {
     it('clears pending debounce timers and waits for running cascades', async () => {
       vi.useRealTimers();

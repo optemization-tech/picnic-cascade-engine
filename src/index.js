@@ -1,6 +1,9 @@
 import { config } from './config.js';
 import { createServer } from './server.js';
 import { cascadeQueue } from './services/cascade-queue.js';
+import { flightTracker } from './services/flight-tracker.js';
+import { NotionClient } from './notion/client.js';
+import { sweepStuckImportMode } from './startup/import-mode-sweep.js';
 
 const app = createServer();
 
@@ -18,6 +21,16 @@ const server = app.listen(config.port, () => {
   console.log(`  POST /webhook/deletion`);
   console.log(`  POST /webhook/undo-cascade`);
   console.log(`  GET  /health`);
+
+  // Safety net: clear stuck Import Mode from prior crashes/OOM/SIGKILL.
+  // Runs async — server accepts webhooks immediately while this completes.
+  (async () => {
+    const tokens = config.notion.provisionTokens.length > 0
+      ? config.notion.provisionTokens
+      : config.notion.tokens;
+    const sweepClient = new NotionClient({ tokens });
+    await sweepStuckImportMode(sweepClient, config.notion.studiesDbId);
+  })();
 });
 
 // Graceful shutdown — drain in-flight cascade before exit
@@ -28,7 +41,7 @@ async function shutdown(signal) {
   console.log(`[shutdown] ${signal} received, draining in-flight work...`);
   server.close();
   try {
-    await cascadeQueue.drain();
+    await Promise.all([cascadeQueue.drain(), flightTracker.drain(8000)]);
     console.log('[shutdown] Drain complete, exiting.');
   } catch (err) {
     console.error('[shutdown] Drain failed:', err);

@@ -3,6 +3,7 @@ import { provisionClient as notionClient } from '../notion/clients.js';
 import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
+import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -105,5 +106,5 @@ async function processCopyBlocks(body) {
 
 export async function handleCopyBlocks(req, res) {
   res.status(200).json({ ok: true });
-  void processCopyBlocks(req.body).catch(err => console.error('[copy-blocks] unhandled:', err));
+  flightTracker.track(processCopyBlocks(req.body).catch(err => console.error('[copy-blocks] unhandled:', err)), 'copy-blocks');
 }

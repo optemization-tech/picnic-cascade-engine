@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   filterBlueprintSubtree: vi.fn(),
   createStudyTasks: vi.fn(),
   wireRemainingRelations: vi.fn(),
+  copyBlocks: vi.fn(),
   activityLogService: {
     logTerminalEvent: vi.fn(),
   },
@@ -52,6 +53,10 @@ vi.mock('../../src/provisioning/wire-relations.js', () => ({
   wireRemainingRelations: mocks.wireRemainingRelations,
 }));
 
+vi.mock('../../src/provisioning/copy-blocks.js', () => ({
+  copyBlocks: mocks.copyBlocks,
+}));
+
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
 }));
@@ -89,19 +94,12 @@ function mockStudyPage({ importMode = false, contractSignDate = '2026-01-15' } =
 }
 
 describe('add-task-set route', () => {
-  let savedFetch;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    savedFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+    mocks.copyBlocks.mockResolvedValue({ blocksWrittenCount: 0, pagesProcessed: 0, pagesSkipped: 0 });
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true, pageId: 'page-1' });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.request.mockResolvedValue({});
-  });
-
-  afterEach(() => {
-    globalThis.fetch = savedFetch;
   });
 
   it('returns 200 immediately', async () => {
@@ -266,12 +264,13 @@ describe('add-task-set route', () => {
       }),
     );
 
-    // Fires copy-blocks self-POST
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/webhook/copy-blocks',
+    // Fires copy-blocks directly (no self-HTTP)
+    expect(mocks.copyBlocks).toHaveBeenCalledWith(
+      mocks.mockClient,
+      expect.objectContaining({ 'bp-1': 'prod-1', 'bp-2': 'prod-2' }),
       expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('prod-1'),
+        studyPageId: 'study-1',
+        studyName: 'Test Study',
       }),
     );
 
