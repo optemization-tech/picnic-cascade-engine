@@ -107,6 +107,8 @@ export class NotionClient {
         if (attempt === maxAttempts) break;
         // Don't retry non-retryable HTTP errors (4xx except 429)
         if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) break;
+        // Timeout errors: retry once (transient), but not all 5 attempts (30s × 5 = 150s)
+        if ((err.name === 'TimeoutError' || err.name === 'AbortError') && attempt >= 2) break;
         const jitter = Math.floor(Math.random() * 100);
         const backoff = baseMs * (2 ** (attempt - 1)) + jitter;
         if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: err.status || 0, tokenIndex });
@@ -194,8 +196,10 @@ export class NotionClient {
         } catch (err) {
           // Notion can invalidate cursors when the dataset changes mid-pagination.
           // Retry the entire query from scratch rather than returning partial results.
-          if (cursor && err.message?.includes('start_cursor') && attempt < maxRetries) {
-            console.warn(`[queryDatabase] cursor invalidated after ${results.length} results (attempt ${attempt + 1}/${maxRetries + 1}), retrying from scratch`);
+          if (cursor && err.message?.includes('start_cursor')) {
+            if (attempt < maxRetries) {
+              console.warn(`[queryDatabase] cursor invalidated after ${results.length} results (attempt ${attempt + 1}/${maxRetries + 1}), retrying from scratch`);
+            }
             cursorFailed = true;
             break;
           }
@@ -205,9 +209,9 @@ export class NotionClient {
 
       if (!cursorFailed) return results;
     }
-    // All cursor retries exhausted — return empty rather than undefined
-    console.warn(`[queryDatabase] all ${maxRetries + 1} cursor retry attempts exhausted`);
-    return [];
+    // All cursor retries exhausted — throw rather than returning [] which callers
+    // would misinterpret as "no tasks exist" (enables double-inception, phantom cascades)
+    throw new Error(`[queryDatabase] all ${maxRetries + 1} cursor retry attempts exhausted for db ${dbId}`);
   }
 
   /**
