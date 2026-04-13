@@ -60,8 +60,8 @@ Grouped by theme, not P-level. File:line anchors are on `main` @ HEAD.
 - **#27 Status rollup not serialized via `cascadeQueue`** — `src/routes/status-rollup.js:80`. Uses `flightTracker.track` (fire-and-forget tracking for shutdown drain) instead of `cascadeQueue.enqueue`. Concurrent rollups for the same parent can race and write conflicting status values.
 
 ### Maintainability
-- **#19 Notion property-name string literals scattered** — 75 occurrences across 13 files (down from 80+/15+). Single `PROPERTY_NAMES` map in `notion/schema.js` still the right fix; a silent rename would still fail on unknown properties.
-- **#20 `isFrozen` / `FROZEN_STATUSES` duplicated 3×** — `src/engine/cascade.js:18-22`, `src/engine/parent-subtask.js:9-13`, `src/gates/guards.js:98-100`. Adding a status like `Cancelled` still requires editing 3 files.
+- **#19 Notion property-name string literals scattered** — ~70 occurrences across 12 files (down from 80+/15+). Single `PROPERTY_NAMES` map in `notion/schema.js` still the right fix; a silent rename would still fail on unknown properties.
+- **#20 `isFrozen` duplicated 3× (plus inline `['Done', 'N/A']` in guards)** — `isFrozen` function at `src/engine/cascade.js:18-22` and `src/engine/parent-subtask.js:9-13` (both backed by a `FROZEN_STATUSES` constant), and at `src/gates/guards.js:98-100` which inlines `['Done', 'N/A']` directly. Consolidation to a single `utils/status.js` (exporting `isFrozen` + `FROZEN_STATUSES`) normalizes all 3 sites. Adding a status like `Cancelled` still requires editing 3 files.
 - **#21 Kahn's topo sort duplicated — now 4 sites** (was 5) — `src/engine/cascade.js:96-119, 289-316, 418-441` + `src/provisioning/blueprint.js:114-146`. `parent-subtask.js` no longer hosts one. `topoSort(nodeIds, getSuccessors)` utility still warranted.
 
 ### Design-decision flags (may be intentional, like #4)
