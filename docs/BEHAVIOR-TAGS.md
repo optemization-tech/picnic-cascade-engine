@@ -1,6 +1,8 @@
-# ENGINE-BEHAVIOR-REFERENCE
+# BEHAVIOR-TAGS
 
-This document is the in-repo behavior reference for the cascade engine. It is the source used by the traceability check in `scripts/check-behavior-traceability.js`.
+This document is the canonical registry of `BEH-*` behavior IDs. Every ID listed here must be covered by at least one tagged test — the traceability check in `scripts/check-behavior-traceability.js` enforces this on every run.
+
+For the behavior contract itself (governance matrix, cross-chain algorithm, changelog, webhook auth, graceful shutdown, startup sweep), see [`ENGINE-BEHAVIOR-REFERENCE.md`](./ENGINE-BEHAVIOR-REFERENCE.md). For implementation-level pseudocode and `file:line` references, see [`CASCADE-RULEBOOK.md`](./CASCADE-RULEBOOK.md).
 
 ## 1) Core Cascade Modes
 

@@ -6,6 +6,8 @@ This is the authoritative testing reference for the PicnicHealth cascade engine.
 - Source of truth for behavior: `ENGINE-BEHAVIOR-REFERENCE.md` (L2) and the code (L3)
 - Source of truth for testing: this file
 - Source of truth for requirements: Workflow Requirements Doc in Notion (L1)
+- Machine-readable `BEH-*` tag registry: `BEHAVIOR-TAGS.md` (enforced by `scripts/check-behavior-traceability.js`)
+- Implementation-detailed rulebook: `CASCADE-RULEBOOK.md`
 
 If this file disagrees with `ENGINE-BEHAVIOR-REFERENCE.md` or the code, update this file.
 
