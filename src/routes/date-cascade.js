@@ -5,6 +5,7 @@ import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { enforceConstraints } from '../engine/constraints.js';
 import { buildReportingText } from '../utils/reporting.js';
+import { formatDate } from '../utils/business-days.js';
 import { cascadeClient as notionClient } from '../notion/clients.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
@@ -211,11 +212,19 @@ async function processDateCascade(payload) {
 
     // Snapshot pre-cascade dates for undo capability.
     // allTasks has current dates for all downstream tasks (only source has changed).
+    // normalizeTask returns Date objects for start/end; we flatten to 'YYYY-MM-DD' strings here
+    // so the undo manifest is uniformly string-typed and safe to sort/send to Notion.
     const preSnapshot = new Map();
     for (const t of allTasks) {
-      preSnapshot.set(t.id, { start: t.start, end: t.end, refStart: t.refStart, refEnd: t.refEnd });
+      preSnapshot.set(t.id, {
+        start: t.start ? formatDate(t.start) : null,
+        end: t.end ? formatDate(t.end) : null,
+        refStart: t.refStart,
+        refEnd: t.refEnd,
+      });
     }
-    // Source task's pre-edit dates come from webhook payload (allTasks already has the new edit)
+    // Source task's pre-edit dates come from webhook payload (allTasks already has the new edit).
+    // parsed.refStart/refEnd are already 'YYYY-MM-DD' strings — no conversion needed.
     preSnapshot.set(parsed.taskId, {
       start: parsed.refStart, end: parsed.refEnd,
       refStart: parsed.refStart, refEnd: parsed.refEnd,
