@@ -2,3 +2,9 @@ node_modules/
 .env
 .DS_Store
 .gstack/
+
+# Client-level artifacts — must never land inside the code repo.
+# pulse-log/ belongs at clients/picnic-health/pulse-log/ (see CLAUDE.md pulse-log rule).
+# resources/ is a pre-code-era engagement folder that predates this repo.
+pulse-log/
+resources/

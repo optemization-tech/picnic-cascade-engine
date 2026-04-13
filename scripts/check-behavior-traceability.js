@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const repoRoot = process.cwd();
-const docsPath = path.join(repoRoot, 'docs', 'ENGINE-BEHAVIOR-REFERENCE.md');
+const docsPath = path.join(repoRoot, 'docs', 'BEHAVIOR-TAGS.md');
 const testRoot = path.join(repoRoot, 'test');
 
 function walk(dir) {
@@ -38,7 +38,7 @@ if (!fs.existsSync(testRoot)) {
 const docText = fs.readFileSync(docsPath, 'utf8');
 const requiredIds = [...extractBehaviorIds(docText)].sort();
 if (requiredIds.length === 0) {
-  console.error('No behavior IDs found in docs/ENGINE-BEHAVIOR-REFERENCE.md');
+  console.error('No behavior IDs found in docs/BEHAVIOR-TAGS.md');
   process.exit(1);
 }
 
