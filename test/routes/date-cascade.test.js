@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   activityLogService: {
     logTerminalEvent: vi.fn(),
   },
+  undoStore: {
+    save: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -50,6 +53,9 @@ vi.mock('../../src/engine/constraints.js', () => ({ enforceConstraints: mocks.en
 vi.mock('../../src/notion/queries.js', () => ({ queryStudyTasks: mocks.queryStudyTasks }));
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
+}));
+vi.mock('../../src/services/undo-store.js', () => ({
+  undoStore: mocks.undoStore,
 }));
 vi.mock('../../src/services/cascade-queue.js', () => ({
   cascadeQueue: {
@@ -291,6 +297,84 @@ describe('date-cascade route safety', () => {
       'Cascade complete for Source: push-right (3 task updates)',
       expect.any(Object),
     );
+  });
+
+  it('normalizes Date-typed task start/end to YYYY-MM-DD strings in undo manifest', async () => {
+    // Regression: 2026-04-13 production incident. normalizeTask returns Date objects for
+    // t.start/t.end, and the undo manifest propagated them verbatim. The Undo Cascade sort
+    // then called .localeCompare on a Date and threw. Here we prove the snapshot site
+    // converts to strings before handing off to undoStore.save.
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 0,
+      endDelta: 1,
+      refStart: '2026-04-01',
+      refEnd: '2026-04-02',
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    // Matches what normalizeTask actually produces: start/end are Date objects.
+    mocks.queryStudyTasks.mockResolvedValue([
+      {
+        id: 'source',
+        parentId: null,
+        start: new Date('2026-04-01T00:00:00Z'),
+        end: new Date('2026-04-02T00:00:00Z'),
+      },
+      {
+        id: 'task-a',
+        parentId: null,
+        start: new Date('2026-04-05T00:00:00Z'),
+        end: new Date('2026-04-06T00:00:00Z'),
+      },
+    ]);
+    mocks.classify.mockReturnValue({
+      skip: false,
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source',
+      newStart: '2026-04-01',
+      newEnd: '2026-04-03',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-03',
+      startDelta: 0,
+      endDelta: 1,
+      cascadeMode: 'push-right',
+      parentTaskId: null,
+      parentMode: 'case-a',
+    });
+    mocks.runCascade.mockReturnValue({
+      updates: [{ taskId: 'task-a', newStart: '2026-04-06', newEnd: '2026-04-07' }],
+      movedTaskIds: ['task-a'],
+      movedTaskMap: { 'task-a': { newStart: '2026-04-06', newEnd: '2026-04-07' } },
+      diagnostics: {},
+    });
+    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: 'case-a', rolledUpStart: null, rolledUpEnd: null });
+    mocks.enforceConstraints.mockReturnValue({ newStart: '2026-04-01', newEnd: '2026-04-03', constrained: false, merged: false });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.patchPages.mockResolvedValueOnce({ updatedCount: 2, taskIds: ['source', 'task-a'] });
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.undoStore.save).toHaveBeenCalledTimes(1);
+    const savedEntry = mocks.undoStore.save.mock.calls[0][1];
+    const manifest = savedEntry.manifest;
+    // The manifest must be string-typed for both oldStart and oldEnd on every entry —
+    // otherwise Undo Cascade's sort (.localeCompare) blows up in production.
+    for (const taskId of Object.keys(manifest)) {
+      expect(typeof manifest[taskId].oldStart).toBe('string');
+      expect(typeof manifest[taskId].oldEnd).toBe('string');
+      expect(manifest[taskId].oldStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(manifest[taskId].oldEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+    expect(manifest['task-a'].oldStart).toBe('2026-04-05');
+    expect(manifest['task-a'].oldEnd).toBe('2026-04-06');
   });
 
   it('logs failure when processing throws', async () => {

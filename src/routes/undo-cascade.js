@@ -53,10 +53,11 @@ async function processUndoCascade(payload) {
         },
       },
     }));
-    // Sort by ascending start date so top-of-timeline tasks restore first
-    restorePayload.sort((a, b) =>
-      (a.properties['Dates'].date.start || '').localeCompare(b.properties['Dates'].date.start || ''),
-    );
+    // Sort by ascending start date so top-of-timeline tasks restore first.
+    // String() coercion is defense-in-depth: if a non-string ever sneaks into the manifest
+    // (see 2026-04-13 incident: Date objects threw .localeCompare), the sort degrades gracefully.
+    const startKey = (p) => String(p.properties['Dates'].date.start ?? '');
+    restorePayload.sort((a, b) => startKey(a).localeCompare(startKey(b)));
     await notionClient.patchPages(restorePayload);
 
     // Only consume the undo entry after successful restore.
