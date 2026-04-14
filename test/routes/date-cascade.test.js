@@ -41,6 +41,7 @@ vi.mock('../../src/notion/clients.js', () => ({
   cascadeClient: mocks.mockClient,
   provisionClient: mocks.mockClient,
   deletionClient: mocks.mockClient,
+  commentClient: mocks.mockClient,
 }));
 
 vi.mock('../../src/gates/guards.js', () => ({
@@ -436,7 +437,7 @@ describe('date-cascade route safety', () => {
       sourceTaskName: 'Source',
       triggeredByUserId: 'user-abc',
       editedByBot: false,
-      summary: 'push-right: Source (2 updates)',
+      summary: 'Source updated — 2 dependent task(s) rescheduled',
     }));
   });
 
@@ -467,7 +468,7 @@ describe('date-cascade route safety', () => {
       status: 'failed',
       studyId: 'study-1',
       sourceTaskName: 'Source',
-      summary: expect.stringContaining('Cascade failed'),
+      summary: expect.stringContaining('Date cascade failed'),
     }));
   });
 
@@ -547,7 +548,7 @@ describe('date-cascade route safety', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
       status: 'failed',
-      summary: expect.stringContaining('Cascade failed'),
+      summary: expect.stringContaining('cascade failed'),
     }));
   });
 });

@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { cascadeClient as notionClient } from '../notion/clients.js';
+import { cascadeClient as notionClient, commentClient } from '../notion/clients.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { undoStore } from '../services/undo-store.js';
@@ -8,7 +8,7 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
-const studyCommentService = new StudyCommentService({ notionClient });
+const studyCommentService = new StudyCommentService({ notionClient: commentClient });
 
 async function processUndoCascade(payload) {
   const startTime = Date.now();

@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { provisionClient as notionClient } from '../notion/clients.js';
+import { provisionClient as notionClient, commentClient } from '../notion/clients.js';
 import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
@@ -12,7 +12,7 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
-const studyCommentService = new StudyCommentService({ notionClient });
+const studyCommentService = new StudyCommentService({ notionClient: commentClient });
 
 /**
  * For repeat-delivery buttons, scan existing production tasks for the max
@@ -448,6 +448,7 @@ async function processAddTaskSet(req) {
     }
 
     const successSummary = `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`;
+    const commentSummary = `${buttonType} tasks added — ${createResult.totalCreated} tasks created`;
 
     await Promise.all([
       (async () => {
@@ -496,7 +497,7 @@ async function processAddTaskSet(req) {
         sourceTaskName: `${studyName} (${buttonType})`,
         triggeredByUserId,
         editedByBot,
-        summary: successSummary,
+        summary: commentSummary,
       }).catch(() => {}),
     ]);
 
@@ -549,7 +550,7 @@ async function processAddTaskSet(req) {
           sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
           triggeredByUserId,
           editedByBot,
-          summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
+          summary: `Failed to add ${buttonType} tasks: ${String(error.message || error).slice(0, 150)}`,
         }).catch(() => {}),
       ]);
     } catch { /* don't mask original error */ }

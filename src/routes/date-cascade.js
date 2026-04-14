@@ -6,7 +6,7 @@ import { runParentSubtask } from '../engine/parent-subtask.js';
 import { enforceConstraints } from '../engine/constraints.js';
 import { buildReportingText } from '../utils/reporting.js';
 import { formatDate } from '../utils/business-days.js';
-import { cascadeClient as notionClient } from '../notion/clients.js';
+import { cascadeClient as notionClient, commentClient } from '../notion/clients.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
@@ -17,12 +17,12 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
-const studyCommentService = new StudyCommentService({ notionClient });
+const studyCommentService = new StudyCommentService({ notionClient: commentClient });
 const DIRECT_PARENT_WARNING = '⚠️ This task has subtasks — edit a subtask directly to shift dates and trigger cascading.';
 const DIRECT_PARENT_REVERT_WARNING = 'Parent date edit reverted — edit a subtask directly to shift dates and trigger cascading.';
 
 function summarizeFailure(error) {
-  return `Cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
+  return `Date cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
 }
 
 function buildActivityDetails({ parsed, classified, patched, constrainedSource, cascadeResult, error, noActionReason, tracer }) {
@@ -411,8 +411,8 @@ async function processDateCascade(payload) {
         triggeredByUserId: parsed.triggeredByUserId,
         editedByBot: parsed.editedByBot,
         summary: capReached
-          ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
-          : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
+          ? `Date cascade for ${parsed.taskName} hit safety limit — ${residueCount} task(s) may need manual review`
+          : `${parsed.taskName} updated — ${patched.updatedCount} dependent task(s) rescheduled`,
       }).catch(() => {}),
     ]);
 

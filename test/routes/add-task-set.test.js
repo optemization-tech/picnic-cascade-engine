@@ -37,6 +37,7 @@ vi.mock('../../src/notion/clients.js', () => ({
   cascadeClient: mocks.mockClient,
   provisionClient: mocks.mockClient,
   deletionClient: mocks.mockClient,
+  commentClient: mocks.mockClient,
 }));
 
 vi.mock('../../src/provisioning/blueprint.js', () => ({

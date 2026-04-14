@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { provisionClient as notionClient } from '../notion/clients.js';
+import { provisionClient as notionClient, commentClient } from '../notion/clients.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
@@ -12,7 +12,7 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
-const studyCommentService = new StudyCommentService({ notionClient });
+const studyCommentService = new StudyCommentService({ notionClient: commentClient });
 
 async function processInception(body) {
   const studyPageId = body?.data?.id || body?.studyPageId;
@@ -167,6 +167,8 @@ async function processInception(body) {
     ]);
 
     const completionMessage = `Inception complete: ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`;
+    // Human-friendly version for study page comments (no internal jargon)
+    const commentSummary = `Study setup complete — ${createResult.totalCreated} tasks created`;
 
     const disableImportModePromise = (async () => {
       tracer.startPhase('disableImportMode');
@@ -228,7 +230,7 @@ async function processInception(body) {
         sourceTaskName: studyName,
         triggeredByUserId,
         editedByBot,
-        summary: completionMessage,
+        summary: commentSummary,
       }).catch(() => {}),
     ]);
 
@@ -264,7 +266,7 @@ async function processInception(body) {
           sourceTaskName: studyName || null,
           triggeredByUserId,
           editedByBot,
-          summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
+          summary: `Study setup failed: ${String(error.message || error).slice(0, 180)}`,
         }).catch(() => {}),
       ]);
     } catch { /* don't mask original error */ }

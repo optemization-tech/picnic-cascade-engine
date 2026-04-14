@@ -37,6 +37,8 @@ export const config = {
     provisionTokens: collectTokens('NOTION_PROVISION_TOKEN'),
     // Deletion pool — destructive dev utility (fully isolated)
     deletionTokens: collectTokens('NOTION_DELETION_TOKEN'),
+    // Comment pool — dedicated integration for study page comments (distinct identity)
+    commentTokens: collectTokens('NOTION_COMMENT_TOKEN'),
     studyTasksDbId: required('STUDY_TASKS_DB_ID'),
     studiesDbId: required('STUDIES_DB_ID'),
     blueprintDbId: process.env.BLUEPRINT_DB_ID || null,

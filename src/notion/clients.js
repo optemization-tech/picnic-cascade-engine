@@ -14,3 +14,9 @@ export const deletionClient = new NotionClient({
     ? config.notion.deletionTokens
     : config.notion.tokens,
 });
+
+export const commentClient = new NotionClient({
+  tokens: config.notion.commentTokens.length > 0
+    ? config.notion.commentTokens
+    : config.notion.tokens,
+});
