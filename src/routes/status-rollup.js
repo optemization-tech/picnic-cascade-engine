@@ -5,6 +5,7 @@ import { cascadeClient as notionClient, commentClient } from '../notion/clients.
 import { normalizeTask } from '../notion/properties.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { flightTracker } from '../services/flight-tracker.js';
+// No StudyCommentService — status-rollup is a background child-triggered event, not user-facing.
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,

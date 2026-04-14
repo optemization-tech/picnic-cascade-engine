@@ -19,6 +19,7 @@ vi.mock('../../src/config.js', () => ({
   config: {
     notion: {
       tokens: ['token-1'],
+      commentTokens: [],
       studyTasksDbId: 'db-study-tasks',
       studiesDbId: 'db-studies',
       activityLogDbId: 'db-activity-log',

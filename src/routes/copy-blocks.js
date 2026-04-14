@@ -4,6 +4,7 @@ import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { flightTracker } from '../services/flight-tracker.js';
+// No StudyCommentService — copy-blocks is triggered internally by inception/add-task-set which post their own comments.
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,

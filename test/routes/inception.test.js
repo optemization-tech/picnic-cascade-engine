@@ -225,6 +225,13 @@ describe('inception route', () => {
         summary: 'No blueprint tasks found',
       }),
     );
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'failed',
+        summary: 'No blueprint tasks found',
+      }),
+    );
     // Should NOT proceed to create tasks
     expect(mocks.createStudyTasks).not.toHaveBeenCalled();
   });
@@ -476,6 +483,13 @@ describe('inception route', () => {
     await flush();
 
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'failed',
+        summary: expect.stringContaining('Rate limited'),
+      }),
+    );
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
       expect.objectContaining({
         workflow: 'Inception',
         status: 'failed',

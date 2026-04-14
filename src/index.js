@@ -11,7 +11,7 @@ const server = app.listen(config.port, () => {
   console.log(`Cascade engine listening on port ${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
   console.log(`Auth: ${process.env.WEBHOOK_SECRET ? 'enabled' : 'disabled (no WEBHOOK_SECRET)'}`);
-  console.log(`Token pools: cascade=${config.notion.tokens.length}, provision=${config.notion.provisionTokens.length}, deletion=${config.notion.deletionTokens.length}`);
+  console.log(`Token pools: cascade=${config.notion.tokens.length}, provision=${config.notion.provisionTokens.length}, deletion=${config.notion.deletionTokens.length}, comment=${config.notion.commentTokens.length}${config.notion.commentTokens.length === 0 ? ' (fallback to cascade)' : ''}`);
   console.log(`Endpoints:`);
   console.log(`  POST /webhook/date-cascade`);
   console.log(`  POST /webhook/status-rollup`);

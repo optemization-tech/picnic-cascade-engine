@@ -154,4 +154,14 @@ describe('StudyCommentService', () => {
     const textContent = payload.rich_text.find((r) => r.type === 'text').text.content;
     expect(textContent).toContain('Date Cascade');
   });
+
+  it('falls back to "Automation complete" when both summary and workflow are missing', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.postComment(baseEvent({ summary: null, workflow: null }));
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const textContent = payload.rich_text.find((r) => r.type === 'text').text.content;
+    expect(textContent).toContain('Automation complete');
+  });
 });
