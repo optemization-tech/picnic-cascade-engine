@@ -9,6 +9,7 @@ import { formatDate } from '../utils/business-days.js';
 import { cascadeClient as notionClient } from '../notion/clients.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
+import { StudyCommentService } from '../services/study-comment.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { cascadeQueue } from '../services/cascade-queue.js';
 import { undoStore } from '../services/undo-store.js';
@@ -16,6 +17,7 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
+const studyCommentService = new StudyCommentService({ notionClient });
 const DIRECT_PARENT_WARNING = '⚠️ This task has subtasks — edit a subtask directly to shift dates and trigger cascading.';
 const DIRECT_PARENT_REVERT_WARNING = 'Parent date edit reverted — edit a subtask directly to shift dates and trigger cascading.';
 
@@ -401,6 +403,21 @@ async function processDateCascade(payload) {
           tracer.endPhase('logTerminal');
         }
       })(),
+      (async () => {
+        try {
+          await studyCommentService.postComment({
+            workflow: 'Date Cascade',
+            status: capReached ? 'failed' : 'success',
+            studyId: parsed.studyId,
+            sourceTaskName: parsed.taskName,
+            triggeredByUserId: parsed.triggeredByUserId,
+            editedByBot: parsed.editedByBot,
+            summary: capReached
+              ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
+              : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
+          });
+        } catch { /* comment failure must not break route */ }
+      })(),
     ]);
 
     // Save undo manifest — only for successful cascades that actually moved tasks
@@ -443,6 +460,15 @@ async function processDateCascade(payload) {
           error,
           tracer,
         }),
+        studyCommentService.postComment({
+          workflow: 'Date Cascade',
+          status: 'failed',
+          studyId: parsed.studyId,
+          sourceTaskName: parsed.taskName || 'Unknown',
+          triggeredByUserId: parsed.triggeredByUserId,
+          editedByBot: parsed.editedByBot,
+          summary: summarizeFailure(error),
+        }).catch(() => {}),
       ]);
     } catch { /* don't mask original error */ }
     throw error;
