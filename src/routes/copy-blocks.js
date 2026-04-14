@@ -48,6 +48,7 @@ async function processCopyBlocks(body) {
       executionId: tracer.cascadeId,
       timestamp: new Date().toISOString(),
       cascadeMode: 'N/A',
+      sourceTaskName: studyName || null,
       studyId: studyPageId || null,
       summary: `Copy blocks complete: ${result.pagesProcessed} pages processed, ${result.blocksWrittenCount} blocks written, ${result.pagesSkipped} skipped`,
       details: {
@@ -89,6 +90,7 @@ async function processCopyBlocks(body) {
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
+        sourceTaskName: studyName || null,
         studyId: studyPageId || null,
         summary: `Copy blocks failed: ${String(error.message || error).slice(0, 180)}`,
         details: {

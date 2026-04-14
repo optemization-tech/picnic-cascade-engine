@@ -90,14 +90,49 @@ describe('ActivityLogService', () => {
     expect(notionClient.request).not.toHaveBeenCalled();
   });
 
-  it('never includes Tested by property (bot user IDs cause 400 errors)', async () => {
+  it('sets Tested by for real person user IDs', async () => {
     const { service, notionClient } = makeService();
 
     await service.logTerminalEvent({
       workflow: 'Date Cascade',
       status: 'success',
       summary: 'ok',
-      triggeredByUserId: '33423867-60c2-818e-99ce-00271a790f0a',
+      triggeredByUserId: 'person-user-id',
+      editedByBot: false,
+      details: {},
+    });
+
+    expect(notionClient.request).toHaveBeenCalledTimes(1);
+    const payload = notionClient.request.mock.calls[0][2];
+    expect(payload.properties['Tested by']).toEqual({
+      people: [{ id: 'person-user-id' }],
+    });
+  });
+
+  it('omits Tested by for bot/integration user IDs', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'ok',
+      triggeredByUserId: 'bot-integration-id',
+      editedByBot: true,
+      details: {},
+    });
+
+    expect(notionClient.request).toHaveBeenCalledTimes(1);
+    const payload = notionClient.request.mock.calls[0][2];
+    expect(payload.properties['Tested by']).toBeUndefined();
+  });
+
+  it('omits Tested by when triggeredByUserId is absent', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'ok',
       details: {},
     });
 

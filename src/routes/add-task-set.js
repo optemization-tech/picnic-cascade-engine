@@ -173,6 +173,7 @@ async function processAddTaskSet(req) {
           workflow: 'Add Task Set',
           status: 'failed',
           triggerType: 'Automation',
+          sourceTaskName: `${studyName} (${buttonType})`,
           studyId: studyPageId,
           summary: 'No blueprint tasks found',
         }),
@@ -197,6 +198,7 @@ async function processAddTaskSet(req) {
           workflow: 'Add Task Set',
           status: 'failed',
           triggerType: 'Automation',
+          sourceTaskName: `${studyName} (${buttonType})`,
           studyId: studyPageId,
           summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
         }),
@@ -436,6 +438,7 @@ async function processAddTaskSet(req) {
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
+        sourceTaskName: `${studyName} (${buttonType})`,
         studyId: studyPageId,
         summary: successSummary,
         details: {
@@ -484,6 +487,9 @@ async function processAddTaskSet(req) {
           executionId: tracer.cascadeId,
           timestamp: new Date().toISOString(),
           cascadeMode: 'N/A',
+          sourceTaskName: studyPage?.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content
+            ? `${studyPage.properties['Study Name (Internal)'].title[0].text.content} (${buttonType})`
+            : buttonType,
           studyId: studyPageId,
           summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
           details: {

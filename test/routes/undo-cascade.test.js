@@ -175,7 +175,7 @@ describe('undo-cascade route', () => {
     );
   });
 
-  it('logs activity entry on success', async () => {
+  it('logs activity entry on success with source task fields and timing', async () => {
     mocks.undoStore.peek.mockReturnValue({
       cascadeId: 'c1',
       sourceTaskId: 'source',
@@ -194,8 +194,15 @@ describe('undo-cascade route', () => {
       expect.objectContaining({
         workflow: 'Undo Cascade',
         status: 'success',
+        sourceTaskId: 'source',
+        sourceTaskName: 'Source Task',
+        cascadeMode: 'push-right',
         summary: 'Undo: push-right cascade for Source Task reversed (1 tasks restored)',
-        details: expect.objectContaining({ undoCascadeId: 'c1', restoredCount: 1 }),
+        details: expect.objectContaining({
+          undoCascadeId: 'c1',
+          restoredCount: 1,
+          timing: expect.objectContaining({ totalMs: expect.any(Number) }),
+        }),
       }),
     );
   });

@@ -16,6 +16,7 @@ function mapRollupStatusToNotion(status) {
 }
 
 async function processStatusRollup(payload) {
+  const startTime = Date.now();
   const parsed = parseWebhookPayload(payload);
   if (parsed.skip) return;
 
@@ -60,6 +61,11 @@ async function processStatusRollup(payload) {
   await activityLogService.logTerminalEvent({
     workflow: 'Status Roll-Up',
     triggerType: 'Automation',
+    cascadeMode: 'status-rollup',
+    executionId: parsed?.executionId || null,
+    timestamp: new Date().toISOString(),
+    triggeredByUserId: parsed?.triggeredByUserId || null,
+    editedByBot: parsed?.editedByBot || false,
     sourceTaskId: changedTask.id,
     sourceTaskName: changedTask.name,
     studyId: changedTask.studyId,
@@ -71,6 +77,7 @@ async function processStatusRollup(payload) {
       oldStatus: parentStatus,
       newStatus: desiredStatus,
       subtaskCount: siblings.length,
+      timing: { totalMs: Date.now() - startTime },
     },
   });
 }

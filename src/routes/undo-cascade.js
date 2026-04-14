@@ -9,6 +9,7 @@ const activityLogService = new ActivityLogService({
 });
 
 async function processUndoCascade(payload) {
+  const startTime = Date.now();
   console.log('[undo-cascade] raw payload:', JSON.stringify(payload).slice(0, 500));
   const studyId = payload?.data?.studyId || payload?.studyId || payload?.data?.id || payload?.source?.id;
   if (!studyId) {
@@ -87,6 +88,9 @@ async function processUndoCascade(payload) {
       workflow: 'Undo Cascade',
       status: 'success',
       triggerType: 'Manual',
+      sourceTaskId: entry.sourceTaskId || null,
+      sourceTaskName,
+      cascadeMode,
       studyId,
       summary: `Undo: ${cascadeMode} cascade for ${sourceTaskName} reversed (${taskIds.length} tasks restored)`,
       details: {
@@ -94,6 +98,7 @@ async function processUndoCascade(payload) {
         restoredCount: taskIds.length,
         cascadeMode,
         sourceTaskName,
+        timing: { totalMs: Date.now() - startTime },
       },
     });
   } catch (error) {
@@ -110,8 +115,12 @@ async function processUndoCascade(payload) {
         workflow: 'Undo Cascade',
         status: 'failed',
         triggerType: 'Manual',
+        sourceTaskId: entry.sourceTaskId || null,
+        sourceTaskName,
+        cascadeMode,
         studyId,
         summary: `Undo failed: ${String(error.message || error).slice(0, 180)}`,
+        details: { timing: { totalMs: Date.now() - startTime } },
       });
     } catch { /* don't mask original error */ }
     throw error;

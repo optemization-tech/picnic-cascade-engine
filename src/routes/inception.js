@@ -169,6 +169,7 @@ async function processInception(body) {
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
+        sourceTaskName: studyName,
         studyId: studyPageId,
         summary: completionMessage,
         details: {
@@ -206,8 +207,11 @@ async function processInception(body) {
           workflow: 'Inception',
           status: 'failed',
           triggerType: 'Automation',
+          executionId: tracer.cascadeId,
+          sourceTaskName: studyPage?.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || null,
           studyId: studyPageId,
           summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
+          details: { ...(tracer.toActivityLogDetails()) },
         }),
       ]);
     } catch { /* don't mask original error */ }

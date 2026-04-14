@@ -143,10 +143,11 @@ export class ActivityLogService {
 
     if (event.sourceTaskId) properties['Study Tasks'] = { relation: [{ id: event.sourceTaskId }] };
     if (event.studyId) properties.Study = { relation: [{ id: event.studyId }] };
-    // Note: 'Tested by' people property removed — automation-triggered cascades
-    // always have a bot/integration user ID which Notion rejects with 400. The
-    // prior fallback caught the error but only after burning through 5 retries
-    // with exponential backoff (~8s wasted per cascade).
+    // 'Tested by' — only set for real person IDs. Bot/integration user IDs
+    // cause Notion 400 errors (wasting ~8s in retries with exponential backoff).
+    if (event.triggeredByUserId && !event.editedByBot) {
+      properties['Tested by'] = { people: [{ id: event.triggeredByUserId }] };
+    }
     const totalMs = event.details?.timing?.totalMs;
     if (typeof totalMs === 'number') properties['Duration (ms)'] = { number: totalMs };
     if (sourceDates.originalStart || sourceDates.originalEnd) {

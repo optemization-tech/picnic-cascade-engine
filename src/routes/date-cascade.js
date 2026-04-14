@@ -89,6 +89,7 @@ async function logTerminalEvent({
     sourceTaskName: parsed?.taskName || null,
     studyId: parsed?.studyId || null,
     triggeredByUserId: parsed?.triggeredByUserId || null,
+    editedByBot: parsed?.editedByBot || false,
     summary,
     details: buildActivityDetails({
       parsed,

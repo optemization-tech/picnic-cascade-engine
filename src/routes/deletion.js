@@ -40,6 +40,7 @@ async function processDeletion(body) {
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
+        sourceTaskName: `Study ${studyId.substring(0, 8)}`,
         studyId,
         summary: `Deletion complete: archived ${result.archivedCount} task(s)`,
         details: {
@@ -73,6 +74,7 @@ async function processDeletion(body) {
           executionId: tracer.cascadeId,
           timestamp: new Date().toISOString(),
           cascadeMode: 'N/A',
+          sourceTaskName: `Study ${studyId.substring(0, 8)}`,
           studyId,
           summary: `Deletion failed: ${String(error.message || error).slice(0, 180)}`,
           details: {
