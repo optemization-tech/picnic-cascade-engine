@@ -27,6 +27,13 @@ async function processUndoCascade(payload) {
       summary: 'Undo requested but no recent cascade available',
       details: { noActionReason: 'no_undo_available' },
     });
+    // Disable Import Mode even on the no-op path — the Notion button automation
+    // sets it ON before firing the webhook regardless of whether an undo entry exists.
+    try {
+      await notionClient.request('PATCH', `/pages/${studyId}`, {
+        properties: { 'Import Mode': { checkbox: false } },
+      });
+    } catch { /* best-effort — startup sweep will catch it */ }
     return;
   }
 
@@ -63,6 +70,12 @@ async function processUndoCascade(payload) {
     // Only consume the undo entry after successful restore.
     // If patchPages fails mid-batch, the entry stays available for retry.
     undoStore.pop(studyId);
+
+    // Disable Import Mode — the Notion button automation sets it ON before firing the webhook.
+    // Without this, subsequent user edits hit import_mode_skip. (2026-04-14 prod incident)
+    await notionClient.request('PATCH', `/pages/${studyId}`, {
+      properties: { 'Import Mode': { checkbox: false } },
+    });
 
     await notionClient.reportStatus(
       studyId,
@@ -102,6 +115,16 @@ async function processUndoCascade(payload) {
       });
     } catch { /* don't mask original error */ }
     throw error;
+  } finally {
+    // Critical: always disable Import Mode — leaving it on blocks all cascades.
+    // Matches the pattern in inception.js and add-task-set.js.
+    try {
+      await notionClient.request('PATCH', `/pages/${studyId}`, {
+        properties: { 'Import Mode': { checkbox: false } },
+      });
+    } catch (cleanupError) {
+      console.warn('[undo-cascade] failed to disable Import Mode in finally:', cleanupError.message);
+    }
   }
 }
 
