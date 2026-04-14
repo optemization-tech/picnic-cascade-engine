@@ -92,9 +92,9 @@ async function processAddTaskSet(req) {
     : [];
   const studyPageId = body.data?.id || body.studyPageId;
 
-  // Button automation payloads include last_edited_by — the user who clicked.
-  const triggeredByUserId = body.data?.last_edited_by?.id || null;
-  const editedByBot = body.data?.last_edited_by?.type === 'bot';
+  // source.user_id is the actual button clicker; data.last_edited_by is whoever last edited the page.
+  const triggeredByUserId = body.source?.user_id || body.data?.last_edited_by?.id || null;
+  const editedByBot = !body.source?.user_id && body.data?.last_edited_by?.type === 'bot';
 
   if (!studyPageId) {
     console.warn('[add-task-set] no studyPageId in payload, skipping');
@@ -557,7 +557,34 @@ async function processAddTaskSet(req) {
   }
 }
 
+// Per-study serialization — prevents concurrent add-task-set operations
+// from racing on Notion's eventually-consistent database queries, which
+// causes duplicate numbering (e.g., two "TLF #2" instead of #2 and #3).
+const _studyLocks = new Map();
+
+function withStudyLock(studyId, fn) {
+  const prev = _studyLocks.get(studyId) || Promise.resolve();
+  const next = prev.then(() => fn(), () => fn());
+  _studyLocks.set(studyId, next);
+  // Clean up lock entry; .catch suppresses the floating rejection since the
+  // caller handles errors via the returned `next` promise.
+  next.finally(() => {
+    if (_studyLocks.get(studyId) === next) _studyLocks.delete(studyId);
+  }).catch(() => {});
+  return next;
+}
+
 export async function handleAddTaskSet(req, res) {
   res.status(200).json({ ok: true });
-  flightTracker.track(processAddTaskSet(req).catch(err => console.error('[add-task-set] unhandled:', err)), 'add-task-set');
+  const studyPageId = req.body?.data?.id || req.body?.studyPageId;
+  const run = studyPageId
+    ? withStudyLock(studyPageId, () => processAddTaskSet(req))
+    : processAddTaskSet(req);
+  flightTracker.track(
+    run.catch(err => console.error('[add-task-set] unhandled:', err)),
+    'add-task-set',
+  );
 }
+
+// Exposed for test cleanup
+export function _resetStudyLocks() { _studyLocks.clear(); }
