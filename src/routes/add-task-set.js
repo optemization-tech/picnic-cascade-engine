@@ -111,6 +111,7 @@ async function processAddTaskSet(req) {
   tracer.set('is_repeat_delivery', isRepeatDelivery);
 
   let studyPage;
+  let studyName;
 
   try {
     // Enable Import Mode (may already be ON — the Notion button automation
@@ -164,7 +165,7 @@ async function processAddTaskSet(req) {
 
     const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start
       || new Date().toISOString().split('T')[0];
-    const studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
+    studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
 
     if (!blueprintTasks || blueprintTasks.length === 0) {
       await Promise.all([
@@ -487,9 +488,7 @@ async function processAddTaskSet(req) {
           executionId: tracer.cascadeId,
           timestamp: new Date().toISOString(),
           cascadeMode: 'N/A',
-          sourceTaskName: studyPage?.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content
-            ? `${studyPage.properties['Study Name (Internal)'].title[0].text.content} (${buttonType})`
-            : buttonType,
+          sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
           studyId: studyPageId,
           summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
           details: {

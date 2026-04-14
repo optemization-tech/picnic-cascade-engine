@@ -24,6 +24,7 @@ async function processInception(body) {
   tracer.set('study_id', studyPageId);
 
   let studyPage;
+  let studyName;
 
   try {
     // Enable Import Mode — blocks date-cascade from firing during bulk creation
@@ -63,6 +64,7 @@ async function processInception(body) {
     ]);
     studyPage = fetchedStudyPage;
 
+    studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
     const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start
       || new Date().toISOString().split('T')[0];
 
@@ -73,6 +75,7 @@ async function processInception(body) {
           workflow: 'Inception',
           status: 'failed',
           triggerType: 'Automation',
+          sourceTaskName: studyName,
           studyId: studyPageId,
           summary: 'Study already has tasks — double-inception blocked',
         }),
@@ -92,6 +95,7 @@ async function processInception(body) {
           workflow: 'Inception',
           status: 'failed',
           triggerType: 'Automation',
+          sourceTaskName: studyName,
           studyId: studyPageId,
           summary: 'No blueprint tasks found',
         }),
@@ -134,7 +138,6 @@ async function processInception(body) {
       ),
     ]);
 
-    const studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
     const completionMessage = `Inception complete: ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`;
 
     const disableImportModePromise = (async () => {
@@ -208,7 +211,7 @@ async function processInception(body) {
           status: 'failed',
           triggerType: 'Automation',
           executionId: tracer.cascadeId,
-          sourceTaskName: studyPage?.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || null,
+          sourceTaskName: studyName || null,
           studyId: studyPageId,
           summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
           details: { ...(tracer.toActivityLogDetails()) },
