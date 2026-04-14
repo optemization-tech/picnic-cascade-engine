@@ -90,6 +90,10 @@ async function processAddTaskSet(req) {
     : [];
   const studyPageId = body.data?.id || body.studyPageId;
 
+  // Button automation payloads include last_edited_by — the user who clicked.
+  const triggeredByUserId = body.data?.last_edited_by?.id || null;
+  const editedByBot = body.data?.last_edited_by?.type === 'bot';
+
   if (!studyPageId) {
     console.warn('[add-task-set] no studyPageId in payload, skipping');
     return;
@@ -174,6 +178,8 @@ async function processAddTaskSet(req) {
           workflow: 'Add Task Set',
           status: 'failed',
           triggerType: 'Automation',
+          triggeredByUserId,
+          editedByBot,
           sourceTaskName: `${studyName} (${buttonType})`,
           studyId: studyPageId,
           summary: 'No blueprint tasks found',
@@ -199,6 +205,8 @@ async function processAddTaskSet(req) {
           workflow: 'Add Task Set',
           status: 'failed',
           triggerType: 'Automation',
+          triggeredByUserId,
+          editedByBot,
           sourceTaskName: `${studyName} (${buttonType})`,
           studyId: studyPageId,
           summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
@@ -436,6 +444,8 @@ async function processAddTaskSet(req) {
         workflow: 'Add Task Set',
         status: 'success',
         triggerType: 'Automation',
+        triggeredByUserId,
+        editedByBot,
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
@@ -485,6 +495,8 @@ async function processAddTaskSet(req) {
           workflow: 'Add Task Set',
           status: 'failed',
           triggerType: 'Automation',
+          triggeredByUserId,
+          editedByBot,
           executionId: tracer.cascadeId,
           timestamp: new Date().toISOString(),
           cascadeMode: 'N/A',
