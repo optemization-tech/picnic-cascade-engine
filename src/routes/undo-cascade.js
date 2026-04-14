@@ -19,9 +19,9 @@ async function processUndoCascade(payload) {
     return;
   }
 
-  // Button automation payloads include last_edited_by — the user who clicked.
-  const triggeredByUserId = payload?.data?.last_edited_by?.id || payload?.source?.last_edited_by?.id || null;
-  const editedByBot = (payload?.data?.last_edited_by?.type || payload?.source?.last_edited_by?.type) === 'bot';
+  // source.user_id is the actual button clicker; data.last_edited_by is whoever last edited the page.
+  const triggeredByUserId = payload?.source?.user_id || payload?.data?.last_edited_by?.id || null;
+  const editedByBot = !payload?.source?.user_id && payload?.data?.last_edited_by?.type === 'bot';
 
   const entry = undoStore.peek(studyId);
   if (!entry) {
