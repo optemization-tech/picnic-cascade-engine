@@ -41,6 +41,7 @@ vi.mock('../../src/notion/clients.js', () => ({
   cascadeClient: mocks.mockClient,
   provisionClient: mocks.mockClient,
   deletionClient: mocks.mockClient,
+  commentClient: mocks.mockClient,
 }));
 
 vi.mock('../../src/services/activity-log.js', () => ({
@@ -218,6 +219,13 @@ describe('inception route', () => {
       expect.any(Object),
     );
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'failed',
+        summary: 'No blueprint tasks found',
+      }),
+    );
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
       expect.objectContaining({
         workflow: 'Inception',
         status: 'failed',
@@ -475,6 +483,13 @@ describe('inception route', () => {
     await flush();
 
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'failed',
+        summary: expect.stringContaining('Rate limited'),
+      }),
+    );
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
       expect.objectContaining({
         workflow: 'Inception',
         status: 'failed',

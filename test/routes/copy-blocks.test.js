@@ -16,6 +16,7 @@ vi.mock('../../src/config.js', () => ({
     notion: {
       tokens: ['token-1'],
       provisionTokens: ['prov-token-1'],
+      commentTokens: [],
       studyTasksDbId: 'db-study-tasks',
       studiesDbId: 'db-studies',
       activityLogDbId: 'db-activity-log',
@@ -29,6 +30,7 @@ vi.mock('../../src/notion/clients.js', () => ({
   cascadeClient: mocks.mockClient,
   provisionClient: mocks.mockClient,
   deletionClient: mocks.mockClient,
+  commentClient: mocks.mockClient,
 }));
 
 vi.mock('../../src/provisioning/copy-blocks.js', () => ({
