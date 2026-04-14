@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { provisionClient as notionClient } from '../notion/clients.js';
 import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
+import { StudyCommentService } from '../services/study-comment.js';
 import { flightTracker } from '../services/flight-tracker.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { fetchBlueprint, buildTaskTree, filterBlueprintSubtree } from '../provisioning/blueprint.js';
@@ -11,6 +12,7 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
+const studyCommentService = new StudyCommentService({ notionClient });
 
 /**
  * For repeat-delivery buttons, scan existing production tasks for the max
@@ -184,6 +186,15 @@ async function processAddTaskSet(req) {
           studyId: studyPageId,
           summary: 'No blueprint tasks found',
         }),
+        studyCommentService.postComment({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: `${studyName} (${buttonType})`,
+          triggeredByUserId,
+          editedByBot,
+          summary: 'No blueprint tasks found',
+        }).catch(() => {}),
       ]);
       return;
     }
@@ -211,6 +222,15 @@ async function processAddTaskSet(req) {
           studyId: studyPageId,
           summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
         }),
+        studyCommentService.postComment({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: `${studyName} (${buttonType})`,
+          triggeredByUserId,
+          editedByBot,
+          summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
+        }).catch(() => {}),
       ]);
       return;
     }
@@ -469,6 +489,15 @@ async function processAddTaskSet(req) {
         `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created`,
         { tracer },
       ),
+      studyCommentService.postComment({
+        workflow: 'Add Task Set',
+        status: 'success',
+        studyId: studyPageId,
+        sourceTaskName: `${studyName} (${buttonType})`,
+        triggeredByUserId,
+        editedByBot,
+        summary: successSummary,
+      }).catch(() => {}),
     ]);
 
     // Fire copy-blocks independently — don't block Import Mode disable or activity logging
@@ -513,6 +542,15 @@ async function processAddTaskSet(req) {
             ...(tracer.toActivityLogDetails()),
           },
         }),
+        studyCommentService.postComment({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
+          triggeredByUserId,
+          editedByBot,
+          summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
+        }).catch(() => {}),
       ]);
     } catch { /* don't mask original error */ }
 

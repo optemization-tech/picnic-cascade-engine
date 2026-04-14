@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
   activityLogService: {
     logTerminalEvent: vi.fn(),
   },
+  studyCommentService: {
+    postComment: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -42,6 +45,10 @@ vi.mock('../../src/notion/clients.js', () => ({
 
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
+}));
+
+vi.mock('../../src/services/study-comment.js', () => ({
+  StudyCommentService: vi.fn(() => mocks.studyCommentService),
 }));
 
 vi.mock('../../src/provisioning/blueprint.js', () => ({
@@ -87,6 +94,7 @@ describe('inception route', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
+    mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.request.mockResolvedValue({});
     mocks.prefetchTemplateBlocks.mockResolvedValue({});
@@ -491,6 +499,83 @@ describe('inception route', () => {
       ? config.notion.provisionTokens
       : config.notion.tokens;
     expect(expectedTokens).toEqual(['prov-token-1']);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Study comment: posted on successful inception
+  // ────────────────────────────────────────────────────────────────────
+  it('posts study comment on successful inception', async () => {
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: {
+        'Contract Sign Date': { date: { start: '2026-03-01' } },
+        'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+      },
+    });
+    mocks.mockClient.queryDatabase.mockResolvedValue([]);
+    mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
+    mocks.buildTaskTree.mockReturnValue([]);
+    mocks.createStudyTasks.mockResolvedValue({
+      idMapping: {}, totalCreated: 2, depTracking: [], parentTracking: [],
+    });
+    mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 1, depsPatchedCount: 0 });
+    mocks.copyBlocks.mockResolvedValue({
+      blocksWrittenCount: 0, pagesProcessed: 0, pagesSkipped: 0,
+    });
+
+    const { req, res } = makeReqRes({ studyPageId: 'study-1' });
+    await handleInception(req, res);
+    await flush();
+
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'success',
+        studyId: 'study-1',
+      }),
+    );
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Study comment: posted when double-inception blocked
+  // ────────────────────────────────────────────────────────────────────
+  it('posts study comment when double-inception blocked', async () => {
+    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
+
+    const { req, res } = makeReqRes({ studyPageId: 'study-1' });
+    await handleInception(req, res);
+    await flush();
+
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'failed',
+        summary: expect.stringContaining('double-inception'),
+      }),
+    );
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Study comment: inception completes even when comment fails
+  // ────────────────────────────────────────────────────────────────────
+  it('inception completes even when comment fails', async () => {
+    mocks.studyCommentService.postComment.mockRejectedValue(new Error('Comment API down'));
+
+    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
+
+    const { req, res } = makeReqRes({ studyPageId: 'study-1' });
+    await handleInception(req, res);
+    await flush();
+
+    // logTerminalEvent should still have been called despite comment failure
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'failed',
+        summary: expect.stringContaining('double-inception'),
+      }),
+    );
   });
 
   // ────────────────────────────────────────────────────────────────────
