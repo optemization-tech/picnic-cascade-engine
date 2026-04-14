@@ -281,10 +281,6 @@ async function processAddTaskSet(req) {
     tracer.set('external_deps_resolved', Object.keys(existingIdMapping).length);
     tracer.set('internal_template_ids_excluded', internalTemplateIds.size);
 
-    // Task set numbering is applied AFTER task creation (see post-create block below)
-    // because Notion's database query has eventual consistency — queries made seconds
-    // after creation still return stale results missing the just-created tasks.
-
     // ── Repeat-delivery date copying ─────────────────────────────────────
     // Copy dates from the latest delivery's tasks so each new delivery
     // inherits the previous one's dates (which may have been manually adjusted).
@@ -380,21 +376,14 @@ async function processAddTaskSet(req) {
     ]);
 
     // ── Post-create task set numbering ───────────────────────────────────
-    // Applied AFTER creation + wiring because Notion's DB query has eventual
-    // consistency — pre-create queries miss recently-created tasks. By this
-    // point tasks were created 20-30s ago, so a fresh query should see them.
+    // Uses pre-creation existingTasks (fetched above in fetchBlueprintAndExisting)
+    // — only the count of tasks that existed before this operation matters.
+    // count + 1 = next number. Per-study FIFO queue prevents concurrent
+    // add-task-set operations, so the pre-creation count is authoritative.
     if (!isRepeatDelivery && parentTaskNames.length > 0) {
       tracer.startPhase('applyTaskSetNumbering');
 
-      // Fresh query — tasks created 20-30s ago should now be indexed
-      const freshTasks = await notionClient.queryDatabase(
-        config.notion.studyTasksDbId,
-        { property: 'Study', relation: { contains: studyPageId } },
-        100,
-        { tracer },
-      ) || [];
-
-      const numberMap = resolveTaskSetNumbers(freshTasks, filteredLevels);
+      const numberMap = resolveTaskSetNumbers(existingTasks, filteredLevels);
 
       // PATCH-rename each parent page
       const renames = [];
