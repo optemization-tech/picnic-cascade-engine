@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   mockClient: {
     patchPages: vi.fn(),
     reportStatus: vi.fn(),
+    request: vi.fn(),
   },
   activityLogService: {
     logTerminalEvent: vi.fn(),
@@ -64,6 +65,7 @@ describe('undo-cascade route', () => {
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 2 });
+    mocks.mockClient.request.mockResolvedValue({});
   });
 
   it('returns 200 immediately', async () => {
@@ -180,5 +182,56 @@ describe('undo-cascade route', () => {
         details: expect.objectContaining({ undoCascadeId: 'c1', restoredCount: 1 }),
       }),
     );
+  });
+
+  it('disables Import Mode after successful undo', async () => {
+    mocks.undoStore.peek.mockReturnValue({
+      cascadeId: 'c1',
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source Task',
+      cascadeMode: 'push-right',
+      manifest: { 'task-a': { oldStart: '2026-04-01', oldEnd: '2026-04-02', newStart: '2026-04-03', newEnd: '2026-04-04' } },
+      timestamp: Date.now(),
+    });
+
+    const { req, res } = makeReqRes({ studyId: 'study-1' });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    // Import Mode disabled in success path + finally = 2 calls
+    const importModeCalls = mocks.mockClient.request.mock.calls.filter(
+      ([method, path, body]) =>
+        method === 'PATCH' &&
+        path === '/pages/study-1' &&
+        body?.properties?.['Import Mode']?.checkbox === false,
+    );
+    expect(importModeCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('disables Import Mode even when patchPages throws', async () => {
+    mocks.undoStore.peek.mockReturnValue({
+      cascadeId: 'c1',
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source Task',
+      cascadeMode: 'push-right',
+      manifest: { 'task-a': { oldStart: '2026-04-01', oldEnd: '2026-04-02', newStart: '2026-04-03', newEnd: '2026-04-04' } },
+      timestamp: Date.now(),
+    });
+    mocks.mockClient.patchPages.mockRejectedValueOnce(new Error('restore failed'));
+
+    const { req, res } = makeReqRes({ studyId: 'study-1' });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    // Even though patchPages threw, the finally block should disable Import Mode
+    const importModeCalls = mocks.mockClient.request.mock.calls.filter(
+      ([method, path, body]) =>
+        method === 'PATCH' &&
+        path === '/pages/study-1' &&
+        body?.properties?.['Import Mode']?.checkbox === false,
+    );
+    expect(importModeCalls.length).toBeGreaterThanOrEqual(1);
   });
 });
