@@ -1,15 +1,15 @@
 // Formats and posts Notion page comments on study pages after automations.
 // Mirrors ActivityLogService pattern: constructor injection, try/catch, { posted, reason } return.
 
-function statusLabel(status) {
-  if (status === 'failed') return 'Failed';
-  if (status === 'no_action') return 'No Action';
-  return 'Success';
+function statusEmoji(status) {
+  if (status === 'failed') return '❌';
+  if (status === 'no_action') return 'ℹ️';
+  return '✅';
 }
 
 function buildRichText(event) {
-  const label = statusLabel(event.status);
-  const text = `${event.workflow} — ${event.sourceTaskName || 'Unknown'}: ${label}. ${event.summary || ''}`.trim();
+  const emoji = statusEmoji(event.status);
+  const text = `${emoji} ${event.summary || event.workflow || 'Automation complete'}`;
 
   const richText = [];
 

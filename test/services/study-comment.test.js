@@ -16,7 +16,7 @@ function baseEvent(overrides = {}) {
     sourceTaskName: 'Task One',
     triggeredByUserId: 'user-1',
     editedByBot: false,
-    summary: 'pull-left: Task One (4 updates)',
+    summary: 'Task One updated — 4 dependent task(s) rescheduled',
     ...overrides,
   };
 }
@@ -33,7 +33,7 @@ describe('StudyCommentService', () => {
       parent: { page_id: 'study-1' },
       rich_text: [
         { type: 'mention', mention: { type: 'user', user: { id: 'user-1' } } },
-        { type: 'text', text: { content: ': Date Cascade — Task One: Success. pull-left: Task One (4 updates)' } },
+        { type: 'text', text: { content: ': ✅ Task One updated — 4 dependent task(s) rescheduled' } },
       ],
     });
   });
@@ -45,7 +45,7 @@ describe('StudyCommentService', () => {
 
     const payload = notionClient.request.mock.calls[0][2];
     expect(payload.rich_text).toEqual([
-      { type: 'text', text: { content: 'Date Cascade — Task One: Success. pull-left: Task One (4 updates)' } },
+      { type: 'text', text: { content: '✅ Task One updated — 4 dependent task(s) rescheduled' } },
     ]);
   });
 
@@ -60,18 +60,18 @@ describe('StudyCommentService', () => {
     expect(payload.rich_text[0].type).toBe('text');
   });
 
-  it('posts comment with Failed status label', async () => {
+  it('uses ❌ emoji for failed status', async () => {
     const { service, notionClient } = makeService();
 
     await service.postComment(baseEvent({
       status: 'failed',
-      summary: 'Cascade failed: timeout',
+      summary: 'Date cascade failed: timeout',
     }));
 
     const payload = notionClient.request.mock.calls[0][2];
     const textContent = payload.rich_text.find((r) => r.type === 'text').text.content;
-    expect(textContent).toContain('Failed');
-    expect(textContent).toContain('Cascade failed: timeout');
+    expect(textContent).toContain('❌');
+    expect(textContent).toContain('Date cascade failed: timeout');
   });
 
   it('skips when studyId is null', async () => {
@@ -105,7 +105,7 @@ describe('StudyCommentService', () => {
     expect(notionClient.request).toHaveBeenCalledTimes(1);
     const payload = notionClient.request.mock.calls[0][2];
     const textContent = payload.rich_text.find((r) => r.type === 'text').text.content;
-    expect(textContent).toContain('No Action');
+    expect(textContent).toContain('ℹ️');
     expect(textContent).toContain('No recent cascade to undo');
   });
 
@@ -145,13 +145,13 @@ describe('StudyCommentService', () => {
     expect(text.text.content).toMatch(/^: /);
   });
 
-  it('handles missing sourceTaskName with fallback', async () => {
+  it('falls back to workflow name when summary is missing', async () => {
     const { service, notionClient } = makeService();
 
-    await service.postComment(baseEvent({ sourceTaskName: null }));
+    await service.postComment(baseEvent({ summary: null }));
 
     const payload = notionClient.request.mock.calls[0][2];
     const textContent = payload.rich_text.find((r) => r.type === 'text').text.content;
-    expect(textContent).toContain('Unknown');
+    expect(textContent).toContain('Date Cascade');
   });
 });

@@ -1,11 +1,11 @@
 import { config } from '../config.js';
-import { provisionClient as notionClient } from '../notion/clients.js';
+import { provisionClient as notionClient, commentClient } from '../notion/clients.js';
 import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
-  notionClient,
+  notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
 

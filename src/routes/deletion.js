@@ -1,15 +1,15 @@
 import { config } from '../config.js';
-import { deletionClient as notionClient } from '../notion/clients.js';
+import { deletionClient as notionClient, commentClient } from '../notion/clients.js';
 import { deleteStudyTasks } from '../provisioning/deletion.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
-  notionClient,
+  notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
-const studyCommentService = new StudyCommentService({ notionClient });
+const studyCommentService = new StudyCommentService({ notionClient: commentClient });
 
 async function processDeletion(body) {
   const studyId = body.studyId || body.data?.id;
@@ -69,7 +69,7 @@ async function processDeletion(body) {
         sourceTaskName: `Study ${studyId.substring(0, 8)}`,
         triggeredByUserId,
         editedByBot,
-        summary: `Deletion complete: archived ${result.archivedCount} task(s)`,
+        summary: `Study tasks deleted — ${result.archivedCount} task(s) archived`,
       }).catch(() => {}),
     ]);
   } catch (error) {
@@ -112,7 +112,7 @@ async function processDeletion(body) {
           sourceTaskName: `Study ${studyId.substring(0, 8)}`,
           triggeredByUserId,
           editedByBot,
-          summary: `Deletion failed: ${String(error.message || error).slice(0, 180)}`,
+          summary: `Task deletion failed: ${String(error.message || error).slice(0, 180)}`,
         }).catch(() => {}),
       ]);
     } catch { /* don't mask original error */ }

@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   activityLogService: {
     logTerminalEvent: vi.fn(),
   },
+  studyCommentService: {
+    postComment: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -37,6 +40,7 @@ vi.mock('../../src/notion/clients.js', () => ({
   cascadeClient: mocks.mockClient,
   provisionClient: mocks.mockClient,
   deletionClient: mocks.mockClient,
+  commentClient: mocks.mockClient,
 }));
 
 vi.mock('../../src/provisioning/blueprint.js', () => ({
@@ -59,6 +63,10 @@ vi.mock('../../src/provisioning/copy-blocks.js', () => ({
 
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
+}));
+
+vi.mock('../../src/services/study-comment.js', () => ({
+  StudyCommentService: vi.fn(() => mocks.studyCommentService),
 }));
 
 import { handleAddTaskSet } from '../../src/routes/add-task-set.js';
@@ -98,6 +106,7 @@ describe('add-task-set route', () => {
     vi.clearAllMocks();
     mocks.copyBlocks.mockResolvedValue({ blocksWrittenCount: 0, pagesProcessed: 0, pagesSkipped: 0 });
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true, pageId: 'page-1' });
+    mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.request.mockResolvedValue({});
   });
