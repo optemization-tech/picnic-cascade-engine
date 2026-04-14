@@ -27,6 +27,13 @@ async function processUndoCascade(payload) {
       summary: 'Undo requested but no recent cascade available',
       details: { noActionReason: 'no_undo_available' },
     });
+    // Disable Import Mode even on the no-op path — the Notion button automation
+    // sets it ON before firing the webhook regardless of whether an undo entry exists.
+    try {
+      await notionClient.request('PATCH', `/pages/${studyId}`, {
+        properties: { 'Import Mode': { checkbox: false } },
+      });
+    } catch { /* best-effort — startup sweep will catch it */ }
     return;
   }
 

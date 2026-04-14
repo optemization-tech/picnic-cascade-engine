@@ -96,6 +96,22 @@ describe('undo-cascade route', () => {
     );
   });
 
+  it('disables Import Mode on early-return (no undo entry)', async () => {
+    mocks.undoStore.peek.mockReturnValue(null);
+    const { req, res } = makeReqRes({ studyId: 'study-1' });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    const importModeCalls = mocks.mockClient.request.mock.calls.filter(
+      ([method, path, body]) =>
+        method === 'PATCH' &&
+        path === '/pages/study-1' &&
+        body?.properties?.['Import Mode']?.checkbox === false,
+    );
+    expect(importModeCalls).toHaveLength(1);
+  });
+
   it('restores dates in a single patch batch without LMBS', async () => {
     mocks.undoStore.peek.mockReturnValue({
       cascadeId: 'c1',
@@ -206,7 +222,7 @@ describe('undo-cascade route', () => {
         path === '/pages/study-1' &&
         body?.properties?.['Import Mode']?.checkbox === false,
     );
-    expect(importModeCalls.length).toBeGreaterThanOrEqual(1);
+    expect(importModeCalls).toHaveLength(2);
   });
 
   it('disables Import Mode even when patchPages throws', async () => {
@@ -232,6 +248,6 @@ describe('undo-cascade route', () => {
         path === '/pages/study-1' &&
         body?.properties?.['Import Mode']?.checkbox === false,
     );
-    expect(importModeCalls.length).toBeGreaterThanOrEqual(1);
+    expect(importModeCalls).toHaveLength(1);
   });
 });
