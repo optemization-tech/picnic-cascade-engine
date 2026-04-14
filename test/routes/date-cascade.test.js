@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
   undoStore: {
     save: vi.fn(),
   },
+  studyCommentService: {
+    postComment: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -54,6 +57,9 @@ vi.mock('../../src/notion/queries.js', () => ({ queryStudyTasks: mocks.queryStud
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
 }));
+vi.mock('../../src/services/study-comment.js', () => ({
+  StudyCommentService: vi.fn(() => mocks.studyCommentService),
+}));
 vi.mock('../../src/services/undo-store.js', () => ({
   undoStore: mocks.undoStore,
 }));
@@ -82,6 +88,7 @@ describe('date-cascade route safety', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true, pageId: 'page-1' });
+    mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
   });
 
   it('returns early on zero delta without side effects', async () => {
@@ -375,6 +382,146 @@ describe('date-cascade route safety', () => {
     }
     expect(manifest['task-a'].oldStart).toBe('2026-04-05');
     expect(manifest['task-a'].oldEnd).toBe('2026-04-06');
+  });
+
+  it('posts study comment on successful cascade', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 0,
+      endDelta: 1,
+      triggeredByUserId: 'user-abc',
+      editedByBot: false,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'source', parentId: null }]);
+    mocks.classify.mockReturnValue({
+      skip: false,
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source',
+      newStart: '2026-04-01',
+      newEnd: '2026-04-02',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-02',
+      startDelta: 0,
+      endDelta: 1,
+      cascadeMode: 'push-right',
+      parentTaskId: null,
+      parentMode: 'case-a',
+    });
+    mocks.runCascade.mockReturnValue({
+      updates: [{ taskId: 'a', newStart: '2026-04-02', newEnd: '2026-04-03' }],
+      movedTaskIds: ['a'],
+      movedTaskMap: { a: { newStart: '2026-04-02', newEnd: '2026-04-03' } },
+      diagnostics: {},
+    });
+    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: 'case-a', rolledUpStart: null, rolledUpEnd: null });
+    mocks.enforceConstraints.mockReturnValue({ newStart: '2026-04-01', newEnd: '2026-04-02', constrained: false, merged: false });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.patchPages.mockResolvedValueOnce({ updatedCount: 2, taskIds: ['source', 'a'] });
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(expect.objectContaining({
+      workflow: 'Date Cascade',
+      status: 'success',
+      studyId: 'study-1',
+      sourceTaskName: 'Source',
+      triggeredByUserId: 'user-abc',
+      editedByBot: false,
+      summary: 'push-right: Source (2 updates)',
+    }));
+  });
+
+  it('posts study comment on failed cascade', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 0,
+      endDelta: 1,
+      triggeredByUserId: 'user-abc',
+      editedByBot: false,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockRejectedValue(new Error('db timeout'));
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(expect.objectContaining({
+      workflow: 'Date Cascade',
+      status: 'failed',
+      studyId: 'study-1',
+      sourceTaskName: 'Source',
+      summary: expect.stringContaining('Cascade failed'),
+    }));
+  });
+
+  it('cascade completes even when comment fails', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 0,
+      endDelta: 1,
+      triggeredByUserId: 'user-abc',
+      editedByBot: false,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'source', parentId: null }]);
+    mocks.classify.mockReturnValue({
+      skip: false,
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source',
+      newStart: '2026-04-01',
+      newEnd: '2026-04-02',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-02',
+      startDelta: 0,
+      endDelta: 1,
+      cascadeMode: 'push-right',
+      parentTaskId: null,
+      parentMode: 'case-a',
+    });
+    mocks.runCascade.mockReturnValue({
+      updates: [{ taskId: 'a', newStart: '2026-04-02', newEnd: '2026-04-03' }],
+      movedTaskIds: ['a'],
+      movedTaskMap: { a: { newStart: '2026-04-02', newEnd: '2026-04-03' } },
+      diagnostics: {},
+    });
+    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: 'case-a', rolledUpStart: null, rolledUpEnd: null });
+    mocks.enforceConstraints.mockReturnValue({ newStart: '2026-04-01', newEnd: '2026-04-02', constrained: false, merged: false });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.patchPages.mockResolvedValueOnce({ updatedCount: 2, taskIds: ['source', 'a'] });
+    // Make postComment reject — cascade should still complete
+    mocks.studyCommentService.postComment.mockRejectedValue(new Error('comment API down'));
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    // logTerminalEvent should still have been called despite comment failure
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'success',
+    }));
   });
 
   it('logs failure when processing throws', async () => {

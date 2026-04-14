@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { provisionClient as notionClient } from '../notion/clients.js';
 import { ActivityLogService } from '../services/activity-log.js';
+import { StudyCommentService } from '../services/study-comment.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { fetchBlueprint, buildTaskTree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
@@ -11,6 +12,7 @@ const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
+const studyCommentService = new StudyCommentService({ notionClient });
 
 async function processInception(body) {
   const studyPageId = body?.data?.id || body?.studyPageId;
@@ -85,6 +87,15 @@ async function processInception(body) {
           studyId: studyPageId,
           summary: 'Study already has tasks — double-inception blocked',
         }),
+        studyCommentService.postComment({
+          workflow: 'Inception',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: studyName,
+          triggeredByUserId,
+          editedByBot,
+          summary: 'Study already has tasks — double-inception blocked',
+        }).catch(() => {}),
       ]);
       return;
     }
@@ -107,6 +118,15 @@ async function processInception(body) {
           studyId: studyPageId,
           summary: 'No blueprint tasks found',
         }),
+        studyCommentService.postComment({
+          workflow: 'Inception',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: studyName,
+          triggeredByUserId,
+          editedByBot,
+          summary: 'No blueprint tasks found',
+        }).catch(() => {}),
       ]);
       return;
     }
@@ -201,6 +221,15 @@ async function processInception(body) {
         `Content blocks copied: ${copyResult.pagesProcessed} pages, ${copyResult.blocksWrittenCount} blocks`,
         { tracer },
       ),
+      studyCommentService.postComment({
+        workflow: 'Inception',
+        status: 'success',
+        studyId: studyPageId,
+        sourceTaskName: studyName,
+        triggeredByUserId,
+        editedByBot,
+        summary: completionMessage,
+      }).catch(() => {}),
     ]);
 
     console.log(tracer.toConsoleLog());
@@ -228,6 +257,15 @@ async function processInception(body) {
           summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
           details: { ...(tracer.toActivityLogDetails()) },
         }),
+        studyCommentService.postComment({
+          workflow: 'Inception',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: studyName || null,
+          triggeredByUserId,
+          editedByBot,
+          summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
+        }).catch(() => {}),
       ]);
     } catch { /* don't mask original error */ }
 

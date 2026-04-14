@@ -2,12 +2,14 @@ import { config } from '../config.js';
 import { deletionClient as notionClient } from '../notion/clients.js';
 import { deleteStudyTasks } from '../provisioning/deletion.js';
 import { ActivityLogService } from '../services/activity-log.js';
+import { StudyCommentService } from '../services/study-comment.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { flightTracker } from '../services/flight-tracker.js';
 const activityLogService = new ActivityLogService({
   notionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
+const studyCommentService = new StudyCommentService({ notionClient });
 
 async function processDeletion(body) {
   const studyId = body.studyId || body.data?.id;
@@ -60,6 +62,15 @@ async function processDeletion(body) {
         `Deletion complete: archived ${result.archivedCount} task(s)`,
         { tracer },
       ),
+      studyCommentService.postComment({
+        workflow: 'Deletion',
+        status: 'success',
+        studyId,
+        sourceTaskName: `Study ${studyId.substring(0, 8)}`,
+        triggeredByUserId,
+        editedByBot,
+        summary: `Deletion complete: archived ${result.archivedCount} task(s)`,
+      }).catch(() => {}),
     ]);
   } catch (error) {
     console.error('[deletion] processing failed:', error);
@@ -94,6 +105,15 @@ async function processDeletion(body) {
             ...(tracer.toActivityLogDetails()),
           },
         }),
+        studyCommentService.postComment({
+          workflow: 'Deletion',
+          status: 'failed',
+          studyId,
+          sourceTaskName: `Study ${studyId.substring(0, 8)}`,
+          triggeredByUserId,
+          editedByBot,
+          summary: `Deletion failed: ${String(error.message || error).slice(0, 180)}`,
+        }).catch(() => {}),
       ]);
     } catch { /* don't mask original error */ }
   }

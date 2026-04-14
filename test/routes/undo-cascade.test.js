@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
     peek: vi.fn(),
     pop: vi.fn(),
   },
+  studyCommentService: {
+    postComment: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/config.js', () => ({
@@ -33,6 +36,10 @@ vi.mock('../../src/notion/clients.js', () => ({
 
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
+}));
+
+vi.mock('../../src/services/study-comment.js', () => ({
+  StudyCommentService: vi.fn(() => mocks.studyCommentService),
 }));
 
 vi.mock('../../src/services/undo-store.js', () => ({
@@ -66,6 +73,7 @@ describe('undo-cascade route', () => {
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 2 });
     mocks.mockClient.request.mockResolvedValue({});
+    mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
   });
 
   it('returns 200 immediately', async () => {
@@ -256,5 +264,88 @@ describe('undo-cascade route', () => {
         body?.properties?.['Import Mode']?.checkbox === false,
     );
     expect(importModeCalls).toHaveLength(1);
+  });
+
+  it('posts comment with forceComment on no_action path', async () => {
+    mocks.undoStore.peek.mockReturnValue(null);
+    const { req, res } = makeReqRes({ data: { id: 'study-1', last_edited_by: { id: 'user-1', type: 'person' } } });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceComment: true,
+        status: 'no_action',
+        summary: expect.stringContaining('No recent cascade to undo'),
+      }),
+    );
+  });
+
+  it('posts comment on successful undo', async () => {
+    mocks.undoStore.peek.mockReturnValue({
+      manifest: {
+        'task-1': { oldStart: '2026-01-01', oldEnd: '2026-01-02', newStart: '2026-02-01', newEnd: '2026-02-02' },
+      },
+      cascadeId: 'c1',
+      sourceTaskName: 'Task One',
+      cascadeMode: 'pull-left',
+    });
+
+    const { req, res } = makeReqRes({ studyId: 'study-1' });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Undo Cascade',
+        status: 'success',
+        studyId: 'study-1',
+        sourceTaskName: 'Task One',
+        summary: expect.stringContaining('1 task'),
+      }),
+    );
+  });
+
+  it('posts comment on failed undo', async () => {
+    mocks.undoStore.peek.mockReturnValue({
+      manifest: {
+        'task-1': { oldStart: '2026-01-01', oldEnd: '2026-01-02', newStart: '2026-02-01', newEnd: '2026-02-02' },
+      },
+      cascadeId: 'c1',
+      sourceTaskName: 'Task One',
+      cascadeMode: 'pull-left',
+    });
+    mocks.mockClient.patchPages.mockRejectedValueOnce(new Error('patch exploded'));
+
+    const { req, res } = makeReqRes({ studyId: 'study-1' });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Undo Cascade',
+        status: 'failed',
+        studyId: 'study-1',
+        sourceTaskName: 'Task One',
+        summary: expect.stringContaining('patch exploded'),
+      }),
+    );
+  });
+
+  it('undo completes even when comment fails', async () => {
+    mocks.studyCommentService.postComment.mockRejectedValue(new Error('comment API down'));
+    mocks.undoStore.peek.mockReturnValue(null);
+
+    const { req, res } = makeReqRes({ studyId: 'study-1' });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'no_action' }),
+    );
   });
 });
