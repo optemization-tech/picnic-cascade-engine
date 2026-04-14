@@ -17,6 +17,10 @@ async function processUndoCascade(payload) {
     return;
   }
 
+  // Button automation payloads include last_edited_by — the user who clicked.
+  const triggeredByUserId = payload?.data?.last_edited_by?.id || payload?.source?.last_edited_by?.id || null;
+  const editedByBot = (payload?.data?.last_edited_by?.type || payload?.source?.last_edited_by?.type) === 'bot';
+
   const entry = undoStore.peek(studyId);
   if (!entry) {
     await notionClient.reportStatus(studyId, 'warning', 'No recent cascade to undo (expired or already undone)');
@@ -24,6 +28,8 @@ async function processUndoCascade(payload) {
       workflow: 'Undo Cascade',
       status: 'no_action',
       triggerType: 'Manual',
+      triggeredByUserId,
+      editedByBot,
       studyId,
       summary: 'Undo requested but no recent cascade available',
       details: { noActionReason: 'no_undo_available' },
@@ -88,6 +94,8 @@ async function processUndoCascade(payload) {
       workflow: 'Undo Cascade',
       status: 'success',
       triggerType: 'Manual',
+      triggeredByUserId,
+      editedByBot,
       sourceTaskId: entry.sourceTaskId || null,
       sourceTaskName,
       cascadeMode,
@@ -115,6 +123,8 @@ async function processUndoCascade(payload) {
         workflow: 'Undo Cascade',
         status: 'failed',
         triggerType: 'Manual',
+        triggeredByUserId,
+        editedByBot,
         sourceTaskId: entry.sourceTaskId || null,
         sourceTaskName,
         cascadeMode,

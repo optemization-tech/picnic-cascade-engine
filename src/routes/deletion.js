@@ -16,6 +16,10 @@ async function processDeletion(body) {
     return;
   }
 
+  // Button automation payloads include last_edited_by — the user who clicked.
+  const triggeredByUserId = body.data?.last_edited_by?.id || null;
+  const editedByBot = body.data?.last_edited_by?.type === 'bot';
+
   const tracer = new CascadeTracer();
   tracer.set('study_id', studyId);
   tracer.set('workflow', 'deletion');
@@ -37,6 +41,8 @@ async function processDeletion(body) {
         workflow: 'Deletion',
         status: 'success',
         triggerType: 'Manual',
+        triggeredByUserId,
+        editedByBot,
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
@@ -71,6 +77,8 @@ async function processDeletion(body) {
           workflow: 'Deletion',
           status: 'failed',
           triggerType: 'Manual',
+          triggeredByUserId,
+          editedByBot,
           executionId: tracer.cascadeId,
           timestamp: new Date().toISOString(),
           cascadeMode: 'N/A',
