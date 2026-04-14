@@ -19,18 +19,6 @@ async function processInception(body) {
     return;
   }
 
-  // Debug: identify where the triggering user lives in button automation payloads
-  console.log('[inception] payload user fields:', JSON.stringify({
-    topLevelKeys: Object.keys(body || {}),
-    dataKeys: Object.keys(body?.data || {}),
-    dataLastEditedBy: body?.data?.last_edited_by,
-    dataCreatedBy: body?.data?.created_by,
-    sourceKeys: Object.keys(body?.source || {}),
-    sourceLastEditedBy: body?.source?.last_edited_by,
-    topLevelUser: body?.user,
-    topLevelTriggeredBy: body?.triggered_by,
-  }));
-
   // Button automation payloads include last_edited_by — the user who clicked.
   const triggeredByUserId = body?.data?.last_edited_by?.id || null;
   const editedByBot = body?.data?.last_edited_by?.type === 'bot';
