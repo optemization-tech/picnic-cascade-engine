@@ -352,6 +352,285 @@ describe('add-task-set route', () => {
     expect(mocks.mockClient.getPage).toHaveBeenCalledWith('study-alt');
   });
 
+  describe('task set numbering (non-repeat-delivery)', () => {
+    it('assigns #2 when one existing task matches the template ID', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      // Pre-creation query returns 1 existing TLF with matching Template Source ID
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        {
+          id: 'existing-tlf-1',
+          properties: {
+            'Task Name': { title: [{ text: { content: 'TLF' } }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+          },
+        },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-tlf': 'prod-tlf-2' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+      mocks.mockClient.patchPages.mockResolvedValue([]);
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Should rename to TLF #2 (1 existing + 1 = 2)
+      expect(mocks.mockClient.patchPages).toHaveBeenCalledWith(
+        [expect.objectContaining({
+          taskId: 'prod-tlf-2',
+          properties: {
+            'Task Name': { title: [{ type: 'text', text: { content: 'TLF #2' } }] },
+          },
+        })],
+        expect.any(Object),
+      );
+    });
+
+    it('assigns #1 when no existing tasks match the template ID', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      // No existing tasks with matching TSID
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-tlf': 'prod-tlf-1' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+      mocks.mockClient.patchPages.mockResolvedValue([]);
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Should rename to TLF #1 (0 existing + 1 = 1)
+      expect(mocks.mockClient.patchPages).toHaveBeenCalledWith(
+        [expect.objectContaining({
+          taskId: 'prod-tlf-1',
+          properties: {
+            'Task Name': { title: [{ type: 'text', text: { content: 'TLF #1' } }] },
+          },
+        })],
+        expect.any(Object),
+      );
+    });
+
+    it('assigns independent numbers to multiple level-0 parents', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      // 2 existing TLFs, 1 existing CSR
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        {
+          id: 'existing-tlf-1',
+          properties: {
+            'Task Name': { title: [{ text: { content: 'TLF' } }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+          },
+        },
+        {
+          id: 'existing-tlf-2',
+          properties: {
+            'Task Name': { title: [{ text: { content: 'TLF #2' } }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+          },
+        },
+        {
+          id: 'existing-csr-1',
+          properties: {
+            'Task Name': { title: [{ text: { content: 'CSR' } }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-csr' }] },
+          },
+        },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }, { id: 'bp-csr' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        {
+          level: 0,
+          tasks: [
+            { _templateId: 'bp-tlf', _taskName: 'TLF' },
+            { _templateId: 'bp-csr', _taskName: 'CSR' },
+          ],
+          isLastLevel: true,
+        },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-tlf': 'prod-tlf-3', 'bp-csr': 'prod-csr-2' },
+        totalCreated: 2,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+      mocks.mockClient.patchPages.mockResolvedValue([]);
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-csr', 'x-parent-task-names': 'TLF,CSR' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // TLF should be #3 (2 existing), CSR should be #2 (1 existing)
+      expect(mocks.mockClient.patchPages).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            taskId: 'prod-tlf-3',
+            properties: {
+              'Task Name': { title: [{ type: 'text', text: { content: 'TLF #3' } }] },
+            },
+          }),
+          expect.objectContaining({
+            taskId: 'prod-csr-2',
+            properties: {
+              'Task Name': { title: [{ type: 'text', text: { content: 'CSR #2' } }] },
+            },
+          }),
+        ]),
+        expect.any(Object),
+      );
+    });
+
+    it('counts existing tasks using text.content TSID fallback', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      // Template Source ID provided via text.content (not plain_text)
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        {
+          id: 'existing-tlf-1',
+          properties: {
+            'Task Name': { title: [{ text: { content: 'TLF' } }] },
+            'Template Source ID': { rich_text: [{ text: { content: 'bp-tlf' } }] },
+          },
+        },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-tlf': 'prod-tlf-2' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+      mocks.mockClient.patchPages.mockResolvedValue([]);
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Should still count correctly via text.content fallback → TLF #2
+      expect(mocks.mockClient.patchPages).toHaveBeenCalledWith(
+        [expect.objectContaining({
+          taskId: 'prod-tlf-2',
+          properties: {
+            'Task Name': { title: [{ type: 'text', text: { content: 'TLF #2' } }] },
+          },
+        })],
+        expect.any(Object),
+      );
+    });
+
+    it('does not issue a second queryDatabase call after task creation', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-tlf': 'prod-tlf-1' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+      mocks.mockClient.patchPages.mockResolvedValue([]);
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // queryDatabase should be called exactly once (the pre-creation fetch)
+      expect(mocks.mockClient.queryDatabase).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not call patchPages for repeat-delivery buttons', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        { properties: { 'Task Name': { title: [{ text: { content: 'Data Delivery #1 — Review' } }] } } },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-dd' }]);
+      const filteredTask = { _templateId: 'bp-dd', _taskName: 'Data Delivery #1', _templateBlockedBy: [] };
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [filteredTask], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-dd': 'prod-dd-2' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'repeat-delivery', 'x-parent-task-names': 'Data Delivery' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Repeat-delivery uses applyDeliveryNumbering (in-place rename), NOT patchPages
+      expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    });
+  });
+
   it('reports failure when no matching blueprint subtree is found', async () => {
     mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
