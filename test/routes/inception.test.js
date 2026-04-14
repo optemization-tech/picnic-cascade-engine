@@ -531,6 +531,8 @@ describe('inception route', () => {
         workflow: 'Inception',
         status: 'success',
         studyId: 'study-1',
+        sourceTaskName: 'Test Study',
+        summary: expect.stringContaining('tasks created'),
       }),
     );
   });

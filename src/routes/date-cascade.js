@@ -403,21 +403,17 @@ async function processDateCascade(payload) {
           tracer.endPhase('logTerminal');
         }
       })(),
-      (async () => {
-        try {
-          await studyCommentService.postComment({
-            workflow: 'Date Cascade',
-            status: capReached ? 'failed' : 'success',
-            studyId: parsed.studyId,
-            sourceTaskName: parsed.taskName,
-            triggeredByUserId: parsed.triggeredByUserId,
-            editedByBot: parsed.editedByBot,
-            summary: capReached
-              ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
-              : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
-          });
-        } catch { /* comment failure must not break route */ }
-      })(),
+      studyCommentService.postComment({
+        workflow: 'Date Cascade',
+        status: capReached ? 'failed' : 'success',
+        studyId: parsed.studyId,
+        sourceTaskName: parsed.taskName,
+        triggeredByUserId: parsed.triggeredByUserId,
+        editedByBot: parsed.editedByBot,
+        summary: capReached
+          ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
+          : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
+      }).catch(() => {}),
     ]);
 
     // Save undo manifest — only for successful cascades that actually moved tasks

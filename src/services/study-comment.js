@@ -51,8 +51,9 @@ export class StudyCommentService {
       });
       return { posted: true };
     } catch (error) {
-      this.logger.warn('[study-comment] failed to post comment:', error.message);
-      return { posted: false, reason: 'notion-api-error', error: error.message };
+      const msg = error?.message ?? String(error);
+      this.logger.warn('[study-comment] failed to post comment:', msg);
+      return { posted: false, reason: 'notion-api-error', error: msg };
     }
   }
 }

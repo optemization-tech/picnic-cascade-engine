@@ -299,8 +299,11 @@ describe('undo-cascade route', () => {
 
     expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
       expect.objectContaining({
+        workflow: 'Undo Cascade',
         status: 'success',
-        summary: expect.stringContaining('1 tasks'),
+        studyId: 'study-1',
+        sourceTaskName: 'Task One',
+        summary: expect.stringContaining('1 task'),
       }),
     );
   });
@@ -323,7 +326,11 @@ describe('undo-cascade route', () => {
 
     expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
       expect.objectContaining({
+        workflow: 'Undo Cascade',
         status: 'failed',
+        studyId: 'study-1',
+        sourceTaskName: 'Task One',
+        summary: expect.stringContaining('patch exploded'),
       }),
     );
   });

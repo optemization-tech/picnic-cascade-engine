@@ -436,6 +436,7 @@ describe('date-cascade route safety', () => {
       sourceTaskName: 'Source',
       triggeredByUserId: 'user-abc',
       editedByBot: false,
+      summary: 'push-right: Source (2 updates)',
     }));
   });
 

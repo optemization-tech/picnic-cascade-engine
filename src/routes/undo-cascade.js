@@ -131,7 +131,7 @@ async function processUndoCascade(payload) {
         sourceTaskName,
         triggeredByUserId,
         editedByBot,
-        summary: `Undo complete: restored ${taskIds.length} tasks to pre-cascade dates`,
+        summary: `Undo complete: restored ${taskIds.length} ${taskIds.length === 1 ? 'task' : 'tasks'} to pre-cascade dates`,
       });
     } catch { /* comment failure must not break route */ }
   } catch (error) {
