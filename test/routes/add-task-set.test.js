@@ -69,7 +69,7 @@ vi.mock('../../src/services/study-comment.js', () => ({
   StudyCommentService: vi.fn(() => mocks.studyCommentService),
 }));
 
-import { handleAddTaskSet } from '../../src/routes/add-task-set.js';
+import { handleAddTaskSet, _resetStudyLocks } from '../../src/routes/add-task-set.js';
 
 /**
  * Flush microtasks to let the detached void promise chain settle.
@@ -104,6 +104,7 @@ function mockStudyPage({ importMode = false, contractSignDate = '2026-01-15' } =
 describe('add-task-set route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetStudyLocks();
     mocks.copyBlocks.mockResolvedValue({ blocksWrittenCount: 0, pagesProcessed: 0, pagesSkipped: 0 });
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true, pageId: 'page-1' });
     mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
@@ -640,6 +641,33 @@ describe('add-task-set route', () => {
     });
   });
 
+  it('attributes button click to source.user_id, not data.last_edited_by', async () => {
+    mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+    mocks.fetchBlueprint.mockResolvedValue([]);
+
+    const { req, res } = makeReqRes(
+      {
+        source: { user_id: 'button-clicker' },
+        data: {
+          id: 'study-1',
+          last_edited_by: { id: 'page-editor', type: 'person' },
+        },
+      },
+      { 'x-button-type': 'elite', 'x-parent-task-names': 'Elite Tasks' },
+    );
+
+    await handleAddTaskSet(req, res);
+    await flush();
+
+    // Comment should @-mention the button clicker, not the page editor
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggeredByUserId: 'button-clicker',
+        editedByBot: false,
+      }),
+    );
+  });
+
   it('reports failure when no matching blueprint subtree is found', async () => {
     mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
@@ -660,5 +688,94 @@ describe('add-task-set route', () => {
       expect.any(Object),
     );
     expect(mocks.createStudyTasks).not.toHaveBeenCalled();
+  });
+
+  describe('per-study serialization', () => {
+    it('serializes concurrent calls for the same study', async () => {
+      const order = [];
+      let resolveFirst;
+      const firstGate = new Promise(r => { resolveFirst = r; });
+
+      // First call blocks on getPage until we release it
+      mocks.mockClient.getPage
+        .mockImplementationOnce(async () => {
+          order.push('call-1-start');
+          await firstGate;
+          order.push('call-1-end');
+          return mockStudyPage();
+        })
+        .mockImplementationOnce(async () => {
+          order.push('call-2-start');
+          return mockStudyPage();
+        });
+
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([]);
+
+      const { req: req1, res: res1 } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      const { req: req2, res: res2 } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-csr', 'x-parent-task-names': 'TLF' },
+      );
+
+      // Fire both concurrently
+      await handleAddTaskSet(req1, res1);
+      await handleAddTaskSet(req2, res2);
+
+      // Only call 1 should have started — call 2 is queued behind the lock
+      await flush();
+      expect(order).toEqual(['call-1-start']);
+
+      // Release call 1
+      resolveFirst();
+      await flush(40);
+
+      // Call 2 should start only after call 1 finished
+      expect(order).toEqual(['call-1-start', 'call-1-end', 'call-2-start']);
+    });
+
+    it('allows concurrent calls for different studies', async () => {
+      const order = [];
+      let resolveFirst;
+      const firstGate = new Promise(r => { resolveFirst = r; });
+
+      mocks.mockClient.getPage
+        .mockImplementationOnce(async () => {
+          order.push('study-A-start');
+          await firstGate;
+          order.push('study-A-end');
+          return mockStudyPage();
+        })
+        .mockImplementationOnce(async () => {
+          order.push('study-B-start');
+          return mockStudyPage();
+        });
+
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([]);
+
+      const { req: reqA, res: resA } = makeReqRes(
+        { data: { id: 'study-A' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      const { req: reqB, res: resB } = makeReqRes(
+        { data: { id: 'study-B' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+
+      await handleAddTaskSet(reqA, resA);
+      await handleAddTaskSet(reqB, resB);
+      await flush();
+
+      // Both should have started — different studies don't block each other
+      expect(order).toContain('study-A-start');
+      expect(order).toContain('study-B-start');
+
+      resolveFirst();
+      await flush(40);
+    });
   });
 });
