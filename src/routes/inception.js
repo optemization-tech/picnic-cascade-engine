@@ -21,9 +21,9 @@ async function processInception(body) {
     return;
   }
 
-  // Button automation payloads include last_edited_by — the user who clicked.
-  const triggeredByUserId = body?.data?.last_edited_by?.id || null;
-  const editedByBot = body?.data?.last_edited_by?.type === 'bot';
+  // source.user_id is the actual button clicker; data.last_edited_by is whoever last edited the page.
+  const triggeredByUserId = body?.source?.user_id || body?.data?.last_edited_by?.id || null;
+  const editedByBot = !body?.source?.user_id && body?.data?.last_edited_by?.type === 'bot';
 
   const tracer = new CascadeTracer();
   tracer.set('workflow', 'Inception');
