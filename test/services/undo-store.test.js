@@ -1,17 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { UndoStore } from '../../src/services/undo-store.js';
 
 describe('UndoStore', () => {
   let store;
 
   beforeEach(() => {
-    vi.useFakeTimers();
-    store = new UndoStore({ ttlMs: 5000 });
+    store = new UndoStore();
   });
 
   afterEach(() => {
     store._clearAll();
-    vi.useRealTimers();
   });
 
   const manifest = {
@@ -19,7 +17,20 @@ describe('UndoStore', () => {
     'task-b': { oldStart: '2026-04-05', oldEnd: '2026-04-06', newStart: '2026-04-07', newEnd: '2026-04-08' },
   };
 
-  it('save + pop returns manifest without timer', () => {
+  it('save + peek returns entry', () => {
+    store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'Task 1', cascadeMode: 'push-right', manifest });
+    const entry = store.peek('study-1');
+    expect(entry).toEqual({
+      cascadeId: 'c1',
+      sourceTaskId: 't1',
+      sourceTaskName: 'Task 1',
+      cascadeMode: 'push-right',
+      manifest,
+      timestamp: expect.any(Number),
+    });
+  });
+
+  it('save + pop returns entry and removes it', () => {
     store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'Task 1', cascadeMode: 'push-right', manifest });
     const entry = store.pop('study-1');
     expect(entry).toEqual({
@@ -30,7 +41,6 @@ describe('UndoStore', () => {
       manifest,
       timestamp: expect.any(Number),
     });
-    expect(entry).not.toHaveProperty('timer');
   });
 
   it('pop clears entry — second pop returns null', () => {
@@ -39,14 +49,12 @@ describe('UndoStore', () => {
     expect(store.pop('study-1')).toBeNull();
   });
 
-  it('pop returns null when no entry exists', () => {
-    expect(store.pop('nonexistent')).toBeNull();
+  it('peek returns null when no entry exists', () => {
+    expect(store.peek('nonexistent')).toBeNull();
   });
 
-  it('TTL expiry removes entry', () => {
-    store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'T', cascadeMode: 'push-right', manifest });
-    vi.advanceTimersByTime(5001);
-    expect(store.pop('study-1')).toBeNull();
+  it('pop returns null when no entry exists', () => {
+    expect(store.pop('nonexistent')).toBeNull();
   });
 
   it('new cascade overwrites previous (only latest undoable)', () => {
@@ -70,23 +78,16 @@ describe('UndoStore', () => {
     expect(e2.cascadeId).toBe('c2');
   });
 
-  it('overwrite clears previous timer (no double-delete)', () => {
+  it('entry persists indefinitely — no TTL expiry', () => {
     store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'T', cascadeMode: 'push-right', manifest });
-    // Save again at t=3s — should reset the 5s TTL
-    vi.advanceTimersByTime(3000);
-    store.save('study-1', { cascadeId: 'c2', sourceTaskId: 't2', sourceTaskName: 'T2', cascadeMode: 'pull-left', manifest });
 
-    // At t=5s (original TTL would fire), entry should still exist
-    vi.advanceTimersByTime(2000);
-    expect(store.pop('study-1')).not.toBeNull();
-
-    // Re-save since pop consumed it, advance past new TTL
-    store.save('study-1', { cascadeId: 'c3', sourceTaskId: 't3', sourceTaskName: 'T3', cascadeMode: 'pull-left', manifest });
-    vi.advanceTimersByTime(5001);
-    expect(store.pop('study-1')).toBeNull();
+    // Entry should still be available regardless of elapsed time
+    const entry = store.peek('study-1');
+    expect(entry).not.toBeNull();
+    expect(entry.cascadeId).toBe('c1');
   });
 
-  it('_clearAll removes all entries and timers', () => {
+  it('_clearAll removes all entries', () => {
     store.save('study-1', { cascadeId: 'c1', sourceTaskId: 't1', sourceTaskName: 'T', cascadeMode: 'push-right', manifest });
     store.save('study-2', { cascadeId: 'c2', sourceTaskId: 't2', sourceTaskName: 'T', cascadeMode: 'push-right', manifest });
     store._clearAll();
