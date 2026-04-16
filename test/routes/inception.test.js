@@ -516,10 +516,7 @@ describe('inception route', () => {
     expect(expectedTokens).toEqual(['prov-token-1']);
   });
 
-  // ────────────────────────────────────────────────────────────────────
-  // Study comment: posted on successful inception
-  // ────────────────────────────────────────────────────────────────────
-  it('posts study comment on successful inception', async () => {
+  it('does not post study comment on successful inception (comments are errors-only)', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
       properties: {
         'Contract Sign Date': { date: { start: '2026-03-01' } },
@@ -541,19 +538,11 @@ describe('inception route', () => {
     await handleInception(req, res);
     await flush();
 
-    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflow: 'Inception',
-        status: 'success',
-        studyId: 'study-1',
-        sourceTaskName: 'Test Study',
-        summary: expect.stringContaining('tasks created'),
-      }),
-    );
+    expect(mocks.studyCommentService.postComment).not.toHaveBeenCalled();
   });
 
   // ────────────────────────────────────────────────────────────────────
-  // Study comment: posted when double-inception blocked
+  // Study comment: posted when double-inception blocked (error path)
   // ────────────────────────────────────────────────────────────────────
   it('posts study comment when double-inception blocked', async () => {
     mocks.mockClient.getPage.mockResolvedValue({ properties: {} });

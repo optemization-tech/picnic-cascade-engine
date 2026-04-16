@@ -30,6 +30,12 @@ export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   cascadeDebounceMs: parseInt(process.env.CASCADE_DEBOUNCE_MS || '5000', 10),
+  comment: {
+    errorMentionIds: (process.env.COMMENT_ERROR_MENTION_IDS || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(Boolean),
+  },
   notion: {
     // Cascade pool — date-cascade, status-rollup (user-facing, latency-sensitive)
     tokens: collectTokensRequired('NOTION_TOKEN'),

@@ -222,15 +222,6 @@ async function processInception(body) {
         `Content blocks copied: ${copyResult.pagesProcessed} pages, ${copyResult.blocksWrittenCount} blocks`,
         { tracer },
       ),
-      studyCommentService.postComment({
-        workflow: 'Inception',
-        status: 'success',
-        studyId: studyPageId,
-        sourceTaskName: studyName,
-        triggeredByUserId,
-        editedByBot,
-        summary: commentSummary,
-      }).catch(() => {}),
     ]);
 
     console.log(tracer.toConsoleLog());

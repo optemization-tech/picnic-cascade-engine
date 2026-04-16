@@ -479,15 +479,6 @@ async function processAddTaskSet(req) {
         `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created`,
         { tracer },
       ),
-      studyCommentService.postComment({
-        workflow: 'Add Task Set',
-        status: 'success',
-        studyId: studyPageId,
-        sourceTaskName: `${studyName} (${buttonType})`,
-        triggeredByUserId,
-        editedByBot,
-        summary: commentSummary,
-      }).catch(() => {}),
     ]);
 
     // Fire copy-blocks independently — don't block Import Mode disable or activity logging

@@ -267,23 +267,17 @@ describe('undo-cascade route', () => {
     expect(importModeCalls).toHaveLength(1);
   });
 
-  it('posts comment with forceComment on no_action path', async () => {
+  it('does not post comment on no_action path (comments are errors-only)', async () => {
     mocks.undoStore.peek.mockReturnValue(null);
     const { req, res } = makeReqRes({ data: { id: 'study-1', last_edited_by: { id: 'user-1', type: 'person' } } });
     await handleUndoCascade(req, res);
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        forceComment: true,
-        status: 'no_action',
-        summary: expect.stringContaining('No recent cascade to undo'),
-      }),
-    );
+    expect(mocks.studyCommentService.postComment).not.toHaveBeenCalled();
   });
 
-  it('posts comment on successful undo', async () => {
+  it('does not post comment on successful undo (comments are errors-only)', async () => {
     mocks.undoStore.peek.mockReturnValue({
       manifest: {
         'task-1': { oldStart: '2026-01-01', oldEnd: '2026-01-02', newStart: '2026-02-01', newEnd: '2026-02-02' },
@@ -298,15 +292,7 @@ describe('undo-cascade route', () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workflow: 'Undo Cascade',
-        status: 'success',
-        studyId: 'study-1',
-        sourceTaskName: 'Task One',
-        summary: expect.stringContaining('1 task'),
-      }),
-    );
+    expect(mocks.studyCommentService.postComment).not.toHaveBeenCalled();
   });
 
   it('posts comment on failed undo', async () => {
