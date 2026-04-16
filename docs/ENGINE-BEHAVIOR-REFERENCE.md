@@ -240,6 +240,10 @@ On process start, the engine clears any `Import Mode = true` studies left over f
 - Error tolerance: failures are caught inside the IIFE — the server never crashes because of sweep errors; structured log `{event: 'import_mode_sweep', studiesFound, studiesReset}` is emitted on completion
 - Rationale: Import Mode is a guard flag that suppresses cascades during bulk provisioning; if a study is left stuck `true`, Notion edits to that study silently no-op until a human clears it. The sweep is a safety net that removes that operational burden
 
+### 10) Concurrency Model
+
+See [CONCURRENCY-MODEL.md](CONCURRENCY-MODEL.md) for the full concurrency documentation: per-study FIFO queuing (CascadeQueue), debounce, Import Mode lifecycle, LMBS echo prevention, withStudyLock (add-task-set serialization), graceful shutdown, and the multi-replica migration warning.
+
 ## Change Protocol
 For every behavior change:
 1. Update L1 statement

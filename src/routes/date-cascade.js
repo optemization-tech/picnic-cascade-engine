@@ -403,17 +403,6 @@ async function processDateCascade(payload) {
           tracer.endPhase('logTerminal');
         }
       })(),
-      studyCommentService.postComment({
-        workflow: 'Date Cascade',
-        status: capReached ? 'failed' : 'success',
-        studyId: parsed.studyId,
-        sourceTaskName: parsed.taskName,
-        triggeredByUserId: parsed.triggeredByUserId,
-        editedByBot: parsed.editedByBot,
-        summary: capReached
-          ? `Date cascade for ${parsed.taskName} hit safety limit — ${residueCount} task(s) may need manual review`
-          : `${parsed.taskName} updated — ${patched.updatedCount} dependent task(s) rescheduled`,
-      }).catch(() => {}),
     ]);
 
     // Save undo manifest — only for successful cascades that actually moved tasks

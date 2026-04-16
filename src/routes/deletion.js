@@ -62,15 +62,6 @@ async function processDeletion(body) {
         `Deletion complete: archived ${result.archivedCount} task(s)`,
         { tracer },
       ),
-      studyCommentService.postComment({
-        workflow: 'Deletion',
-        status: 'success',
-        studyId,
-        sourceTaskName: `Study ${studyId.substring(0, 8)}`,
-        triggeredByUserId,
-        editedByBot,
-        summary: `Study tasks deleted — ${result.archivedCount} task(s) archived`,
-      }).catch(() => {}),
     ]);
   } catch (error) {
     console.error('[deletion] processing failed:', error);

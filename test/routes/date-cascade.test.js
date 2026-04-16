@@ -385,7 +385,7 @@ describe('date-cascade route safety', () => {
     expect(manifest['task-a'].oldEnd).toBe('2026-04-06');
   });
 
-  it('posts study comment on successful cascade', async () => {
+  it('does not post study comment on successful cascade (comments are errors-only)', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
       taskId: 'source',
@@ -430,15 +430,7 @@ describe('date-cascade route safety', () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(expect.objectContaining({
-      workflow: 'Date Cascade',
-      status: 'success',
-      studyId: 'study-1',
-      sourceTaskName: 'Source',
-      triggeredByUserId: 'user-abc',
-      editedByBot: false,
-      summary: 'Source updated — 2 dependent task(s) rescheduled',
-    }));
+    expect(mocks.studyCommentService.postComment).not.toHaveBeenCalled();
   });
 
   it('posts study comment on failed cascade', async () => {
@@ -472,7 +464,7 @@ describe('date-cascade route safety', () => {
     }));
   });
 
-  it('cascade completes even when comment fails', async () => {
+  it('successful cascade logs activity without posting comment', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
       taskId: 'source',
@@ -511,18 +503,17 @@ describe('date-cascade route safety', () => {
     mocks.enforceConstraints.mockReturnValue({ newStart: '2026-04-01', newEnd: '2026-04-02', constrained: false, merged: false });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchPages.mockResolvedValueOnce({ updatedCount: 2, taskIds: ['source', 'a'] });
-    // Make postComment reject — cascade should still complete
-    mocks.studyCommentService.postComment.mockRejectedValue(new Error('comment API down'));
 
     const { req, res } = makeReqRes({ payload: true });
     await handleDateCascade(req, res);
     await vi.runAllTimersAsync();
     await Promise.resolve();
 
-    // logTerminalEvent should still have been called despite comment failure
+    // logTerminalEvent should be called; postComment should NOT be called on success
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
       status: 'success',
     }));
+    expect(mocks.studyCommentService.postComment).not.toHaveBeenCalled();
   });
 
   it('logs failure when processing throws', async () => {

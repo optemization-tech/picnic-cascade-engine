@@ -36,18 +36,6 @@ async function processUndoCascade(payload) {
       summary: 'Undo requested but no recent cascade available',
       details: { noActionReason: 'no_undo_available' },
     });
-    try {
-      await studyCommentService.postComment({
-        workflow: 'Undo Cascade',
-        status: 'no_action',
-        forceComment: true,
-        studyId,
-        sourceTaskName: 'N/A',
-        triggeredByUserId,
-        editedByBot,
-        summary: 'No recent cascade to undo (expired or already undone)',
-      });
-    } catch { /* comment failure must not break route */ }
     // Disable Import Mode even on the no-op path — the Notion button automation
     // sets it ON before firing the webhook regardless of whether an undo entry exists.
     try {
@@ -123,17 +111,6 @@ async function processUndoCascade(payload) {
         timing: { totalMs: Date.now() - startTime },
       },
     });
-    try {
-      await studyCommentService.postComment({
-        workflow: 'Undo Cascade',
-        status: 'success',
-        studyId,
-        sourceTaskName,
-        triggeredByUserId,
-        editedByBot,
-        summary: `Undo complete: restored ${taskIds.length} ${taskIds.length === 1 ? 'task' : 'tasks'} to pre-cascade dates`,
-      });
-    } catch { /* comment failure must not break route */ }
   } catch (error) {
     console.error('[undo-cascade] processing failed:', error);
     try {
