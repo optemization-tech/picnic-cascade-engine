@@ -176,7 +176,9 @@ describe('inception route', () => {
   // Double-inception guard: study already has tasks
   // ────────────────────────────────────────────────────────────────────
   it('reports error and returns when study already has tasks (double-inception guard)', async () => {
-    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
     mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
@@ -204,7 +206,9 @@ describe('inception route', () => {
   // Empty blueprint -> error reported
   // ────────────────────────────────────────────────────────────────────
   it('reports error when blueprint is empty', async () => {
-    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([]);
 
@@ -279,7 +283,9 @@ describe('inception route', () => {
   // Import Mode is disabled even on error (finally block)
   // ────────────────────────────────────────────────────────────────────
   it('disables Import Mode in finally even when processing throws', async () => {
-    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockRejectedValue(new Error('Notion API down'));
 
@@ -443,7 +449,9 @@ describe('inception route', () => {
   // Activity log called with correct workflow name
   // ────────────────────────────────────────────────────────────────────
   it('logs to activity log with workflow "Inception"', async () => {
-    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
     mocks.buildTaskTree.mockReturnValue([]);
@@ -472,7 +480,9 @@ describe('inception route', () => {
   // Error: activity log records failure
   // ────────────────────────────────────────────────────────────────────
   it('logs error to activity log when pipeline throws', async () => {
-    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
     mocks.buildTaskTree.mockReturnValue([{ level: 0, tasks: [], isLastLevel: true }]);
@@ -545,7 +555,9 @@ describe('inception route', () => {
   // Study comment: posted when double-inception blocked (error path)
   // ────────────────────────────────────────────────────────────────────
   it('posts study comment when double-inception blocked', async () => {
-    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
     mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
@@ -567,7 +579,9 @@ describe('inception route', () => {
   it('inception completes even when comment fails', async () => {
     mocks.studyCommentService.postComment.mockRejectedValue(new Error('Comment API down'));
 
-    mocks.mockClient.getPage.mockResolvedValue({ properties: {} });
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
     mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
@@ -585,36 +599,55 @@ describe('inception route', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
-  // Falls back to today when no Contract Sign Date
+  // Aborts when study has no Contract Sign Date (fail-loud, no silent
+  // "today" fallback). Post-PR-D: empty date → study-page comment + abort.
   // ────────────────────────────────────────────────────────────────────
-  it('falls back to today when study has no Contract Sign Date', async () => {
+  it('aborts when study has no Contract Sign Date and posts a study-page comment', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
       properties: {}, // no Contract Sign Date
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
-    mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
-    mocks.buildTaskTree.mockReturnValue([]);
-    mocks.createStudyTasks.mockResolvedValue({
-      idMapping: {}, totalCreated: 0, depTracking: [], parentTracking: [],
-    });
-    mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
-    mocks.copyBlocks.mockResolvedValue({
-      blocksWrittenCount: 0,
-      pagesProcessed: 0,
-      pagesSkipped: 0,
-    });
 
     const { req, res } = makeReqRes({ studyPageId: 'study-1' });
     await handleInception(req, res);
     await flush();
 
-    // createStudyTasks should have been called with a date string (today)
-    expect(mocks.createStudyTasks).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
+    // Must NOT proceed into provisioning.
+    expect(mocks.fetchBlueprint).not.toHaveBeenCalled();
+    expect(mocks.createStudyTasks).not.toHaveBeenCalled();
+
+    // Study-page comment posted with the exact empty-date summary.
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
       expect.objectContaining({
-        contractSignDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        workflow: 'Inception',
+        status: 'failed',
+        summary: expect.stringContaining('Contract Sign Date is empty'),
       }),
     );
+
+    // Activity Log terminal event with failed status.
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Inception',
+        status: 'failed',
+        summary: expect.stringContaining('Contract Sign Date is empty'),
+      }),
+    );
+
+    // reportStatus fired with error.
+    expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
+      'study-1',
+      'error',
+      expect.stringContaining('Contract Sign Date is empty'),
+      expect.any(Object),
+    );
+
+    // Import Mode reset via the `finally` block.
+    const disableCalls = mocks.mockClient.request.mock.calls.filter(
+      (call) => call[0] === 'PATCH'
+        && call[1] === '/pages/study-1'
+        && call[2]?.properties?.['Import Mode']?.checkbox === false,
+    );
+    expect(disableCalls.length).toBeGreaterThanOrEqual(1);
   });
 });

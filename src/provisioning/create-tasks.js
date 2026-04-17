@@ -212,7 +212,15 @@ function accumulateIdMappings(createdPages, entries, idMapping, depTracking, par
 export async function createStudyTasks(client, levels, { studyPageId, contractSignDate, studyTasksDbId, existingIdMapping, tracer } = {}) {
   if (tracer) tracer.startPhase('createStudyTasks');
 
-  const anchorDate = contractSignDate ? parseDate(contractSignDate) : new Date();
+  // Defense in depth — callers (inception, add-task-set) should have already
+  // aborted on empty Contract Sign Date, but refuse to anchor against
+  // undefined/null here so future misbehaving callers fail loud instead of
+  // silently computing NaN dates (parseDate(null) returns null without
+  // throwing, so guard truthiness FIRST, parse SECOND).
+  if (!contractSignDate) {
+    throw new Error('createStudyTasks: contractSignDate is required');
+  }
+  const anchorDate = parseDate(contractSignDate);
   const idMapping = { ...(existingIdMapping || {}) };
   const depTracking = [];
   const parentTracking = [];

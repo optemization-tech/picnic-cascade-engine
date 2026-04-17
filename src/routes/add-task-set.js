@@ -169,9 +169,39 @@ async function processAddTaskSet(req) {
     const blueprintTasks = blueprintTasksRaw || [];
     const existingTasks = existingTasksRaw || [];
 
-    const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start
-      || new Date().toISOString().split('T')[0];
+    const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start || null;
     studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
+
+    // Fail-loud on empty Contract Sign Date — no silent "today" fallback.
+    // Check happens BEFORE other guards (duplicate, missing subtree) because
+    // those checks presume a valid anchor date for date math/error context.
+    // Import Mode reset happens in the `finally` block.
+    if (!contractSignDate) {
+      const emptyDateSummary = 'Cannot add task set — Contract Sign Date is empty. Please set it on the study page and try again.';
+      await Promise.all([
+        notionClient.reportStatus(studyPageId, 'error', emptyDateSummary, { tracer }),
+        activityLogService.logTerminalEvent({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          triggerType: 'Automation',
+          triggeredByUserId,
+          editedByBot,
+          sourceTaskName: `${studyName} (${buttonType})`,
+          studyId: studyPageId,
+          summary: emptyDateSummary,
+        }),
+        studyCommentService.postComment({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: `${studyName} (${buttonType})`,
+          triggeredByUserId,
+          editedByBot,
+          summary: emptyDateSummary,
+        }).catch(() => {}),
+      ]);
+      return;
+    }
 
     if (!blueprintTasks || blueprintTasks.length === 0) {
       await Promise.all([

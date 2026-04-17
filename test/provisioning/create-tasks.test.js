@@ -572,6 +572,33 @@ describe('createStudyTasks — property mapping', () => {
 
 // ── Tracer integration ─────────────────────────────────────────────────────
 
+describe('createStudyTasks — contractSignDate validation', () => {
+  it('throws when contractSignDate is undefined (defense in depth for future callers)', async () => {
+    const client = mockClient();
+    const { contractSignDate, ...optsWithoutDate } = baseOptions;
+
+    await expect(
+      createStudyTasks(client, [], optsWithoutDate),
+    ).rejects.toThrow(/contractSignDate is required/);
+  });
+
+  it('throws when contractSignDate is null', async () => {
+    const client = mockClient();
+
+    await expect(
+      createStudyTasks(client, [], { ...baseOptions, contractSignDate: null }),
+    ).rejects.toThrow(/contractSignDate is required/);
+  });
+
+  it('throws when contractSignDate is empty string', async () => {
+    const client = mockClient();
+
+    await expect(
+      createStudyTasks(client, [], { ...baseOptions, contractSignDate: '' }),
+    ).rejects.toThrow(/contractSignDate is required/);
+  });
+});
+
 describe('createStudyTasks — tracer', () => {
   it('calls tracer startPhase/endPhase', async () => {
     const phases = [];

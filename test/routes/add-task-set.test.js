@@ -840,6 +840,63 @@ describe('add-task-set route', () => {
     );
   });
 
+  // ────────────────────────────────────────────────────────────────────
+  // Aborts when study has no Contract Sign Date (fail-loud, no silent
+  // "today" fallback). Post-PR-D: empty date → study-page comment + abort.
+  // ────────────────────────────────────────────────────────────────────
+  it('aborts when study has no Contract Sign Date and posts a study-page comment', async () => {
+    mocks.mockClient.getPage.mockResolvedValue(mockStudyPage({ contractSignDate: null }));
+    // Even if blueprint and subtree are healthy, empty date must short-circuit.
+    mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
+    mocks.filterBlueprintSubtree.mockReturnValue([
+      { level: 0, tasks: [{ _templateId: 'bp-1', _taskName: 'TLF' }], isLastLevel: true },
+    ]);
+
+    const { req, res } = makeReqRes(
+      { data: { id: 'study-1' } },
+      { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+    );
+    await handleAddTaskSet(req, res);
+    await flush();
+
+    // Must NOT proceed into provisioning.
+    expect(mocks.createStudyTasks).not.toHaveBeenCalled();
+
+    // Study-page comment posted with the exact empty-date summary.
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Add Task Set',
+        status: 'failed',
+        summary: expect.stringContaining('Contract Sign Date is empty'),
+      }),
+    );
+
+    // Activity Log terminal event with failed status.
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'Add Task Set',
+        status: 'failed',
+        summary: expect.stringContaining('Contract Sign Date is empty'),
+      }),
+    );
+
+    // reportStatus fired with error.
+    expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
+      'study-1',
+      'error',
+      expect.stringContaining('Contract Sign Date is empty'),
+      expect.any(Object),
+    );
+
+    // Import Mode reset via the `finally` block.
+    const disableCalls = mocks.mockClient.request.mock.calls.filter(
+      (call) => call[0] === 'PATCH'
+        && call[1] === '/pages/study-1'
+        && call[2]?.properties?.['Import Mode']?.checkbox === false,
+    );
+    expect(disableCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('reports failure when no matching blueprint subtree is found', async () => {
     mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
