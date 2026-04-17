@@ -375,13 +375,17 @@ describe('add-task-set route', () => {
           },
         },
       ]);
-      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }, { id: 'bp-child' }]);
+      // Multi-task subtree — TLF has a child (Draft TLF, Internal Review, etc.
+      // in the real blueprint). Multi-task subtrees bypass the single-leaf
+      // duplicate guard in Unit 3, so this test covers the numbering path.
       mocks.filterBlueprintSubtree.mockReturnValue([
-        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: true },
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: false },
+        { level: 1, tasks: [{ _templateId: 'bp-child', _taskName: 'Draft TLF' }], isLastLevel: true },
       ]);
       mocks.createStudyTasks.mockResolvedValue({
-        idMapping: { 'bp-tlf': 'prod-tlf-2' },
-        totalCreated: 1,
+        idMapping: { 'bp-tlf': 'prod-tlf-2', 'bp-child': 'prod-child-2' },
+        totalCreated: 2,
         depTracking: [],
         parentTracking: [],
       });
@@ -540,13 +544,16 @@ describe('add-task-set route', () => {
           },
         },
       ]);
-      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }, { id: 'bp-child' }]);
+      // Multi-task subtree — bypasses the single-leaf duplicate guard so we
+      // exercise the TSID text.content fallback in the numbering path.
       mocks.filterBlueprintSubtree.mockReturnValue([
-        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: true },
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: false },
+        { level: 1, tasks: [{ _templateId: 'bp-child', _taskName: 'Draft TLF' }], isLastLevel: true },
       ]);
       mocks.createStudyTasks.mockResolvedValue({
-        idMapping: { 'bp-tlf': 'prod-tlf-2' },
-        totalCreated: 1,
+        idMapping: { 'bp-tlf': 'prod-tlf-2', 'bp-child': 'prod-child-2' },
+        totalCreated: 2,
         depTracking: [],
         parentTracking: [],
       });
@@ -917,6 +924,184 @@ describe('add-task-set route', () => {
       expect.any(Object),
     );
     expect(mocks.createStudyTasks).not.toHaveBeenCalled();
+  });
+
+  describe('single-leaf duplicate guard', () => {
+    it('aborts and posts a comment when a single-leaf non-repeat template already exists', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        {
+          id: 'existing-leaf',
+          properties: {
+            'Task Name': { title: [{ plain_text: 'Final Delivery Retrieval Wrap-Up Window' }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-leaf' }] },
+          },
+        },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-leaf' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-leaf', _taskName: 'Final Delivery Retrieval Wrap-Up Window' }], isLastLevel: true },
+      ]);
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'additional-site', 'x-parent-task-names': 'Final Delivery Retrieval Wrap-Up Window' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Guard fires — no creation.
+      expect(mocks.createStudyTasks).not.toHaveBeenCalled();
+
+      // Comment mentions the existing task's name.
+      expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          summary: expect.stringContaining("'Final Delivery Retrieval Wrap-Up Window'"),
+        }),
+      );
+
+      // Activity Log terminal event.
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          summary: expect.stringContaining('already exists'),
+        }),
+      );
+
+      // reportStatus fired with error.
+      expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
+        'study-1',
+        'error',
+        expect.stringContaining('already exists'),
+        expect.any(Object),
+      );
+
+      // Import Mode reset via the `finally` block.
+      const disableCalls = mocks.mockClient.request.mock.calls.filter(
+        (call) => call[0] === 'PATCH'
+          && call[1] === '/pages/study-1'
+          && call[2]?.properties?.['Import Mode']?.checkbox === false,
+      );
+      expect(disableCalls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('does NOT fire on single-leaf non-repeat when the template is not yet in the study', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      // No existing tasks with matching TSID — guard must not fire.
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-leaf' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-leaf', _taskName: 'Wrap-Up Window' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-leaf': 'prod-leaf-1' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'additional-site', 'x-parent-task-names': 'Wrap-Up Window' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Normal flow runs.
+      expect(mocks.createStudyTasks).toHaveBeenCalled();
+      // No duplicate-guard comment posted on the happy path (errors-only behavior).
+      expect(mocks.studyCommentService.postComment).not.toHaveBeenCalledWith(
+        expect.objectContaining({ summary: expect.stringContaining('already exists') }),
+      );
+    });
+
+    it('does NOT fire on repeat-delivery even when the blueprint slot maps to an existing task', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      // Existing Data Delivery #1 with matching TSID — repeat-delivery must
+      // still proceed because its flow is "always create the next one."
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        {
+          id: 'existing-dd1',
+          properties: {
+            'Task Name': { title: [{ plain_text: 'Data Delivery #1 — Review' }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-dd' }] },
+          },
+        },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-dd' }]);
+      const deliveryTask = { _templateId: 'bp-dd', _taskName: 'Data Delivery #1', _templateBlockedBy: [] };
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [deliveryTask], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-dd': 'prod-dd-2' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'repeat-delivery', 'x-parent-task-names': 'Data Delivery' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Repeat-delivery proceeds — creation happens, numbering bumps to #2.
+      expect(mocks.createStudyTasks).toHaveBeenCalled();
+      expect(deliveryTask._taskName).toBe('Data Delivery #2');
+    });
+
+    it('does NOT fire on multi-task (numbered) subtrees even when one template matches', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      // Existing TLF#1 exists. New TLF#2 subtree has multiple tasks →
+      // isSingleLeaf is false → guard skipped, strip-before-create runs.
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        {
+          id: 'existing-tlf-1',
+          properties: {
+            'Task Name': { title: [{ plain_text: 'TLF' }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+          },
+        },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }, { id: 'bp-child' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: false },
+        { level: 1, tasks: [{ _templateId: 'bp-child', _taskName: 'Draft TLF' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-tlf': 'prod-tlf-2', 'bp-child': 'prod-child-2' },
+        totalCreated: 2,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({
+        parentsPatchedCount: 0,
+        depsPatchedCount: 0,
+      });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // Full numbered-set flow runs; guard did not abort.
+      expect(mocks.createStudyTasks).toHaveBeenCalled();
+    });
   });
 
   describe('per-study serialization', () => {

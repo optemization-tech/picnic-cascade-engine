@@ -317,6 +317,55 @@ async function processAddTaskSet(req) {
       }
     }
 
+    // ── Single-leaf duplicate guard ──────────────────────────────────────
+    // A second click on a single-leaf non-repeat button template would
+    // otherwise silently create a duplicate (the strip below removes the
+    // existing template ID, so the create path has no idea it already
+    // exists). Numbered sets (TLF #2/#3, etc.) have multiple tasks in the
+    // filtered subtree so `isSingleLeaf` is false — they still reach the
+    // strip and create with numbering as before. Repeat-delivery is also
+    // explicitly exempt because its flow is "always create the next one."
+    // Placed AFTER existingIdMapping so we can do an O(1) lookup instead of
+    // re-scanning existingTasks, and BEFORE the strip so the mapping still
+    // has the internal template IDs.
+    const isSingleLeaf = filteredLevels.length === 1 && filteredLevels[0].tasks.length === 1;
+    if (isSingleLeaf && !isRepeatDelivery) {
+      const templateId = filteredLevels[0].tasks[0]._templateId;
+      const existingProductionPageId = existingIdMapping[templateId];
+      if (existingProductionPageId) {
+        // Best-effort name lookup for a useful error message.
+        const existingPage = existingTasks.find((p) => p.id === existingProductionPageId);
+        const existingName =
+          existingPage?.properties?.['Task Name']?.title?.[0]?.plain_text
+          || existingPage?.properties?.['Task Name']?.title?.[0]?.text?.content
+          || 'this task';
+        const duplicateSummary = `Cannot add '${existingName}' — it already exists in this study.`;
+        await Promise.all([
+          notionClient.reportStatus(studyPageId, 'error', duplicateSummary, { tracer }),
+          activityLogService.logTerminalEvent({
+            workflow: 'Add Task Set',
+            status: 'failed',
+            triggerType: 'Automation',
+            triggeredByUserId,
+            editedByBot,
+            sourceTaskName: `${studyName} (${buttonType})`,
+            studyId: studyPageId,
+            summary: duplicateSummary,
+          }),
+          studyCommentService.postComment({
+            workflow: 'Add Task Set',
+            status: 'failed',
+            studyId: studyPageId,
+            sourceTaskName: `${studyName} (${buttonType})`,
+            triggeredByUserId,
+            editedByBot,
+            summary: duplicateSummary,
+          }).catch(() => {}),
+        ]);
+        return;
+      }
+    }
+
     // Strip current subtree's template IDs from existingIdMapping so that
     // intra-set deps (e.g., Draft TLF → Internal Review within TLF #2) stay
     // unresolved during task creation and get wired to the NEW batch's tasks
