@@ -19,7 +19,10 @@ function baseEvent(overrides = {}) {
     status: 'failed',
     studyId: 'study-1',
     sourceTaskName: 'Task One',
-    triggeredByUserId: 'user-1',
+    // Default to null so the existing "2 configured IDs = 2 mentions"
+    // assertions keep their shape. Presser-prepend is exercised in the Unit 1
+    // block further down.
+    triggeredByUserId: null,
     editedByBot: false,
     summary: 'Date cascade failed: timeout',
     ...overrides,
@@ -160,5 +163,110 @@ describe('StudyCommentService', () => {
     const payload = notionClient.request.mock.calls[0][2];
     const textContent = payload.rich_text.find(r => r.type === 'text').text.content;
     expect(textContent).toContain('Automation complete');
+  });
+
+  // ── Unit 1: presser-prepend with dedup + bot carve-out + null-safe ──────
+  describe('presser-prepend (triggeredByUserId)', () => {
+    it('prepends triggeredByUserId ahead of configured mentions', async () => {
+      mockConfig.comment.errorMentionIds = ['user-a', 'user-b', 'user-c'];
+      const { service, notionClient } = makeService();
+
+      await service.postComment(baseEvent({ triggeredByUserId: 'user-X' }));
+
+      const payload = notionClient.request.mock.calls[0][2];
+      const mentionIds = payload.rich_text
+        .filter(r => r.type === 'mention')
+        .map(r => r.mention.user.id);
+      expect(mentionIds).toEqual(['user-X', 'user-a', 'user-b', 'user-c']);
+    });
+
+    it('dedups presser when already in configured mentions (no double-mention)', async () => {
+      mockConfig.comment.errorMentionIds = ['user-a', 'user-b', 'user-c'];
+      const { service, notionClient } = makeService();
+
+      await service.postComment(baseEvent({ triggeredByUserId: 'user-a' }));
+
+      const payload = notionClient.request.mock.calls[0][2];
+      const mentionIds = payload.rich_text
+        .filter(r => r.type === 'mention')
+        .map(r => r.mention.user.id);
+      expect(mentionIds).toEqual(['user-a', 'user-b', 'user-c']);
+    });
+
+    it('skips presser-prepend when editedByBot=true', async () => {
+      mockConfig.comment.errorMentionIds = ['user-a', 'user-b'];
+      const { service, notionClient } = makeService();
+
+      await service.postComment(baseEvent({
+        triggeredByUserId: 'bot-id',
+        editedByBot: true,
+      }));
+
+      const payload = notionClient.request.mock.calls[0][2];
+      const mentionIds = payload.rich_text
+        .filter(r => r.type === 'mention')
+        .map(r => r.mention.user.id);
+      expect(mentionIds).toEqual(['user-a', 'user-b']);
+      // Summary still posted (last text entry, after the mention spacers).
+      const textEntries = payload.rich_text.filter(r => r.type === 'text');
+      const summaryText = textEntries[textEntries.length - 1].text.content;
+      expect(summaryText).toContain('❌');
+    });
+
+    it.each([
+      ['null', null],
+      ['undefined', undefined],
+    ])('null-safe when triggeredByUserId is %s — configured mentions still fire', async (_label, value) => {
+      mockConfig.comment.errorMentionIds = ['user-a', 'user-b'];
+      const { service, notionClient } = makeService();
+
+      const result = await service.postComment(baseEvent({ triggeredByUserId: value }));
+
+      expect(result).toEqual({ posted: true });
+      const payload = notionClient.request.mock.calls[0][2];
+      const mentionIds = payload.rich_text
+        .filter(r => r.type === 'mention')
+        .map(r => r.mention.user.id);
+      expect(mentionIds).toEqual(['user-a', 'user-b']);
+    });
+
+    it('posts presser-only when errorMentionIds is empty', async () => {
+      mockConfig.comment.errorMentionIds = [];
+      const { service, notionClient } = makeService();
+
+      await service.postComment(baseEvent({ triggeredByUserId: 'user-X' }));
+
+      const payload = notionClient.request.mock.calls[0][2];
+      const mentionIds = payload.rich_text
+        .filter(r => r.type === 'mention')
+        .map(r => r.mention.user.id);
+      expect(mentionIds).toEqual(['user-X']);
+    });
+
+    it('posts plain text when both triggeredByUserId and errorMentionIds are empty', async () => {
+      mockConfig.comment.errorMentionIds = [];
+      const { service, notionClient } = makeService();
+
+      await service.postComment(baseEvent({ triggeredByUserId: null }));
+
+      const payload = notionClient.request.mock.calls[0][2];
+      expect(payload.rich_text).toHaveLength(1);
+      expect(payload.rich_text[0].type).toBe('text');
+      expect(payload.rich_text[0].text.content).toContain('❌');
+    });
+
+    it('dedups duplicate entries inside errorMentionIds itself', async () => {
+      // Malformed env config with duplicated ID.
+      mockConfig.comment.errorMentionIds = ['user-a', 'user-a', 'user-b'];
+      const { service, notionClient } = makeService();
+
+      await service.postComment(baseEvent({ triggeredByUserId: null }));
+
+      const payload = notionClient.request.mock.calls[0][2];
+      const mentionIds = payload.rich_text
+        .filter(r => r.type === 'mention')
+        .map(r => r.mention.user.id);
+      expect(mentionIds).toEqual(['user-a', 'user-b']);
+    });
   });
 });
