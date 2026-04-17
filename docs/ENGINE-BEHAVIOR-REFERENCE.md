@@ -56,7 +56,7 @@ Parent guard:
 
 **Import Mode lifecycle:** The Notion button automation sets Import Mode = true before sending the webhook. The engine ensures it stays on during execution and always disables it in a finally block — even on abort or error.
 
-**Repeat-delivery date copying:** When repeat-delivery creates a new delivery (e.g., #11), it copies dates from the latest existing delivery (#10) task-by-task, matched by Template Source ID. This inherits any manual date adjustments. Falls back to Contract Sign Date + offset if no prior delivery exists.
+**Repeat-delivery date copying:** When repeat-delivery creates a new delivery (e.g., #11), it copies dates from the latest existing delivery (#10) task-by-task, matched by task name (with the delivery number normalized to the target `#N`). This inherits any manual date adjustments. Name-matching is deliberate — the blueprint has multiple `Data Delivery #N` subtrees with unique Template Source IDs, so TSID matching would be degenerate (always hits the blueprint source, never a production copy). See PR #18 rationale. Falls back to Contract Sign Date + offset if no prior delivery exists.
 
 **Copy-blocks scope:** Add-task-set only passes newly created task IDs to copy-blocks, not the full idMapping (which includes existing tasks seeded for dependency resolution).
 
@@ -253,6 +253,12 @@ For every behavior change:
 5. Record decision in pulse log
 
 ## Changelog
+
+### 2026-04-16 — PR C: repeat-delivery rename-aware date-copy lookup
+
+**Section 2b correction (this doc):** the "Repeat-delivery date copying" row previously claimed matching was by Template Source ID. That was aspirational and never true in code — PR #18 deliberately moved *from* TSID *to* name-based matching because the blueprint has 9 separate `Data Delivery #N` subtrees with unique TSIDs, making TSID matching degenerate (always hits the blueprint source, never a production copy). Row now documents name-matching with delivery-number normalization.
+
+**Code fix (`src/routes/add-task-set.js`):** the `latestDates` build loop now normalizes keys from `#N` (existing production delivery) to `#${nextNum}` (the target delivery being created). `applyDeliveryNumbering` rewrites `task._taskName` from `#1` → `#${nextNum}` *before* the override lookup, so unnormalized keys missed and the new delivery fell through to the blueprint-offset formula. Meg's 2026-04-16 reproduction showed `Data Delivery #3` starting Dec 7 while `Repeat QC` ended Dec 8 — Delivery before QC ended. After the fix, `Data Delivery #${nextNum}` inherits the previous delivery's manually shifted dates correctly.
 
 ### 2026-04-12 — PR #43 merged (webhook auth, graceful shutdown, startup sweep)
 
