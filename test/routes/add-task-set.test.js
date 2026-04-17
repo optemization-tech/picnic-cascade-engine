@@ -641,6 +641,178 @@ describe('add-task-set route', () => {
     });
   });
 
+  describe('repeat-delivery date copying (rename-aware)', () => {
+    // Regression fixture for the Meg Apr 16 bug: DD#2 has manually shifted
+    // dates (different from blueprint-offset formula). Firing repeat-delivery
+    // must produce DD#3 whose Delivery task inherits DD#2's shifted dates —
+    // not fall back to the formula. applyDeliveryNumbering rewrites
+    // "Data Delivery #2" → "Data Delivery #3" *before* latestDates lookup, so
+    // latestDates keys must be normalized to match the rename target.
+
+    // DD#2 parent task id
+    const parentId = 'dd2-parent-id';
+
+    // DD#2 child dates — manually shifted LEFT by 10 BD from the formula,
+    // so they are impossible to hit by coincidence of blueprint-offset math.
+    // Delivery: 2027-11-23 → 2027-11-23 (formula would produce 2027-12-07).
+    // Repeat QC:    2027-10-26 → 2027-11-22 (contiguous ending day before Delivery).
+    const SHIFTED_DELIVERY_START = '2027-11-23';
+    const SHIFTED_DELIVERY_END = '2027-11-23';
+    const SHIFTED_QC_START = '2027-10-26';
+    const SHIFTED_QC_END = '2027-11-22';
+    const SHIFTED_PARENT_START = '2027-10-26';
+    const SHIFTED_PARENT_END = '2027-11-23';
+
+    function makeDD2ExistingTasks() {
+      return [
+        // DD#2 parent ("Data Delivery #2 Activities")
+        {
+          id: parentId,
+          properties: {
+            'Task Name': { title: [{ text: { content: 'Data Delivery #2 Activities' }, plain_text: 'Data Delivery #2 Activities' }] },
+            'Dates': { date: { start: SHIFTED_PARENT_START, end: SHIFTED_PARENT_END } },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-dd2-parent' }] },
+          },
+        },
+        // Delivery task — name contains "#2", this is the task that gets
+        // renamed by applyDeliveryNumbering and exposes the bug.
+        {
+          id: 'dd2-delivery-id',
+          properties: {
+            'Task Name': { title: [{ text: { content: 'Data Delivery #2' }, plain_text: 'Data Delivery #2' }] },
+            'Dates': { date: { start: SHIFTED_DELIVERY_START, end: SHIFTED_DELIVERY_END } },
+            'Parent Task': { relation: [{ id: parentId }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-delivery' }] },
+          },
+        },
+        // Repeat QC — no "#N" in the name, lookup already worked pre-fix.
+        {
+          id: 'dd2-qc-id',
+          properties: {
+            'Task Name': { title: [{ text: { content: 'Repeat QC' }, plain_text: 'Repeat QC' }] },
+            'Dates': { date: { start: SHIFTED_QC_START, end: SHIFTED_QC_END } },
+            'Parent Task': { relation: [{ id: parentId }] },
+            'Template Source ID': { rich_text: [{ plain_text: 'bp-qc' }] },
+          },
+        },
+      ];
+    }
+
+    function makeBlueprintFilteredLevels() {
+      // Blueprint template tasks — the "#N" in the Delivery name is the placeholder
+      // applyDeliveryNumbering rewrites. Parent carries its own "#N" too.
+      const parentTask = {
+        _templateId: 'bp-dd-parent',
+        _taskName: 'Data Delivery #1 Activities',
+        _templateBlockedBy: [],
+      };
+      const deliveryTask = {
+        _templateId: 'bp-delivery',
+        _taskName: 'Data Delivery #1',
+        _templateParentId: 'bp-dd-parent',
+        _templateBlockedBy: [],
+      };
+      const qcTask = {
+        _templateId: 'bp-qc',
+        _taskName: 'Repeat QC',
+        _templateParentId: 'bp-dd-parent',
+        _templateBlockedBy: [],
+      };
+      return {
+        parentTask,
+        deliveryTask,
+        qcTask,
+        levels: [
+          { level: 0, tasks: [parentTask], isLastLevel: false },
+          { level: 1, tasks: [deliveryTask, qcTask], isLastLevel: true },
+        ],
+      };
+    }
+
+    it('DD#3 Delivery inherits DD#2 shifted dates (even though applyDeliveryNumbering renamed #2 → #3)', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue(makeDD2ExistingTasks());
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-dd-parent' }, { id: 'bp-delivery' }, { id: 'bp-qc' }]);
+
+      const { parentTask, deliveryTask, qcTask, levels } = makeBlueprintFilteredLevels();
+      mocks.filterBlueprintSubtree.mockReturnValue(levels);
+
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-dd-parent': 'prod-p3', 'bp-delivery': 'prod-d3', 'bp-qc': 'prod-q3' },
+        totalCreated: 3,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'repeat-delivery', 'x-parent-task-names': 'Data Delivery' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // applyDeliveryNumbering rewrites #1 → #3 (next after #2).
+      expect(deliveryTask._taskName).toBe('Data Delivery #3');
+
+      // Core regression assertion — Delivery inherits DD#2's SHIFTED dates,
+      // not blueprint-offset fallback. Pre-fix, latestDates was keyed by
+      // "Data Delivery #2" but the lookup used "Data Delivery #3" → miss →
+      // no override → formula fallback.
+      expect(deliveryTask._overrideStartDate).toBe(SHIFTED_DELIVERY_START);
+      expect(deliveryTask._overrideEndDate).toBe(SHIFTED_DELIVERY_END);
+
+      // QC inherits too (no "#N" in name — worked pre-fix; guards against regression).
+      expect(qcTask._overrideStartDate).toBe(SHIFTED_QC_START);
+      expect(qcTask._overrideEndDate).toBe(SHIFTED_QC_END);
+
+      // Parent inherits via the __parent__ special case in add-task-set.js.
+      expect(parentTask._overrideStartDate).toBe(SHIFTED_PARENT_START);
+      expect(parentTask._overrideEndDate).toBe(SHIFTED_PARENT_END);
+
+      // Ordering invariant: Delivery start must come AFTER QC end (Meg Apr 16 bug
+      // was Delivery-before-QC-ended). Asserted on the override values that
+      // downstream create-tasks.js will write.
+      expect(deliveryTask._overrideStartDate > qcTask._overrideEndDate).toBe(true);
+    });
+
+    it('falls back to formula when DD#N does not exist (e.g., first repeat creating DD#1)', async () => {
+      // No existing Data Delivery tasks — resolveNextDeliveryNumber returns 1.
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-delivery' }]);
+
+      const deliveryTask = {
+        _templateId: 'bp-delivery',
+        _taskName: 'Data Delivery #1',
+        _templateBlockedBy: [],
+      };
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [deliveryTask], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-delivery': 'prod-d1' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'repeat-delivery', 'x-parent-task-names': 'Data Delivery' },
+      );
+
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      // No prior DD → no override applied → create-tasks.js uses blueprint-offset formula.
+      expect(deliveryTask._overrideStartDate).toBeUndefined();
+      expect(deliveryTask._overrideEndDate).toBeUndefined();
+    });
+  });
+
   it('attributes button click to source.user_id, not data.last_edited_by', async () => {
     mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
     mocks.fetchBlueprint.mockResolvedValue([]);

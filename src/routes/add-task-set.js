@@ -322,7 +322,12 @@ async function processAddTaskSet(req) {
       }
 
       if (latestDeliveryParentId) {
-        // Collect children of that parent and map by task name → dates
+        // Collect children of that parent and map by task name → dates.
+        // Keyed by the target delivery number (post-rename) so the lookup at
+        // line ~360 matches task._taskName *after* applyDeliveryNumbering
+        // rewrote "#N" → "#nextNum". Name-based (not TSID-based) matching
+        // is deliberate — the blueprint has 9 separate DD subtrees with
+        // unique TSIDs, so TSID matching would be degenerate. See PR #18.
         const latestDates = {};
         for (const page of existingTasks) {
           const parentRel = page.properties?.['Parent Task']?.relation || [];
@@ -330,7 +335,8 @@ async function processAddTaskSet(req) {
             const name = page.properties?.['Task Name']?.title?.[0]?.plain_text || '';
             const dates = page.properties?.['Dates']?.date;
             if (name && dates?.start) {
-              latestDates[name.trim()] = { start: dates.start, end: dates.end };
+              const normalizedKey = name.trim().replace(/#\d+/g, `#${nextNum}`);
+              latestDates[normalizedKey] = { start: dates.start, end: dates.end };
             }
           }
         }
