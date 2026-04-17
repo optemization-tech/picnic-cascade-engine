@@ -238,6 +238,81 @@ export function multiBlockerAllMoved() {
 }
 
 /**
+ * Start-left downstream sibling scenario — Meg Apr 16 repro.
+ *
+ * Topology (Draft ICF / Internal Revisions / Client Review R1):
+ *
+ *     Client Review R1
+ *        /        \
+ *   Draft ICF   Internal Revisions
+ *
+ * Both Draft ICF and Internal Revisions are downstream siblings of
+ * Client Review R1. When Draft ICF's start is dragged far left in
+ * start-left mode, pullLeftUpstream drags Client Review R1 earlier,
+ * but Internal Revisions (the sibling) is NOT reached — bug β.
+ *
+ * Client Review R1:   Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]   (not frozen)
+ * Draft ICF (source): Apr 20 (Mon) - Apr 24 (Fri)  [5 BD]   blocked by Client Review R1
+ * Internal Revisions: Apr 20 (Mon) - Apr 22 (Wed)  [3 BD]   blocked by Client Review R1
+ *
+ * Source drag: Draft ICF start moved ~5 BD left (still legal against
+ * Client Review R1 if R1 moves earlier to accommodate).
+ */
+export function startLeftDownstreamSibling() {
+  return [
+    task('cr1', 'Client Review R1', '2026-03-30', '2026-03-31', {
+      blockingIds: ['draft-icf', 'internal-revisions'],
+    }),
+    task('draft-icf', 'Draft ICF', '2026-04-20', '2026-04-24', {
+      blockedByIds: ['cr1'],
+    }),
+    task('internal-revisions', 'Internal Revisions Round 1: Protocol', '2026-04-20', '2026-04-22', {
+      blockedByIds: ['cr1'],
+    }),
+  ];
+}
+
+/**
+ * Start-left with frozen sibling blocker — SC-7 regression.
+ *
+ * Downstream sibling has fan-in blockers: one non-frozen that the
+ * upstream pass moves, and one frozen. The frozen blocker must be
+ * excluded from the constraint calculation. After tightening, the
+ * sibling's new start = nextBD(non-frozen blocker new end).
+ *
+ *         Frozen Blocker (Done)       Non-Frozen Blocker
+ *                 \                         /    \
+ *                  \                       /      \
+ *                   +-- Downstream Sibling       Source
+ *
+ * Frozen Blocker:       Mar 30 (Mon) - Mar 31 (Tue)  [2 BD, Done]
+ * Non-Frozen Blocker:   Mar 30 (Mon) - Mar 31 (Tue)  [2 BD]
+ * Source (Draft ICF):   Apr 15 (Wed) - Apr 17 (Fri)  [3 BD]   blocked by Non-Frozen Blocker
+ * Sibling:              Apr 15 (Wed) - Apr 16 (Thu)  [2 BD]   blocked by Frozen + Non-Frozen
+ *
+ * When source starts left, pullLeftUpstream pulls Non-Frozen Blocker left.
+ * Frozen Blocker does not move (it's Done). Sibling must tighten against
+ * Non-Frozen Blocker's new end, NOT Frozen Blocker's stale end.
+ */
+export function startLeftDownstreamSiblingFrozenFanIn() {
+  return [
+    task('frozen-blocker', 'Frozen Blocker', '2026-03-30', '2026-03-31', {
+      status: 'Done',
+      blockingIds: ['sibling'],
+    }),
+    task('nf-blocker', 'Non-Frozen Blocker', '2026-03-30', '2026-03-31', {
+      blockingIds: ['source', 'sibling'],
+    }),
+    task('source', 'Source (Draft ICF)', '2026-04-15', '2026-04-17', {
+      blockedByIds: ['nf-blocker'],
+    }),
+    task('sibling', 'Sibling (Internal Revisions)', '2026-04-15', '2026-04-16', {
+      blockedByIds: ['frozen-blocker', 'nf-blocker'],
+    }),
+  ];
+}
+
+/**
  * Multi-blocker, tight with stationary (BL-H4g control):
  * D is tight with stationary blocker C (no gap).
  * Clamp + frustration resolver should handle this normally.

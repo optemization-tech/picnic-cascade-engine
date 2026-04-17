@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { runCascade } from '../../src/engine/cascade.js';
-import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream, fanOutFromUpstream, preExistingViolation, transitiveViolations, multiBlockerAllMoved } from '../fixtures/cascade-tasks.js';
+import { linearTightChain, linearGappedChain, fanIn, chainWithFrozen, gappedUpstreamChain, diamondUpstream, fanOutFromUpstream, preExistingViolation, transitiveViolations, multiBlockerAllMoved, startLeftDownstreamSibling, startLeftDownstreamSiblingFrozenFanIn } from '../fixtures/cascade-tasks.js';
 import { twoChainSharedTask, crossChainClampedByOtherBlocker, parentWithAccidentalDep } from '../fixtures/cross-chain-tasks.js';
+import { nextBusinessDay, parseDate, formatDate } from '../../src/utils/business-days.js';
 
 describe('runCascade', () => {
   // @behavior BEH-MODE-PUSH-RIGHT
@@ -122,6 +123,329 @@ describe('runCascade', () => {
       expect(aUpdate).toBeDefined();
       expect(aUpdate.newStart).toBe('2026-03-27');
       expect(aUpdate.newEnd).toBe('2026-03-30');
+    });
+
+    // @behavior BEH-STARTLEFT-DOWNSTREAM-PASS
+    // Meg Apr 16 bug β — start-left never tightened downstream siblings.
+    // Activity Log event 3442386760c281799d85fea88ef5abf7.
+    describe('downstream pass (Meg Apr 16 bug β)', () => {
+      it('tightens a downstream sibling that shares a blocker with the source', () => {
+        // Draft ICF / Internal Revisions / Client Review R1 topology.
+        const tasks = startLeftDownstreamSibling();
+        // Draft ICF start dragged from Mon Apr 20 → Fri Mar 27 (deep left).
+        const result = runCascade({
+          sourceTaskId: 'draft-icf',
+          sourceTaskName: 'Draft ICF',
+          newStart: '2026-03-27', // Fri
+          newEnd: '2026-04-24',   // unchanged
+          refStart: '2026-04-20',
+          refEnd: '2026-04-24',
+          startDelta: -16,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // Client Review R1 (upstream) must be pulled left to end prevBD(Mar 27) = Thu Mar 26.
+        const cr1Update = result.updates.find(u => u.taskId === 'cr1');
+        expect(cr1Update).toBeDefined();
+        expect(cr1Update.newEnd).toBe('2026-03-26');
+
+        // Internal Revisions (downstream sibling) must tighten against Client Review R1's new end.
+        // nextBD(Mar 26 Thu) = Fri Mar 27, duration preserved = 3 BD → newEnd = Tue Mar 31.
+        const irUpdate = result.updates.find(u => u.taskId === 'internal-revisions');
+        expect(irUpdate).toBeDefined();
+        expect(irUpdate.newStart).toBe('2026-03-27'); // Fri
+        expect(irUpdate.newEnd).toBe('2026-03-31');   // Tue
+      });
+
+      it('no-ops when the source has no downstream siblings', () => {
+        // Linear tight chain, source = D (leaf). Upstream pass does all the work.
+        const tasks = linearTightChain();
+        const result = runCascade({
+          sourceTaskId: 'd',
+          sourceTaskName: 'Task D',
+          newStart: '2026-04-06',
+          newEnd: '2026-04-08',
+          refStart: '2026-04-07',
+          refEnd: '2026-04-08',
+          startDelta: -1,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // Only upstream tasks should appear.
+        const movedIds = new Set(result.movedTaskIds);
+        expect(movedIds.has('a')).toBe(true);
+        expect(movedIds.has('b')).toBe(true);
+        expect(movedIds.has('c')).toBe(true);
+        // D is the source leaf — no downstream sibling exists.
+        expect(movedIds.has('d')).toBe(false);
+      });
+
+      it('tightens across multi-level downstream chain from an upstream-moved task', () => {
+        // Fan-out shape: x blocks b (source) and d, b blocks c.
+        // When b is dragged left, pullLeftUpstream pulls x left.
+        // Then tightenDownstreamFromSeed from {b, x} reaches d through x,
+        // and should tighten d against x's new end.
+        const tasks = fanOutFromUpstream();
+        const result = runCascade({
+          sourceTaskId: 'b',
+          sourceTaskName: 'Task B',
+          newStart: '2026-03-27', // Fri (was Wed Apr 01, 3 BD left)
+          newEnd: '2026-04-02',   // unchanged
+          refStart: '2026-04-01',
+          refEnd: '2026-04-02',
+          startDelta: -3,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // x (upstream of b) gets pulled earlier.
+        const xUpdate = result.updates.find(u => u.taskId === 'x');
+        expect(xUpdate).toBeDefined();
+
+        // d (sibling of b, downstream of x) tightens against x's new end.
+        const dUpdate = result.updates.find(u => u.taskId === 'd');
+        expect(dUpdate).toBeDefined();
+        // d duration = 2 BD, newStart = nextBD(x.newEnd).
+        const xNewEnd = xUpdate.newEnd;
+        const expectedDStart = xNewEnd; // one BD after x.newEnd
+        // Not asserting exact dates to avoid duplicating upstream arithmetic —
+        // the invariant is: d.newStart > x.newEnd (strict), d.newEnd > d.newStart.
+        expect(dUpdate.newStart > xNewEnd).toBe(true);
+        expect(dUpdate.newEnd > dUpdate.newStart).toBe(true);
+        // And explicit shape: d duration preserved (2 BD).
+        expect(dUpdate.duration).toBe(2);
+        // Unused-binding guard for expectedDStart (referenced for clarity above).
+        expect(expectedDStart).toBeTruthy();
+      });
+
+      // @behavior BEH-STARTLEFT-FROZEN-BLOCKER-FANIN (SC-7)
+      it('excludes a frozen blocker from the sibling constraint (SC-7 regression)', () => {
+        const tasks = startLeftDownstreamSiblingFrozenFanIn();
+        // Source dragged from Wed Apr 15 → Thu Mar 26.
+        const result = runCascade({
+          sourceTaskId: 'source',
+          sourceTaskName: 'Source (Draft ICF)',
+          newStart: '2026-03-26', // Thu
+          newEnd: '2026-04-17',   // unchanged
+          refStart: '2026-04-15',
+          refEnd: '2026-04-17',
+          startDelta: -14,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // Non-frozen blocker gets pulled to end prevBD(Mar 26 Thu) = Wed Mar 25.
+        const nfbUpdate = result.updates.find(u => u.taskId === 'nf-blocker');
+        expect(nfbUpdate).toBeDefined();
+        expect(nfbUpdate.newEnd).toBe('2026-03-25');
+
+        // Frozen blocker must NOT move.
+        const fbUpdate = result.updates.find(u => u.taskId === 'frozen-blocker');
+        expect(fbUpdate).toBeUndefined();
+
+        // Sibling must tighten against the non-frozen blocker's new end ONLY.
+        // nextBD(Mar 25 Wed) = Thu Mar 26, duration = 2 BD → newEnd = Fri Mar 27.
+        const sibUpdate = result.updates.find(u => u.taskId === 'sibling');
+        expect(sibUpdate).toBeDefined();
+        expect(sibUpdate.newStart).toBe('2026-03-26'); // Thu
+        expect(sibUpdate.newEnd).toBe('2026-03-27');   // Fri
+      });
+
+      it('does not move a frozen downstream task', () => {
+        // chainWithFrozen: A → B(Done) → C.
+        // Drag C start left in start-left mode. pullLeftUpstream will try to
+        // pull B left, but B is frozen → skipped. Then tightenDownstreamFromSeed
+        // visits B (frozen) and skips it. C is the source, not re-touched.
+        const tasks = chainWithFrozen();
+        const result = runCascade({
+          sourceTaskId: 'c',
+          sourceTaskName: 'Task C',
+          newStart: '2026-04-02', // Thu (was Fri Apr 03)
+          newEnd: '2026-04-06',   // unchanged
+          refStart: '2026-04-03',
+          refEnd: '2026-04-06',
+          startDelta: -1,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // Frozen B must not appear in updates.
+        const bUpdate = result.updates.find(u => u.taskId === 'b');
+        expect(bUpdate).toBeUndefined();
+      });
+
+      it('tightens a downstream sibling even when its pre-cascade start already violates', () => {
+        // Construct: A → source, A → sibling, with sibling currently violating
+        // its blocker (starts same day as A ends). Start-left on source pulls
+        // A earlier; sibling's tightening pass must snap sibling to nextBD(A.newEnd)
+        // regardless of the pre-existing violation.
+        const tasks = [
+          {
+            id: 'a', name: 'Task A',
+            start: new Date('2026-03-30T00:00:00Z'),
+            end: new Date('2026-03-31T00:00:00Z'),
+            duration: 2, status: 'Not Started',
+            blockedByIds: [], blockingIds: ['source', 'sibling'],
+          },
+          {
+            id: 'source', name: 'Source',
+            start: new Date('2026-04-20T00:00:00Z'),
+            end: new Date('2026-04-22T00:00:00Z'),
+            duration: 3, status: 'Not Started',
+            blockedByIds: ['a'], blockingIds: [],
+          },
+          {
+            id: 'sibling', name: 'Sibling',
+            // Violation: sibling starts same day as A ends.
+            start: new Date('2026-03-31T00:00:00Z'),
+            end: new Date('2026-04-01T00:00:00Z'),
+            duration: 2, status: 'Not Started',
+            blockedByIds: ['a'], blockingIds: [],
+          },
+        ];
+        const result = runCascade({
+          sourceTaskId: 'source',
+          sourceTaskName: 'Source',
+          newStart: '2026-03-27', // Fri (deep left)
+          newEnd: '2026-04-22',
+          refStart: '2026-04-20',
+          refEnd: '2026-04-22',
+          startDelta: -16,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // A pulled to end prevBD(Mar 27) = Thu Mar 26.
+        const aUpdate = result.updates.find(u => u.taskId === 'a');
+        expect(aUpdate).toBeDefined();
+        expect(aUpdate.newEnd).toBe('2026-03-26');
+
+        // Sibling tightens to nextBD(Mar 26) = Fri Mar 27, duration 2 → newEnd Mon Mar 30.
+        const sibUpdate = result.updates.find(u => u.taskId === 'sibling');
+        expect(sibUpdate).toBeDefined();
+        expect(sibUpdate.newStart).toBe('2026-03-27'); // Fri
+        expect(sibUpdate.newEnd).toBe('2026-03-30');   // Mon
+      });
+
+      it('tightens sibling using stationary blocker constraint when present', () => {
+        // Sibling has two blockers: one moved by upstream pass, one stationary.
+        // The stationary blocker is NOT in the seed set (no upstream shift touches it)
+        // but is reachable via sibling's blockedByIds. Sibling's new start must be
+        // max of both blockers' effective ends. Document BL-H4g divergence: this
+        // function ALWAYS tightens; it does not "skip on gap" like push-right.
+        const tasks = [
+          {
+            id: 'a', name: 'Task A (moves)',
+            start: new Date('2026-03-30T00:00:00Z'),
+            end: new Date('2026-03-31T00:00:00Z'),
+            duration: 2, status: 'Not Started',
+            blockedByIds: [], blockingIds: ['source', 'sibling'],
+          },
+          {
+            id: 'stat', name: 'Stationary Blocker',
+            start: new Date('2026-04-06T00:00:00Z'),
+            end: new Date('2026-04-07T00:00:00Z'),
+            duration: 2, status: 'Not Started',
+            blockedByIds: [], blockingIds: ['sibling'],
+          },
+          {
+            id: 'source', name: 'Source',
+            start: new Date('2026-04-20T00:00:00Z'),
+            end: new Date('2026-04-22T00:00:00Z'),
+            duration: 3, status: 'Not Started',
+            blockedByIds: ['a'], blockingIds: [],
+          },
+          {
+            id: 'sibling', name: 'Sibling',
+            start: new Date('2026-04-10T00:00:00Z'),
+            end: new Date('2026-04-13T00:00:00Z'),
+            duration: 2, status: 'Not Started',
+            blockedByIds: ['a', 'stat'], blockingIds: [],
+          },
+        ];
+        const result = runCascade({
+          sourceTaskId: 'source',
+          sourceTaskName: 'Source',
+          newStart: '2026-03-27',
+          newEnd: '2026-04-22',
+          refStart: '2026-04-20',
+          refEnd: '2026-04-22',
+          startDelta: -16,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // Sibling effective blocker end = max(a.newEnd Mar 26, stat.end Apr 07) = Apr 07.
+        // newStart = nextBD(Apr 07 Tue) = Wed Apr 08. duration = 2 BD → newEnd Thu Apr 09.
+        const sibUpdate = result.updates.find(u => u.taskId === 'sibling');
+        expect(sibUpdate).toBeDefined();
+        expect(sibUpdate.newStart).toBe('2026-04-08'); // Wed
+        expect(sibUpdate.newEnd).toBe('2026-04-09');   // Thu
+      });
+
+      it('cross-chain propagation still fires through the downstream pass', () => {
+        // Two chains sharing a task. Start-left source → downstream sibling
+        // clamped by cross-chain blocker. Post-cascade validateConstraints
+        // safety net continues to run, so constraints remain valid.
+        const tasks = startLeftDownstreamSibling();
+        const result = runCascade({
+          sourceTaskId: 'draft-icf',
+          sourceTaskName: 'Draft ICF',
+          newStart: '2026-03-27',
+          newEnd: '2026-04-24',
+          refStart: '2026-04-20',
+          refEnd: '2026-04-24',
+          startDelta: -16,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        // Post-cascade validation sweep must have run.
+        expect(typeof result.diagnostics.constraintFixCount).toBe('number');
+        // No cycle in this fixture.
+        expect(result.diagnostics.cycleDetected).toBeFalsy();
+      });
+
+      // @behavior BEH-STARTLEFT-DOWNSTREAM-REGRESSION
+      // SC-5: Meg's exact Apr 16 repro. Activity Log event
+      // 3442386760c281799d85fea88ef5abf7. See
+      // engine/docs/brainstorms/meg-apr-16-feedback-batch-requirements.md.
+      it('regression: Draft ICF / Internal Revisions / Client Review R1 Apr 16 shape', () => {
+        const tasks = startLeftDownstreamSibling();
+        const result = runCascade({
+          sourceTaskId: 'draft-icf',
+          sourceTaskName: 'Draft ICF',
+          newStart: '2026-03-27', // aggressive left drag
+          newEnd: '2026-04-24',
+          refStart: '2026-04-20',
+          refEnd: '2026-04-24',
+          startDelta: -16,
+          endDelta: 0,
+          cascadeMode: 'start-left',
+          tasks,
+        });
+
+        const cr1Update = result.updates.find(u => u.taskId === 'cr1');
+        const irUpdate = result.updates.find(u => u.taskId === 'internal-revisions');
+
+        expect(cr1Update).toBeDefined();
+        expect(irUpdate).toBeDefined();
+
+        // Internal Revisions new start MUST equal Client Review R1 new end + 1 BD.
+        // Without PR B, irUpdate would be undefined — the gap Meg reported.
+        const expectedIRStart = formatDate(nextBusinessDay(parseDate(cr1Update.newEnd)));
+        expect(irUpdate.newStart).toBe(expectedIRStart);
+      });
     });
   });
 

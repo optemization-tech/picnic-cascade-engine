@@ -260,6 +260,10 @@ For every behavior change:
 
 **Code fix (`src/routes/add-task-set.js`):** the `latestDates` build loop now normalizes keys from `#N` (existing production delivery) to `#${nextNum}` (the target delivery being created). `applyDeliveryNumbering` rewrites `task._taskName` from `#1` → `#${nextNum}` *before* the override lookup, so unnormalized keys missed and the new delivery fell through to the blueprint-offset formula. Meg's 2026-04-16 reproduction showed `Data Delivery #3` starting Dec 7 while `Repeat QC` ended Dec 8 — Delivery before QC ended. After the fix, `Data Delivery #${nextNum}` inherits the previous delivery's manually shifted dates correctly.
 
+### 2026-04-16 — PR B: code aligned with `start-left` behavior-matrix row
+
+Previously the dispatch ran `pullLeftUpstream` only, producing downstream gaps when a source task's upstream blockers moved. Added `tightenDownstreamFromSeed` downstream pass seeded from `{source} ∪ {upstream-moved tasks}`. No behavior change to the other modes. Closes spec-vs-code drift flagged on Meg's 2026-04-16 live test (Draft ICF / Internal Revisions / Client Review R1 repro; Activity Log event `3442386760c281799d85fea88ef5abf7`). Section 1 row for `start-left` already correctly specified "Upstream then downstream — downstream re-evaluated against blockers"; no table edit needed.
+
 ### 2026-04-12 — PR #43 merged (webhook auth, graceful shutdown, startup sweep)
 
 New operational sections 7, 8, and 9 added to this document. Changes:

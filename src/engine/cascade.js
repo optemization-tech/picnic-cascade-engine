@@ -361,6 +361,107 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
 }
 
 // -----------------------------------------------------------
+// tightenDownstreamFromSeed: tight-schedule downstream pass.
+// BFS downstream from a seed set, topologically sorts the
+// reachable non-frozen set, and for each task assigns
+//   newStart = nextBD(max(non-frozen blocker effective end))
+// with duration preserved from taskById. Unlike
+// conflictOnlyDownstream, there is no early-out: every
+// reachable non-frozen task tightens against its blockers.
+// Frozen downstream tasks are skipped (don't move). Frozen
+// blockers are excluded from the constraint calculation.
+// Mutates updatesMap in place; does NOT mutate taskById.
+// Used by: start-left
+// -----------------------------------------------------------
+function tightenDownstreamFromSeed(seedTaskIds, updatesMap, taskById) {
+  // Step 1: BFS reachable set downstream from seeds via Blocking edges
+  const reachable = new Set();
+  const dfsStack = [];
+  for (const sid of seedTaskIds) {
+    if (taskById[sid]) dfsStack.push(sid);
+  }
+  while (dfsStack.length > 0) {
+    const cur = dfsStack.pop();
+    if (reachable.has(cur)) continue;
+    reachable.add(cur);
+    for (const bid of (taskById[cur]?.blockingIds || [])) {
+      if (!reachable.has(bid) && taskById[bid]) dfsStack.push(bid);
+    }
+  }
+
+  if (reachable.size === 0) return;
+
+  // Step 2: Topological sort (Kahn's algorithm) over the reachable set
+  const inDegree = {};
+  for (const id of reachable) { inDegree[id] = 0; }
+  for (const id of reachable) {
+    const task = taskById[id];
+    if (!task) continue;
+    for (const bid of (task.blockedByIds || [])) {
+      if (reachable.has(bid)) inDegree[id]++;
+    }
+  }
+  const topoQueue = [];
+  for (const id of reachable) {
+    if (inDegree[id] === 0) topoQueue.push(id);
+  }
+  const topoOrder = [];
+  while (topoQueue.length > 0) {
+    const cur = topoQueue.shift();
+    topoOrder.push(cur);
+    for (const bid of (taskById[cur]?.blockingIds || [])) {
+      if (reachable.has(bid)) {
+        inDegree[bid]--;
+        if (inDegree[bid] === 0) topoQueue.push(bid);
+      }
+    }
+  }
+
+  // Step 3: Process in topo order — tighten against effective blocker ends.
+  // Seeds themselves are skipped (their updates were authored by upstream pass).
+  for (const taskId of topoOrder) {
+    if (seedTaskIds.has(taskId)) continue;
+    const task = taskById[taskId];
+    if (!task || !task.start || !task.end) continue;
+    if (isFrozen(task)) continue;
+
+    let effectiveBlockerEnd = null;
+    for (const blockerId of (task.blockedByIds || [])) {
+      const blocker = taskById[blockerId];
+      if (!blocker) continue;
+      if (isFrozen(blocker)) continue;
+
+      // Read blocker end from updatesMap if present, else from original taskById
+      // (bug 2A.2 pattern: don't trust running state; consult snapshot+overlay).
+      const blockerEnd = updatesMap[blockerId]
+        ? parseDate(updatesMap[blockerId].newEnd)
+        : blocker.end;
+      if (!blockerEnd) continue;
+
+      if (!effectiveBlockerEnd || blockerEnd > effectiveBlockerEnd) {
+        effectiveBlockerEnd = blockerEnd;
+      }
+    }
+
+    if (!effectiveBlockerEnd) continue;
+
+    const newStart = nextBusinessDay(effectiveBlockerEnd);
+    // Duration preserved from pre-cascade task state (same pattern as
+    // gapPreservingDownstream:346). Do NOT read duration from updatesMap.
+    const duration = countBDInclusive(task.start, task.end);
+    const newEnd = addBusinessDays(newStart, duration - 1);
+
+    updatesMap[taskId] = {
+      taskId,
+      taskName: task.name,
+      newStart: formatDate(newStart),
+      newEnd: formatDate(newEnd),
+      duration,
+    };
+  }
+}
+
+// -----------------------------------------------------------
 // pullRightUpstream (v6): BFS upstream via Blocked by edges.
 // When a task's start moves right, shift ALL upstream blockers
 // right by the same delta unconditionally (gap-preserving).
@@ -581,6 +682,12 @@ export function runCascade({
       diagnostics.capReached = upstreamDiag.capReached;
       diagnostics.unresolvedResidue = upstreamDiag.unresolvedResidue;
       diagnostics.monotonicSafe = upstreamDiag.monotonicSafe;
+
+      // R2β-1/R2β-2: tighten downstream siblings reachable from the source
+      // or any upstream-moved task. Without this pass, a downstream sibling
+      // sharing a blocker with the source was never touched (Meg Apr 16 bug β).
+      const seedIds = new Set([sourceTaskId, ...Object.keys(updatesMap)]);
+      tightenDownstreamFromSeed(seedIds, updatesMap, taskById);
       break;
     }
 
