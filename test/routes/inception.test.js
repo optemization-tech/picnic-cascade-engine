@@ -599,6 +599,36 @@ describe('inception route', () => {
   });
 
   // ────────────────────────────────────────────────────────────────────
+  // Inception never tags the original subtree with "Manual Workstream /
+  // Item" (R5-3). Pass `extraTags: []` explicitly at the call-site.
+  // ────────────────────────────────────────────────────────────────────
+  it('passes extraTags=[] to createStudyTasks (inception does not tag original subtree)', async () => {
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+    });
+    mocks.mockClient.queryDatabase.mockResolvedValue([]);
+    mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
+    mocks.buildTaskTree.mockReturnValue([{ level: 0, tasks: [], isLastLevel: true }]);
+    mocks.createStudyTasks.mockResolvedValue({
+      idMapping: {}, totalCreated: 0, depTracking: [], parentTracking: [],
+    });
+    mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+    mocks.copyBlocks.mockResolvedValue({
+      blocksWrittenCount: 0, pagesProcessed: 0, pagesSkipped: 0,
+    });
+
+    const { req, res } = makeReqRes({ studyPageId: 'study-1' });
+    await handleInception(req, res);
+    await flush();
+
+    expect(mocks.createStudyTasks).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Array),
+      expect.objectContaining({ extraTags: [] }),
+    );
+  });
+
+  // ────────────────────────────────────────────────────────────────────
   // Aborts when study has no Contract Sign Date (fail-loud, no silent
   // "today" fallback). Post-PR-D: empty date → study-page comment + abort.
   // ────────────────────────────────────────────────────────────────────

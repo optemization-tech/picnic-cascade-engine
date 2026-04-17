@@ -26,7 +26,7 @@ function timestamp() {
  * Returns null if the task should be skipped (null offsets).
  * Also returns relation-tracking metadata used for the later patch phase.
  */
-function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMapping }) {
+function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMapping, extraTags = [] }) {
   const props = task.properties || {};
   const templateId = task._templateId;
   const taskName = task._taskName;
@@ -105,7 +105,14 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
   // Conditional properties — only include if value exists (null stripping)
   if (status) { pageBody.properties['Status'] = { status: { name: status.name } }; }
   if (ownerValue.length > 0) { pageBody.properties['Owner'] = { people: ownerValue }; }
-  if (tags.length > 0) { pageBody.properties['Tags'] = { multi_select: tags.map((t) => ({ name: t.name })) }; }
+  // Merge blueprint tags with caller-supplied extraTags (e.g., "Manual
+  // Workstream / Item" on Additional TLF buttons). Dedup by name so a
+  // blueprint tag coinciding with extraTags emits exactly once. No
+  // post-create PATCH loop — merging happens at body-build time.
+  const mergedTagNames = [...new Set([...tags.map((t) => t.name), ...extraTags])];
+  if (mergedTagNames.length > 0) {
+    pageBody.properties['Tags'] = { multi_select: mergedTagNames.map((name) => ({ name })) };
+  }
   if (milestone.length > 0) { pageBody.properties['Milestone'] = { multi_select: milestone.map((m) => ({ name: m.name })) }; }
   if (assigneeRole) { pageBody.properties['Owner Role'] = { select: { name: assigneeRole.name } }; }
   if (externalVisibility) { pageBody.properties['External Visibility'] = { select: { name: externalVisibility.name } }; }
@@ -206,10 +213,10 @@ function accumulateIdMappings(createdPages, entries, idMapping, depTracking, par
  *
  * @param {import('../notion/client.js').NotionClient} client
  * @param {Array<{ level: number, tasks: object[], isLastLevel: boolean }>} levels - from buildTaskTree()
- * @param {{ studyPageId: string, contractSignDate: string, blueprintDbId: string, studyTasksDbId: string, existingIdMapping?: object, tracer?: import('../services/cascade-tracer.js').CascadeTracer }} options
+ * @param {{ studyPageId: string, contractSignDate: string, blueprintDbId: string, studyTasksDbId: string, existingIdMapping?: object, extraTags?: string[], tracer?: import('../services/cascade-tracer.js').CascadeTracer }} options
  * @returns {Promise<{ idMapping: object, totalCreated: number, depTracking: object[], parentTracking: object[] }>}
  */
-export async function createStudyTasks(client, levels, { studyPageId, contractSignDate, studyTasksDbId, existingIdMapping, tracer } = {}) {
+export async function createStudyTasks(client, levels, { studyPageId, contractSignDate, studyTasksDbId, existingIdMapping, extraTags = [], tracer } = {}) {
   if (tracer) tracer.startPhase('createStudyTasks');
 
   // Defense in depth — callers (inception, add-task-set) should have already
@@ -233,6 +240,7 @@ export async function createStudyTasks(client, levels, { studyPageId, contractSi
       studyPageId,
       studyTasksDbId,
       idMapping,
+      extraTags,
     });
     if (entry) entries.push(entry);
   }

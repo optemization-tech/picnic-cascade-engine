@@ -176,6 +176,9 @@ async function processInception(body) {
         contractSignDate,
         blueprintDbId: config.notion.blueprintDbId,
         studyTasksDbId: config.notion.studyTasksDbId,
+        // Inception never tags original subtree tasks. Passed explicitly so
+        // the call-site documents the R5-3 requirement.
+        extraTags: [],
         tracer,
       }),
       blockPrefetchPromise,

@@ -926,6 +926,108 @@ describe('add-task-set route', () => {
     expect(mocks.createStudyTasks).not.toHaveBeenCalled();
   });
 
+  describe('Manual Workstream / Item tag (extraTags)', () => {
+    function setupTlfCreateMocks() {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-tlf' }, { id: 'bp-child' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: false },
+        { level: 1, tasks: [{ _templateId: 'bp-child', _taskName: 'Draft TLF' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-tlf': 'prod-tlf', 'bp-child': 'prod-child' },
+        totalCreated: 2,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+    }
+
+    it.each([
+      ['tlf-only'],
+      ['tlf-csr'],
+      ['tlf-insights'],
+      ['tlf-insights-csr'],
+    ])('passes extraTags=["Manual Workstream / Item"] for buttonType=%s', async (buttonType) => {
+      setupTlfCreateMocks();
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': buttonType, 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      expect(mocks.createStudyTasks).toHaveBeenCalledWith(
+        mocks.mockClient,
+        expect.any(Array),
+        expect.objectContaining({
+          extraTags: ['Manual Workstream / Item'],
+        }),
+      );
+    });
+
+    it('passes extraTags=[] for buttonType=additional-site', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-site' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-site', _taskName: 'New Site' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-site': 'prod-site' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'additional-site', 'x-parent-task-names': 'New Site' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      expect(mocks.createStudyTasks).toHaveBeenCalledWith(
+        mocks.mockClient,
+        expect.any(Array),
+        expect.objectContaining({ extraTags: [] }),
+      );
+    });
+
+    it('passes extraTags=[] for buttonType=repeat-delivery', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-dd' }]);
+      const deliveryTask = { _templateId: 'bp-dd', _taskName: 'Data Delivery #1', _templateBlockedBy: [] };
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [deliveryTask], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-dd': 'prod-dd' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'repeat-delivery', 'x-parent-task-names': 'Data Delivery' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      expect(mocks.createStudyTasks).toHaveBeenCalledWith(
+        mocks.mockClient,
+        expect.any(Array),
+        expect.objectContaining({ extraTags: [] }),
+      );
+    });
+  });
+
   describe('single-leaf duplicate guard', () => {
     it('aborts and posts a comment when a single-leaf non-repeat template already exists', async () => {
       mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());

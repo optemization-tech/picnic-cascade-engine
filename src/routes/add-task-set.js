@@ -456,12 +456,21 @@ async function processAddTaskSet(req) {
       }
     }
 
+    // Additional TLF buttons tag every created task with "Manual Workstream /
+    // Item" so downstream workflows/views can distinguish user-added TLF
+    // subtrees from the original inception-provisioned subtree. The engine
+    // does not add this tag on repeat-delivery, additional-site, or inception;
+    // those fall through to the default empty array.
+    const isAdditionalTlfButton = ['tlf-only', 'tlf-csr', 'tlf-insights', 'tlf-insights-csr'].includes(buttonType);
+    const extraTags = isAdditionalTlfButton ? ['Manual Workstream / Item'] : [];
+
     // Create tasks level by level (seed idMapping with existing production tasks)
     const createResult = await createStudyTasks(notionClient, filteredLevels, {
       studyPageId,
       contractSignDate,
       studyTasksDbId: config.notion.studyTasksDbId,
       existingIdMapping,
+      extraTags,
       tracer,
     });
 
