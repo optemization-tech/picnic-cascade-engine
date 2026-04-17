@@ -572,6 +572,138 @@ describe('createStudyTasks — property mapping', () => {
 
 // ── Tracer integration ─────────────────────────────────────────────────────
 
+describe('createStudyTasks — extraTags merging', () => {
+  it('merges extraTags into the page body Tags property', async () => {
+    const levels = buildLevels([taskEntry('t1', 'Task 1')]);
+    const client = mockClient();
+
+    await createStudyTasks(client, levels, {
+      ...baseOptions,
+      extraTags: ['Manual Workstream / Item'],
+    });
+
+    const body = client.postCalls[0];
+    expect(body.properties['Tags']).toEqual({
+      multi_select: [{ name: 'Manual Workstream / Item' }],
+    });
+  });
+
+  it('preserves blueprint tags alongside extraTags', async () => {
+    const levels = buildLevels([
+      taskEntry('t1', 'Task 1', { tags: ['blueprint-a', 'blueprint-b'] }),
+    ]);
+    const client = mockClient();
+
+    await createStudyTasks(client, levels, {
+      ...baseOptions,
+      extraTags: ['Manual Workstream / Item'],
+    });
+
+    const body = client.postCalls[0];
+    expect(body.properties['Tags']).toEqual({
+      multi_select: [
+        { name: 'blueprint-a' },
+        { name: 'blueprint-b' },
+        { name: 'Manual Workstream / Item' },
+      ],
+    });
+  });
+
+  it('dedups when blueprint tag coincides with an extraTag', async () => {
+    const levels = buildLevels([
+      taskEntry('t1', 'Task 1', { tags: ['Manual Workstream / Item', 'other'] }),
+    ]);
+    const client = mockClient();
+
+    await createStudyTasks(client, levels, {
+      ...baseOptions,
+      extraTags: ['Manual Workstream / Item'],
+    });
+
+    const body = client.postCalls[0];
+    // "Manual Workstream / Item" appears exactly once, not twice.
+    expect(body.properties['Tags']).toEqual({
+      multi_select: [
+        { name: 'Manual Workstream / Item' },
+        { name: 'other' },
+      ],
+    });
+  });
+
+  it('omits Tags property when both blueprint tags and extraTags are empty', async () => {
+    const levels = buildLevels([taskEntry('t1', 'Task 1')]);
+    const client = mockClient();
+
+    await createStudyTasks(client, levels, { ...baseOptions, extraTags: [] });
+
+    const body = client.postCalls[0];
+    expect(body.properties['Tags']).toBeUndefined();
+  });
+
+  it('defaults extraTags to [] when omitted from options (no regression on existing callers)', async () => {
+    const levels = buildLevels([
+      taskEntry('t1', 'Task 1', { tags: ['only-blueprint'] }),
+    ]);
+    const client = mockClient();
+
+    // Omit extraTags entirely — baseOptions doesn't include it.
+    await createStudyTasks(client, levels, baseOptions);
+
+    const body = client.postCalls[0];
+    expect(body.properties['Tags']).toEqual({
+      multi_select: [{ name: 'only-blueprint' }],
+    });
+  });
+
+  it('applies extraTags to every task in the subtree', async () => {
+    const levels = buildLevels(
+      [taskEntry('t-root', 'Root')],
+      [taskEntry('t-child', 'Child', { parentId: 't-root' })],
+      [taskEntry('t-grandchild', 'Grandchild', { parentId: 't-child' })],
+    );
+    const client = mockClient();
+
+    await createStudyTasks(client, levels, {
+      ...baseOptions,
+      extraTags: ['Manual Workstream / Item'],
+    });
+
+    expect(client.postCalls).toHaveLength(3);
+    for (const body of client.postCalls) {
+      expect(body.properties['Tags']).toEqual({
+        multi_select: [{ name: 'Manual Workstream / Item' }],
+      });
+    }
+  });
+});
+
+describe('createStudyTasks — contractSignDate validation', () => {
+  it('throws when contractSignDate is undefined (defense in depth for future callers)', async () => {
+    const client = mockClient();
+    const { contractSignDate, ...optsWithoutDate } = baseOptions;
+
+    await expect(
+      createStudyTasks(client, [], optsWithoutDate),
+    ).rejects.toThrow(/contractSignDate is required/);
+  });
+
+  it('throws when contractSignDate is null', async () => {
+    const client = mockClient();
+
+    await expect(
+      createStudyTasks(client, [], { ...baseOptions, contractSignDate: null }),
+    ).rejects.toThrow(/contractSignDate is required/);
+  });
+
+  it('throws when contractSignDate is empty string', async () => {
+    const client = mockClient();
+
+    await expect(
+      createStudyTasks(client, [], { ...baseOptions, contractSignDate: '' }),
+    ).rejects.toThrow(/contractSignDate is required/);
+  });
+});
+
 describe('createStudyTasks — tracer', () => {
   it('calls tracer startPhase/endPhase', async () => {
     const phases = [];

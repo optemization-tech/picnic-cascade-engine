@@ -71,8 +71,38 @@ async function processInception(body) {
     studyPage = fetchedStudyPage;
 
     studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
-    const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start
-      || new Date().toISOString().split('T')[0];
+    const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start || null;
+
+    // Fail-loud on empty Contract Sign Date — no silent "today" fallback.
+    // Silent anchoring produces wrong dates across the whole study; post a
+    // comment (via the existing Promise.all trio) and abort. Import Mode
+    // reset happens in the `finally` block.
+    if (!contractSignDate) {
+      const emptyDateSummary = 'Cannot activate — Contract Sign Date is empty. Please set it on the study page and try again.';
+      await Promise.all([
+        notionClient.reportStatus(studyPageId, 'error', emptyDateSummary, { tracer }),
+        activityLogService.logTerminalEvent({
+          workflow: 'Inception',
+          status: 'failed',
+          triggerType: 'Automation',
+          triggeredByUserId,
+          editedByBot,
+          sourceTaskName: studyName,
+          studyId: studyPageId,
+          summary: emptyDateSummary,
+        }),
+        studyCommentService.postComment({
+          workflow: 'Inception',
+          status: 'failed',
+          studyId: studyPageId,
+          sourceTaskName: studyName,
+          triggeredByUserId,
+          editedByBot,
+          summary: emptyDateSummary,
+        }).catch(() => {}),
+      ]);
+      return;
+    }
 
     if (existingTasks.length > 0) {
       await Promise.all([
@@ -146,6 +176,9 @@ async function processInception(body) {
         contractSignDate,
         blueprintDbId: config.notion.blueprintDbId,
         studyTasksDbId: config.notion.studyTasksDbId,
+        // Inception never tags original subtree tasks. Passed explicitly so
+        // the call-site documents the R5-3 requirement.
+        extraTags: [],
         tracer,
       }),
       blockPrefetchPromise,

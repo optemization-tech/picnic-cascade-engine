@@ -7,11 +7,31 @@ import { config } from '../config.js';
 function buildRichText(event) {
   const text = `❌ ${event.summary || event.workflow || 'Automation complete'}`;
 
-  const richText = [];
-  const mentionIds = config.comment.errorMentionIds;
+  // Build the mention list:
+  //   1. Prepend `triggeredByUserId` (button presser) when present AND not a bot.
+  //   2. Append configured `errorMentionIds` (Tem/Meg/Seb, typically).
+  //   3. Dedup the combined list so a presser who is also configured is only
+  //      mentioned once. Dedup also tolerates malformed env vars with duplicate
+  //      IDs.
+  //   4. Filter falsy entries defensively.
+  const rawIds = [];
+  if (event.triggeredByUserId && !event.editedByBot) {
+    rawIds.push(event.triggeredByUserId);
+  }
+  rawIds.push(...config.comment.errorMentionIds);
 
-  if (mentionIds.length > 0) {
-    for (const id of mentionIds) {
+  const uniqueIds = [];
+  const seen = new Set();
+  for (const id of rawIds) {
+    if (!id) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    uniqueIds.push(id);
+  }
+
+  const richText = [];
+  if (uniqueIds.length > 0) {
+    for (const id of uniqueIds) {
       richText.push({
         type: 'mention',
         mention: { type: 'user', user: { id } },
