@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const {
   confirmArchive,
   pickCanonical,
   classifyPage,
   computeFlags,
+  tokenSuffix,
+  safeTimestamp,
+  openAuditLog,
 } = await import('../../scripts/sweep-all-studies.js');
 
 // Helper — build a minimal Notion-shaped page object for pickCanonical tests.
@@ -236,5 +242,95 @@ describe('sweep-all-studies: computeFlags (engine-bot protection)', () => {
     const page = makePageWithEditor({ type: 'bot', id: 'engine-bot-id', status: 'In Progress' });
     const flags = computeFlags(page, false, { engineBotUserId: 'engine-bot-id' });
     expect(flags).toContain('status:In Progress');
+  });
+});
+
+describe('sweep-all-studies: audit log', () => {
+  let tempDir;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'sweep-audit-'));
+  });
+
+  afterEach(() => {
+    if (tempDir && existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  describe('tokenSuffix', () => {
+    it('returns last 4 chars of a typical Notion token', () => {
+      expect(tokenSuffix('secret_abcdefghijklmnopqrstuvwxyz')).toBe('wxyz');
+    });
+
+    it('returns "none" when token is null', () => {
+      expect(tokenSuffix(null)).toBe('none');
+    });
+
+    it('returns "none" when token is shorter than 4 chars', () => {
+      expect(tokenSuffix('ab')).toBe('none');
+    });
+
+    it('returns "none" when token is undefined', () => {
+      expect(tokenSuffix(undefined)).toBe('none');
+    });
+  });
+
+  describe('safeTimestamp', () => {
+    it('replaces colons and dots with dashes', () => {
+      const ts = safeTimestamp(new Date('2026-04-20T15:30:45.123Z'));
+      expect(ts).toBe('2026-04-20T15-30-45-123Z');
+      expect(ts).not.toContain(':');
+      expect(ts).not.toContain('.');
+    });
+  });
+
+  describe('openAuditLog', () => {
+    it('dry-run mode: returns null and creates no file', () => {
+      const result = openAuditLog({ dryRun: true, cwd: tempDir });
+      expect(result).toBeNull();
+      // No files should have been created in the temp dir.
+      expect(readdirSync(tempDir)).toEqual([]);
+    });
+
+    it('archive mode: creates file and appends NDJSON lines', () => {
+      const logFn = vi.fn();
+      const now = new Date('2026-04-20T12:00:00.000Z');
+      const audit = openAuditLog({ dryRun: false, cwd: tempDir, now, logFn });
+      expect(audit).not.toBeNull();
+      expect(audit.filename).toContain('sweep-archive-2026-04-20T12-00-00-000Z.json');
+      expect(logFn).toHaveBeenCalledWith(expect.stringContaining('writing archive log'));
+
+      audit.append({ studyId: 's1', archivedPageId: 'p1', keepReason: 'mixed' });
+      audit.append({ studyId: 's1', archivedPageId: 'p2', keepReason: 'all-wired' });
+      audit.close();
+
+      // File should contain 2 NDJSON lines.
+      const content = readFileSync(audit.filename, 'utf8');
+      const lines = content.trim().split('\n');
+      expect(lines).toHaveLength(2);
+      const parsed = lines.map((l) => JSON.parse(l));
+      expect(parsed[0]).toMatchObject({ studyId: 's1', archivedPageId: 'p1', keepReason: 'mixed' });
+      expect(parsed[1]).toMatchObject({ studyId: 's1', archivedPageId: 'p2', keepReason: 'all-wired' });
+    });
+
+    it('filename timestamp avoids filesystem-unfriendly characters', () => {
+      const audit = openAuditLog({
+        dryRun: false,
+        cwd: tempDir,
+        now: new Date('2026-04-20T12:30:45.789Z'),
+        logFn: () => {},
+      });
+      // Colons would be the main concern on macOS/Linux, and would be invalid
+      // on Windows.
+      expect(audit.filename).not.toMatch(/:/);
+      // The only dot in the path should be the `.json` extension — the
+      // timestamp's fractional seconds should have been converted.
+      const basename = audit.filename.split('/').pop();
+      const dotsInBasename = (basename.match(/\./g) || []).length;
+      expect(dotsInBasename).toBe(1);
+      expect(audit.filename).toMatch(/\.json$/);
+      audit.close();
+    });
   });
 });

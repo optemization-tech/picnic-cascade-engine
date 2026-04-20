@@ -56,6 +56,8 @@
 
 import 'dotenv/config';
 import { createInterface } from 'node:readline';
+import { appendFileSync, openSync, closeSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const TOKEN = process.env.NOTION_TOKEN_1;
 const STUDIES_DB_ID = process.env.STUDIES_DB_ID;
@@ -383,6 +385,45 @@ export async function confirmArchive({
   return { proceed: true, reason: 'tty_approved' };
 }
 
+/**
+ * Derive a 4-char suffix from the Notion token for audit-log provenance. Lets
+ * an operator confirm "did we use the right token?" post-hoc without leaking
+ * the full secret. If the token is missing or <4 chars, returns 'none'.
+ */
+export function tokenSuffix(token) {
+  if (typeof token !== 'string' || token.length < 4) return 'none';
+  return token.slice(-4);
+}
+
+/**
+ * Build an ISO-like timestamp safe for filesystems (colons + dots replaced).
+ */
+export function safeTimestamp(now = new Date()) {
+  return now.toISOString().replace(/[:.]/g, '-');
+}
+
+/**
+ * Open an append-writable audit log file. Returns `{ filename, fd, append }`
+ * where `append(entry)` writes one NDJSON line. `null` when called in dry-run
+ * mode (no file created).
+ */
+export function openAuditLog({ dryRun, cwd = process.cwd(), now = new Date(), logFn = console.log } = {}) {
+  if (dryRun) return null;
+  const filename = resolve(cwd, `sweep-archive-${safeTimestamp(now)}.json`);
+  const fd = openSync(filename, 'a');
+  logFn(`[audit] writing archive log → ${filename}`);
+  return {
+    filename,
+    fd,
+    append(entry) {
+      appendFileSync(fd, `${JSON.stringify(entry)}\n`);
+    },
+    close() {
+      try { closeSync(fd); } catch { /* already closed */ }
+    },
+  };
+}
+
 async function main() {
   console.log(`\n=== Workspace Duplicate Sweep ===`);
   console.log(`Mode: ${DRY_RUN ? 'DRY-RUN' : 'ARCHIVE'}`);
@@ -471,6 +512,9 @@ async function main() {
 
   // --archive mode: archive candidates only. Flagged pages are NEVER archived
   // — they require manual resolution.
+  const auditLog = openAuditLog({ dryRun: false });
+  const auditTokenSuffix = tokenSuffix(TOKEN);
+
   console.log(`\n=== ARCHIVING (${totalCandidates} pages) ===`);
   let archived = 0;
   let failed = 0;
@@ -482,6 +526,19 @@ async function main() {
         await notionRequest('PATCH', `/pages/${d.pageId}`, { archived: true });
         archived++;
         console.log(`  ✓ archived ${d.taskName} (${d.pageId})`);
+        // Successful archive → append one NDJSON line for provenance.
+        if (auditLog) {
+          auditLog.append({
+            timestamp: new Date().toISOString(),
+            studyId: entry.studyId,
+            studyName: entry.studyName || null,
+            tsid: entry.tsid,
+            archivedPageId: d.pageId,
+            archivedPageName: d.taskName,
+            keepReason: entry.groupState,
+            tokenSuffix: auditTokenSuffix,
+          });
+        }
       } catch (err) {
         failed++;
         console.error(`  ✗ failed to archive ${d.pageId}: ${err.message}`);
@@ -490,12 +547,17 @@ async function main() {
     }
   }
 
+  if (auditLog) auditLog.close();
+
   console.log(`\n=== DONE ===`);
   console.log(`Archived: ${archived}`);
   console.log(`Failed: ${failed}`);
   console.log(`Flagged (skipped): ${totalFlagged}`);
   if (totalFlagged > 0) {
     console.log(`\nFlagged duplicates require manual resolution. See JSON report above.`);
+  }
+  if (auditLog) {
+    console.log(`Archive audit log: ${auditLog.filename}`);
   }
 }
 
