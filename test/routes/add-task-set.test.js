@@ -69,7 +69,8 @@ vi.mock('../../src/services/study-comment.js', () => ({
   StudyCommentService: vi.fn(() => mocks.studyCommentService),
 }));
 
-import { handleAddTaskSet, _resetStudyLocks } from '../../src/routes/add-task-set.js';
+import { handleAddTaskSet } from '../../src/routes/add-task-set.js';
+import { _resetStudyLocks } from '../../src/services/study-lock.js';
 
 /**
  * Flush microtasks to let the detached void promise chain settle.

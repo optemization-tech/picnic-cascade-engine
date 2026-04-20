@@ -5,6 +5,7 @@ import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { flightTracker } from '../services/flight-tracker.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
+import { withStudyLock } from '../services/study-lock.js';
 import { fetchBlueprint, buildTaskTree, filterBlueprintSubtree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
@@ -642,23 +643,6 @@ async function processAddTaskSet(req) {
   }
 }
 
-// Per-study serialization — prevents concurrent add-task-set operations
-// from racing on Notion's eventually-consistent database queries, which
-// causes duplicate numbering (e.g., two "TLF #2" instead of #2 and #3).
-const _studyLocks = new Map();
-
-function withStudyLock(studyId, fn) {
-  const prev = _studyLocks.get(studyId) || Promise.resolve();
-  const next = prev.then(() => fn(), () => fn());
-  _studyLocks.set(studyId, next);
-  // Clean up lock entry; .catch suppresses the floating rejection since the
-  // caller handles errors via the returned `next` promise.
-  next.finally(() => {
-    if (_studyLocks.get(studyId) === next) _studyLocks.delete(studyId);
-  }).catch(() => {});
-  return next;
-}
-
 export async function handleAddTaskSet(req, res) {
   res.status(200).json({ ok: true });
   const studyPageId = req.body?.data?.id || req.body?.studyPageId;
@@ -670,6 +654,3 @@ export async function handleAddTaskSet(req, res) {
     'add-task-set',
   );
 }
-
-// Exposed for test cleanup
-export function _resetStudyLocks() { _studyLocks.clear(); }
