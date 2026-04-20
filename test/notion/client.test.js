@@ -791,4 +791,69 @@ describe('NotionClient', () => {
       expect(tracer.suppressedCalls).toBe(1);
     });
   });
+
+  describe('runParallel bubbleErrors option', () => {
+    it('default behavior (bubbleErrors=false) traps errors into results array', async () => {
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 1, baseMs: 1 },
+      });
+
+      const boom = new Error('boom');
+      const results = await client.runParallel(
+        ['a', 'b', 'c'],
+        async (item) => {
+          if (item === 'b') throw boom;
+          return `ok-${item}`;
+        },
+        { workersPerToken: 1, maxWorkers: 1 },
+      );
+
+      // Default trap-into-results behavior: results array holds a mix of
+      // success values and the Error object, and runParallel resolves
+      // normally (does not throw).
+      expect(results.length).toBe(3);
+      expect(results[0]).toBe('ok-a');
+      expect(results[1]).toBe(boom);
+      // Slot 2 never runs after abort.
+      expect(results[2]).toBeUndefined();
+    });
+
+    it('bubbleErrors=true rethrows the first inner error (restores throw-propagation semantics)', async () => {
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 1, baseMs: 1 },
+      });
+
+      const boom = new Error('boom');
+      await expect(
+        client.runParallel(
+          ['a', 'b', 'c'],
+          async (item) => {
+            if (item === 'b') throw boom;
+            return `ok-${item}`;
+          },
+          { workersPerToken: 1, maxWorkers: 1, bubbleErrors: true },
+        ),
+      ).rejects.toBe(boom);
+    });
+
+    it('bubbleErrors=true with no errors returns results normally', async () => {
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 1, baseMs: 1 },
+      });
+
+      const results = await client.runParallel(
+        ['a', 'b', 'c'],
+        async (item) => `ok-${item}`,
+        { workersPerToken: 1, maxWorkers: 1, bubbleErrors: true },
+      );
+
+      expect(results).toEqual(['ok-a', 'ok-b', 'ok-c']);
+    });
+  });
 });

@@ -217,6 +217,12 @@ export async function prefetchTemplateBlocks(client, templateIds, {
   const syncCache = {};
   const preparedBlocksByTemplate = {};
 
+  // bubbleErrors: true restores the original throw-propagation semantics for
+  // this direct runParallel caller. prefetchTemplateBlocks has no try/catch
+  // wrapping the call, so trapping errors silently would collapse concurrency
+  // to serial on the first transient failure and hide errors from callers.
+  // Lazy fetch in copyBlocks still recovers correctness if a template fails
+  // to prefetch — this restores the original visibility and performance.
   await client.runParallel(
     ids,
     async (templateId) => {
@@ -229,6 +235,7 @@ export async function prefetchTemplateBlocks(client, templateIds, {
     {
       maxWorkers: concurrency ?? ids.length,
       workersPerToken,
+      bubbleErrors: true,
     },
   );
 

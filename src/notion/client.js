@@ -150,12 +150,13 @@ export class NotionClient {
     return this._requestWithSlot(this._nextSlot(), method, path, body, { tracer });
   }
 
-  async runParallel(items, processItem, { workersPerToken = this.workersPerToken, maxWorkers } = {}) {
+  async runParallel(items, processItem, { workersPerToken = this.workersPerToken, maxWorkers, bubbleErrors = false } = {}) {
     if (!Array.isArray(items) || items.length === 0) return [];
 
     const results = new Array(items.length);
     let nextIndex = 0;
     let aborted = false;
+    let bubbledError = null;
 
     const worker = async (slot) => {
       for (;;) {
@@ -163,6 +164,12 @@ export class NotionClient {
         // items continue to run — they have their own fate. This is the
         // R1-7 batch semantics: abort-on-first-unsafe, let in-flight
         // complete, return per-operation outcomes.
+        //
+        // When bubbleErrors is true, inner throws are captured and rethrown
+        // from runParallel after all workers drain — restoring the original
+        // throw-propagation semantics for direct callers like
+        // prefetchTemplateBlocks that never wired up try/catch around the
+        // runParallel invocation itself.
         if (aborted) return;
         const index = nextIndex;
         nextIndex += 1;
@@ -170,6 +177,9 @@ export class NotionClient {
         try {
           results[index] = await processItem(items[index], slot, index);
         } catch (err) {
+          if (bubbleErrors && bubbledError === null) {
+            bubbledError = err;
+          }
           results[index] = err;
           aborted = true;
           return;
@@ -185,6 +195,9 @@ export class NotionClient {
     }
 
     await Promise.all(workers);
+    if (bubbleErrors && bubbledError !== null) {
+      throw bubbledError;
+    }
     return results;
   }
 
