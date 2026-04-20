@@ -22,7 +22,11 @@
  *
  * Flags:
  *   --dry-run (default) — print the report, archive nothing.
- *   --archive          — actually archive after operator review.
+ *   --archive          — actually archive after operator review. Requires a
+ *                        deliberate confirmation step:
+ *                          • Interactive (TTY): y/N prompt.
+ *                          • Non-interactive  : must also pass `--yes`.
+ *   --yes              — non-interactive confirmation for `--archive`.
  *   --study-id X       — scope to a single study (for debugging).
  *
  * Pattern mirrors scripts/migrate-relative-offsets.js — raw fetch + single
@@ -30,7 +34,8 @@
  *
  * Usage:
  *   node scripts/sweep-all-studies.js                 # dry-run on all active studies
- *   node scripts/sweep-all-studies.js --archive       # execute after review
+ *   node scripts/sweep-all-studies.js --archive       # execute after review (TTY prompt)
+ *   node scripts/sweep-all-studies.js --archive --yes # non-interactive (cron)
  *   node scripts/sweep-all-studies.js --study-id abc  # scope to one study
  *
  * Env:
@@ -43,6 +48,7 @@
  */
 
 import 'dotenv/config';
+import { createInterface } from 'node:readline';
 
 const TOKEN = process.env.NOTION_TOKEN_1;
 const STUDIES_DB_ID = process.env.STUDIES_DB_ID;
@@ -52,17 +58,9 @@ const ENGINE_BOT_USER_ID = process.env.ENGINE_BOT_USER_ID || null;
 // Default status values that indicate the page has not been manually touched.
 const DEFAULT_STATUS_VALUES = new Set(['Backlog', 'Not started', 'To-do', '']);
 
-if (!TOKEN) {
-  console.error('Missing NOTION_TOKEN_1 env var');
-  process.exit(1);
-}
-if (!STUDIES_DB_ID || !STUDY_TASKS_DB_ID) {
-  console.error('Missing STUDIES_DB_ID or STUDY_TASKS_DB_ID env var');
-  process.exit(1);
-}
-
 const args = process.argv.slice(2);
 const DRY_RUN = !args.includes('--archive');
+const YES_FLAG = args.includes('--yes');
 const STUDY_ID_ARG = (() => {
   const idx = args.indexOf('--study-id');
   if (idx === -1) return null;
@@ -222,6 +220,57 @@ async function fetchActiveStudies() {
   return queryAll(STUDIES_DB_ID);
 }
 
+/**
+ * Prompt the user for y/N confirmation on a TTY. Resolves to true on y/yes.
+ */
+export function promptConfirmation(message, { input = process.stdin, output = process.stdout } = {}) {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input, output });
+    rl.question(message, (answer) => {
+      rl.close();
+      const normalized = (answer || '').trim().toLowerCase();
+      resolve(normalized === 'y' || normalized === 'yes');
+    });
+  });
+}
+
+/**
+ * Gate `--archive` execution behind a confirmation. Returns { proceed, reason }.
+ *
+ *   - Interactive (TTY): y/N prompt via readline.
+ *   - Non-interactive : must pass --yes; otherwise abort with a clear error.
+ */
+export async function confirmArchive({
+  totalCandidates,
+  studiesWithDuplicates,
+  isTty,
+  yesFlag,
+  promptFn = promptConfirmation,
+  logFn = console.log,
+  errorFn = console.error,
+}) {
+  const summary = `Ready to archive ${totalCandidates} duplicate pages across ${studiesWithDuplicates} studies. This operation is destructive. Continue? [y/N] `;
+
+  if (!isTty) {
+    if (!yesFlag) {
+      errorFn('ERROR: --archive requires --yes for non-interactive use');
+      return { proceed: false, reason: 'non_tty_missing_yes' };
+    }
+    logFn(`[confirm] --yes flag present, non-interactive approval granted (${totalCandidates} archives queued).`);
+    return { proceed: true, reason: 'non_tty_yes_flag' };
+  }
+
+  // TTY path — interactive prompt.
+  logFn(`\n${summary.trim()}`);
+  const answer = await promptFn(summary);
+  if (!answer) {
+    logFn(`[confirm] operator declined — aborting without archive. (0 of ${totalCandidates} archives performed.)`);
+    return { proceed: false, reason: 'tty_declined' };
+  }
+  logFn(`[confirm] operator approved — proceeding with ${totalCandidates} archives.`);
+  return { proceed: true, reason: 'tty_approved' };
+}
+
 async function main() {
   console.log(`\n=== Workspace Duplicate Sweep ===`);
   console.log(`Mode: ${DRY_RUN ? 'DRY-RUN' : 'ARCHIVE'}`);
@@ -269,6 +318,8 @@ async function main() {
   console.log(`  Archive candidates (no flags): ${totalCandidates}`);
   console.log(`  Flagged (manual resolution): ${totalFlagged}`);
 
+  const studiesWithDuplicates = new Set(fullReport.map((e) => e.studyId)).size;
+
   for (const entry of fullReport) {
     console.log(`\n  [${entry.studyName || entry.studyId}] TSID ${entry.tsid}`);
     console.log(`    Canonical: ${entry.canonicalName} (${entry.canonicalId})`);
@@ -284,6 +335,19 @@ async function main() {
 
   if (DRY_RUN) {
     console.log(`\n[dry-run] No archives performed. Re-run with --archive to execute.`);
+    return;
+  }
+
+  // --archive mode: gate behind confirmation (TTY prompt or --yes).
+  const isTty = Boolean(process.stdin.isTTY);
+  const decision = await confirmArchive({
+    totalCandidates,
+    studiesWithDuplicates,
+    isTty,
+    yesFlag: YES_FLAG,
+  });
+  if (!decision.proceed) {
+    process.exitCode = 1;
     return;
   }
 
@@ -317,7 +381,28 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('Sweep failed:', err);
-  process.exit(1);
-});
+// Only run main() when invoked as a script — importing this module (for tests)
+// should not execute it or require env vars.
+const invokedAsScript = (() => {
+  try {
+    const entry = process.argv[1] || '';
+    return entry.endsWith('sweep-all-studies.js');
+  } catch {
+    return false;
+  }
+})();
+
+if (invokedAsScript) {
+  if (!TOKEN) {
+    console.error('Missing NOTION_TOKEN_1 env var');
+    process.exit(1);
+  }
+  if (!STUDIES_DB_ID || !STUDY_TASKS_DB_ID) {
+    console.error('Missing STUDIES_DB_ID or STUDY_TASKS_DB_ID env var');
+    process.exit(1);
+  }
+  main().catch((err) => {
+    console.error('Sweep failed:', err);
+    process.exit(1);
+  });
+}
