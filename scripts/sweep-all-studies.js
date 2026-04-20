@@ -9,11 +9,18 @@
  *      for the per-run sweep.
  *
  * Keep-rule (historical, no engine-tracked list available):
- *   - Prefer pages that are fully wired (Parent Task / Blocked by / Blocking
- *     relations populated). "Fully wired" is implementation-approximate —
- *     we use "has Parent Task relation OR is root-level by template" as a
- *     proxy. See NOTE below.
- *   - Fall back to earliest `created_time`.
+ *   Tri-state classification per duplicate group:
+ *     - `wired`        — Parent Task / Blocked by / Blocking relation populated.
+ *     - `root-unwired` — no relations, but all duplicates share the same empty
+ *                        state (consistent root-level by design).
+ *     - `true-unwired` — no relations AND the group is inconsistent (some wired,
+ *                        others not) — orphans from failed wiring.
+ *   Rules:
+ *     1. If any duplicate is `wired` and others are not → keep wired, archive
+ *        the unwired/orphaned ones.
+ *     2. If all duplicates share the same state → fall back to earliest
+ *        `created_time`. Ties within <100ms emit `tie_warning: true` so the
+ *        operator sees the ambiguity in the dry-run report.
  *   - SKIP + flag pages with any of:
  *       - Non-empty comments (queried via the Comments API)
  *       - `last_edited_by` is not the engine bot
@@ -58,6 +65,10 @@ const ENGINE_BOT_USER_ID = process.env.ENGINE_BOT_USER_ID || null;
 // Default status values that indicate the page has not been manually touched.
 const DEFAULT_STATUS_VALUES = new Set(['Backlog', 'Not started', 'To-do', '']);
 
+// Tie threshold — two created_time stamps within this window are considered
+// ambiguous for canonical selection.
+const TIE_THRESHOLD_MS = 100;
+
 const args = process.argv.slice(2);
 const DRY_RUN = !args.includes('--archive');
 const YES_FLAG = args.includes('--yes');
@@ -98,13 +109,13 @@ async function queryAll(dbId, filter) {
   return results;
 }
 
-function extractTsid(page) {
+export function extractTsid(page) {
   const rich = page.properties?.['Template Source ID']?.rich_text;
   if (!Array.isArray(rich) || rich.length === 0) return null;
   return rich[0].plain_text || rich[0].text?.content || null;
 }
 
-function extractStatus(page) {
+export function extractStatus(page) {
   // Status property — both "status" type and "select" type supported defensively.
   return (
     page.properties?.['Status']?.status?.name
@@ -113,7 +124,7 @@ function extractStatus(page) {
   );
 }
 
-function extractTaskName(page) {
+export function extractTaskName(page) {
   return (
     page.properties?.['Task Name']?.title?.[0]?.plain_text
     || page.properties?.['Task Name']?.title?.[0]?.text?.content
@@ -121,9 +132,25 @@ function extractTaskName(page) {
   );
 }
 
-function hasParentRelation(page) {
-  const rel = page.properties?.['Parent Task']?.relation;
+function relationIsPopulated(page, propName) {
+  const rel = page.properties?.[propName]?.relation;
   return Array.isArray(rel) && rel.length > 0;
+}
+
+export function hasParentRelation(page) {
+  return relationIsPopulated(page, 'Parent Task');
+}
+
+/**
+ * A page is `wired` if ANY of Parent Task / Blocked by / Blocking is populated.
+ * The group-level distinction between `root-unwired` and `true-unwired` is
+ * made by pickCanonical() based on whether the group is homogeneous or mixed.
+ */
+export function classifyPage(page) {
+  const wired = relationIsPopulated(page, 'Parent Task')
+    || relationIsPopulated(page, 'Blocked by')
+    || relationIsPopulated(page, 'Blocking');
+  return wired ? 'wired' : 'unwired';
 }
 
 async function pageHasComments(pageId) {
@@ -151,15 +178,69 @@ function computeFlags(page, hasCommentsFlag) {
   return flags;
 }
 
-function pickCanonical(pages) {
-  // Prefer a page with a Parent Task relation (fully wired).
-  const wired = pages.filter(hasParentRelation);
-  const pool = wired.length > 0 ? wired : pages;
-  // Within pool, earliest created_time wins.
-  return pool.reduce((earliest, p) => {
+/**
+ * Pick the canonical page from a group of duplicates using the tri-state rule.
+ * Returns { canonical, duplicates, groupState, tieWarnings }.
+ *
+ *   - groupState: 'mixed' (wired picked), 'all-wired', 'root-unwired'.
+ *   - tieWarnings: Set of page IDs whose created_time falls within TIE_THRESHOLD_MS
+ *                  of the canonical's created_time (ambiguous keep).
+ *
+ * NOTE: Without blueprint introspection, `root-unwired` and `true-unwired` are
+ * indistinguishable at a single-group level — both have "all unwired". We treat
+ * any "all unwired" group as root-unwired-by-consistency (consistent empty
+ * state across the group implies a root-level TSID). `true-unwired` is
+ * surfaced only when some duplicates are wired and others are not, indicating
+ * partial wiring failure — in that case wired survivors win and the orphans
+ * get archived (state: 'mixed').
+ */
+export function pickCanonical(pages) {
+  if (!Array.isArray(pages) || pages.length === 0) {
+    return { canonical: null, duplicates: [], groupState: 'empty', tieWarnings: new Set() };
+  }
+
+  const wired = pages.filter((p) => classifyPage(p) === 'wired');
+  const unwired = pages.filter((p) => classifyPage(p) === 'unwired');
+
+  let pool;
+  let groupState;
+  if (wired.length > 0 && unwired.length > 0) {
+    // Rule 1: mixed — keep wired, archive orphans (true-unwired).
+    pool = wired;
+    groupState = 'mixed';
+  } else if (wired.length > 0) {
+    // All wired — tie-break by created_time.
+    pool = wired;
+    groupState = 'all-wired';
+  } else {
+    // All unwired. Without blueprint introspection, treat as root-unwired.
+    pool = unwired;
+    groupState = 'root-unwired';
+  }
+
+  // Earliest created_time wins within the pool.
+  const canonical = pool.reduce((earliest, p) => {
     if (!earliest) return p;
     return new Date(p.created_time) < new Date(earliest.created_time) ? p : earliest;
   }, null);
+
+  const canonicalMs = canonical ? new Date(canonical.created_time).getTime() : 0;
+  const tieWarnings = new Set();
+  // A tie exists when another page in the pool has a created_time within
+  // TIE_THRESHOLD_MS of the canonical (ambiguous earliest). Applies only when
+  // the pool has >1 member and we actually resolved by time (not mixed).
+  if (pool.length > 1 && (groupState === 'all-wired' || groupState === 'root-unwired')) {
+    for (const p of pool) {
+      if (p.id === canonical.id) continue;
+      const deltaMs = Math.abs(new Date(p.created_time).getTime() - canonicalMs);
+      if (deltaMs < TIE_THRESHOLD_MS) {
+        tieWarnings.add(p.id);
+      }
+    }
+  }
+
+  const duplicates = pages.filter((p) => p.id !== canonical.id);
+  return { canonical, duplicates, groupState, tieWarnings };
 }
 
 async function processStudy(studyId, studyName, opts = {}) {
@@ -185,18 +266,19 @@ async function processStudy(studyId, studyName, opts = {}) {
   const reportEntries = [];
   for (const [tsid, pagesForTsid] of byTsid) {
     if (pagesForTsid.length <= 1) continue;
-    const canonical = pickCanonical(pagesForTsid);
-    const duplicates = pagesForTsid.filter((p) => p.id !== canonical.id);
+    const { canonical, duplicates, groupState, tieWarnings } = pickCanonical(pagesForTsid);
 
     const duplicateDetails = [];
     for (const dup of duplicates) {
       const hasCommentsFlag = await pageHasComments(dup.id);
       const flags = computeFlags(dup, hasCommentsFlag);
+      const tieWarning = tieWarnings.has(dup.id);
       duplicateDetails.push({
         pageId: dup.id,
         taskName: extractTaskName(dup),
         flags,
         archiveCandidate: flags.length === 0,
+        tie_warning: tieWarning,
       });
     }
 
@@ -206,6 +288,7 @@ async function processStudy(studyId, studyName, opts = {}) {
       tsid,
       canonicalId: canonical.id,
       canonicalName: extractTaskName(canonical),
+      groupState,
       duplicates: duplicateDetails,
     });
   }
@@ -321,11 +404,12 @@ async function main() {
   const studiesWithDuplicates = new Set(fullReport.map((e) => e.studyId)).size;
 
   for (const entry of fullReport) {
-    console.log(`\n  [${entry.studyName || entry.studyId}] TSID ${entry.tsid}`);
+    console.log(`\n  [${entry.studyName || entry.studyId}] TSID ${entry.tsid} (state=${entry.groupState})`);
     console.log(`    Canonical: ${entry.canonicalName} (${entry.canonicalId})`);
     for (const d of entry.duplicates) {
       const prefix = d.archiveCandidate ? '    [archive]' : '    [FLAGGED]';
-      console.log(`${prefix} ${d.taskName} (${d.pageId})${d.flags.length > 0 ? ` flags=[${d.flags.join(', ')}]` : ''}`);
+      const tie = d.tie_warning ? ' ⚠ TIE' : '';
+      console.log(`${prefix} ${d.taskName} (${d.pageId})${d.flags.length > 0 ? ` flags=[${d.flags.join(', ')}]` : ''}${tie}`);
     }
   }
 

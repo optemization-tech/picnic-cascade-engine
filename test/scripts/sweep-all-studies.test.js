@@ -2,7 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   confirmArchive,
+  pickCanonical,
+  classifyPage,
 } = await import('../../scripts/sweep-all-studies.js');
+
+// Helper — build a minimal Notion-shaped page object for pickCanonical tests.
+function makePage({ id, createdTime, parent = false, blockedBy = false, blocking = false }) {
+  const relation = (populated) => (populated ? [{ id: 'related-x' }] : []);
+  return {
+    id,
+    created_time: createdTime,
+    properties: {
+      'Parent Task': { relation: relation(parent) },
+      'Blocked by': { relation: relation(blockedBy) },
+      'Blocking': { relation: relation(blocking) },
+    },
+  };
+}
 
 describe('sweep-all-studies: confirmArchive gate', () => {
   let logFn;
@@ -77,5 +93,91 @@ describe('sweep-all-studies: confirmArchive gate', () => {
     expect(result.proceed).toBe(false);
     expect(result.reason).toBe('tty_declined');
     expect(logFn).toHaveBeenCalledWith(expect.stringContaining('operator declined'));
+  });
+});
+
+describe('sweep-all-studies: pickCanonical tri-state keep-rule', () => {
+  it('classifyPage: Parent Task relation → wired', () => {
+    expect(classifyPage(makePage({ id: 'a', createdTime: '2026-01-01T00:00:00Z', parent: true }))).toBe('wired');
+  });
+
+  it('classifyPage: Blocked by relation → wired', () => {
+    expect(classifyPage(makePage({ id: 'a', createdTime: '2026-01-01T00:00:00Z', blockedBy: true }))).toBe('wired');
+  });
+
+  it('classifyPage: Blocking relation → wired', () => {
+    expect(classifyPage(makePage({ id: 'a', createdTime: '2026-01-01T00:00:00Z', blocking: true }))).toBe('wired');
+  });
+
+  it('classifyPage: no relations → unwired', () => {
+    expect(classifyPage(makePage({ id: 'a', createdTime: '2026-01-01T00:00:00Z' }))).toBe('unwired');
+  });
+
+  it('mixed (wired + unwired): keeps wired, archives unwired, state=mixed', () => {
+    const wiredPage = makePage({ id: 'wired-1', createdTime: '2026-02-01T00:00:00Z', parent: true });
+    const unwiredPage1 = makePage({ id: 'unwired-1', createdTime: '2026-01-01T00:00:00Z' });
+    const unwiredPage2 = makePage({ id: 'unwired-2', createdTime: '2026-01-15T00:00:00Z' });
+    const result = pickCanonical([wiredPage, unwiredPage1, unwiredPage2]);
+    expect(result.canonical.id).toBe('wired-1');
+    expect(result.groupState).toBe('mixed');
+    expect(result.duplicates.map((p) => p.id).sort()).toEqual(['unwired-1', 'unwired-2']);
+    expect(result.tieWarnings.size).toBe(0);
+  });
+
+  it('mixed with multiple wired: keeps earliest wired, archives all unwired', () => {
+    const wiredNewer = makePage({ id: 'wired-new', createdTime: '2026-02-01T00:00:00Z', parent: true });
+    const wiredOlder = makePage({ id: 'wired-old', createdTime: '2026-01-01T00:00:00Z', blockedBy: true });
+    const unwired = makePage({ id: 'unwired-1', createdTime: '2025-12-01T00:00:00Z' });
+    const result = pickCanonical([wiredNewer, wiredOlder, unwired]);
+    expect(result.canonical.id).toBe('wired-old'); // earliest wired wins
+    expect(result.groupState).toBe('mixed');
+    // Both wired-new and unwired-1 are archived.
+    expect(result.duplicates.map((p) => p.id).sort()).toEqual(['unwired-1', 'wired-new']);
+  });
+
+  it('all-wired: earliest created_time wins, state=all-wired', () => {
+    const a = makePage({ id: 'a', createdTime: '2026-03-01T00:00:00Z', parent: true });
+    const b = makePage({ id: 'b', createdTime: '2026-02-01T00:00:00Z', blocking: true });
+    const c = makePage({ id: 'c', createdTime: '2026-02-15T00:00:00Z', parent: true });
+    const result = pickCanonical([a, b, c]);
+    expect(result.canonical.id).toBe('b');
+    expect(result.groupState).toBe('all-wired');
+    expect(result.tieWarnings.size).toBe(0);
+  });
+
+  it('all-wired with tie (<100ms apart): emits tie warning', () => {
+    const a = makePage({ id: 'a', createdTime: '2026-02-01T00:00:00.000Z', parent: true });
+    const b = makePage({ id: 'b', createdTime: '2026-02-01T00:00:00.050Z', parent: true }); // 50ms later
+    const c = makePage({ id: 'c', createdTime: '2026-03-01T00:00:00.000Z', parent: true });
+    const result = pickCanonical([a, b, c]);
+    expect(result.canonical.id).toBe('a'); // earliest
+    expect(result.groupState).toBe('all-wired');
+    expect(result.tieWarnings.has('b')).toBe(true); // within 100ms → tie
+    expect(result.tieWarnings.has('c')).toBe(false); // 1 month apart → no tie
+  });
+
+  it('all-unwired: earliest created_time wins, state=root-unwired', () => {
+    const a = makePage({ id: 'a', createdTime: '2026-02-01T00:00:00Z' });
+    const b = makePage({ id: 'b', createdTime: '2026-01-01T00:00:00Z' });
+    const c = makePage({ id: 'c', createdTime: '2026-03-01T00:00:00Z' });
+    const result = pickCanonical([a, b, c]);
+    expect(result.canonical.id).toBe('b');
+    expect(result.groupState).toBe('root-unwired');
+    expect(result.tieWarnings.size).toBe(0);
+  });
+
+  it('all-unwired with tie (<100ms apart): emits tie warning', () => {
+    const a = makePage({ id: 'a', createdTime: '2026-02-01T00:00:00.000Z' });
+    const b = makePage({ id: 'b', createdTime: '2026-02-01T00:00:00.080Z' }); // 80ms later
+    const result = pickCanonical([a, b]);
+    expect(result.canonical.id).toBe('a');
+    expect(result.groupState).toBe('root-unwired');
+    expect(result.tieWarnings.has('b')).toBe(true);
+  });
+
+  it('empty input returns canonical=null', () => {
+    const result = pickCanonical([]);
+    expect(result.canonical).toBeNull();
+    expect(result.groupState).toBe('empty');
   });
 });
