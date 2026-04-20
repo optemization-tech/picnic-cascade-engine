@@ -274,4 +274,294 @@ describe('NotionClient', () => {
     const result = await client.getPage('abc');
     expect(result.id).toBe('ok');
   });
+
+  describe('narrow retry for non-idempotent writes', () => {
+    /**
+     * Minimal tracer stub that records the suppression-counter and retry
+     * events so the retry-loop assertions can diff before/after state.
+     */
+    function makeTracer() {
+      return {
+        suppressedCalls: 0,
+        retries: [],
+        recordNarrowRetrySuppressed() {
+          this.suppressedCalls += 1;
+        },
+        recordRetry(entry) {
+          this.retries.push(entry);
+        },
+      };
+    }
+
+    function httpError(status, body = {}) {
+      return {
+        ok: false,
+        status,
+        statusText: `status-${status}`,
+        text: async () => JSON.stringify(body),
+        headers: { get: () => null },
+      };
+    }
+
+    function ok(body) {
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify(body),
+        headers: { get: () => null },
+      };
+    }
+
+    it('nonIdempotent POST /pages surfaces 502 immediately (no retry)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(httpError(502));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 5, baseMs: 1 },
+      });
+
+      await expect(
+        client.request('POST', '/pages', { parent: {} }, { tracer }),
+      ).rejects.toThrow(/502/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(tracer.suppressedCalls).toBe(1);
+      expect(tracer.retries).toHaveLength(0);
+    });
+
+    it('nonIdempotent POST /pages surfaces post-send timeout immediately', async () => {
+      const timeoutErr = new Error('timeout');
+      timeoutErr.name = 'TimeoutError';
+      const fetchMock = vi.fn().mockRejectedValue(timeoutErr);
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 5, baseMs: 1 },
+      });
+
+      await expect(
+        client.request('POST', '/pages', { parent: {} }, { tracer }),
+      ).rejects.toThrow(/timeout/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(tracer.suppressedCalls).toBe(1);
+    });
+
+    it('nonIdempotent POST /pages retries on 429 (safe_retry)', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(httpError(429, { message: 'rate limited' }))
+        .mockResolvedValueOnce(ok({ id: 'page-1' }));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.request('POST', '/pages', { parent: {} }, { tracer });
+      expect(result.id).toBe('page-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(tracer.suppressedCalls).toBe(0);
+      expect(tracer.retries).toHaveLength(1);
+    });
+
+    it('nonIdempotent POST /pages retries on ECONNREFUSED (safe_retry, pre-send)', async () => {
+      const err = new Error('connect refused');
+      err.code = 'ECONNREFUSED';
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(err)
+        .mockResolvedValueOnce(ok({ id: 'page-1' }));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.request('POST', '/pages', { parent: {} }, { tracer });
+      expect(result.id).toBe('page-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(tracer.suppressedCalls).toBe(0);
+    });
+
+    it('nonIdempotent PATCH /blocks/:id/children surfaces 502 immediately', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(httpError(502));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 5, baseMs: 1 },
+      });
+
+      await expect(
+        client.request('PATCH', '/blocks/abc-123/children', { children: [] }, { tracer }),
+      ).rejects.toThrow(/502/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(tracer.suppressedCalls).toBe(1);
+    });
+
+    it('idempotent PATCH /blocks/:id (no /children suffix) retries on 502 (wide retry preserved)', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(httpError(502))
+        .mockResolvedValueOnce(ok({ id: 'block-1' }));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.request('PATCH', '/blocks/abc-123', { paragraph: {} }, { tracer });
+      expect(result.id).toBe('block-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(tracer.suppressedCalls).toBe(0);
+    });
+
+    it('idempotent PATCH /pages/:id retries on 502 (wide retry preserved)', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(httpError(502))
+        .mockResolvedValueOnce(ok({ id: 'page-1' }));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.patchPage('page-1', { Status: { status: { name: 'Done' } } }, { tracer });
+      expect(result.id).toBe('page-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(tracer.suppressedCalls).toBe(0);
+      expect(tracer.retries).toHaveLength(1);
+    });
+
+    it('idempotent GET retries on 429 (safe_retry, unchanged)', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(httpError(429))
+        .mockResolvedValueOnce(ok({ id: 'ok' }));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.getPage('abc');
+      // getPage doesn't accept tracer, so spot-check fetchMock calls only
+      expect(result.id).toBe('ok');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('nonIdempotent POST /pages throws on 400 (non_retryable)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(httpError(400, { message: 'bad request' }));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      await expect(
+        client.request('POST', '/pages', { parent: {} }, { tracer }),
+      ).rejects.toThrow(/400/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // non_retryable does NOT count as narrow-retry suppression
+      expect(tracer.suppressedCalls).toBe(0);
+    });
+
+    it('idempotent post-send timeout respects PR #43 2-attempt cap', async () => {
+      const timeoutErr = new Error('timeout');
+      timeoutErr.name = 'TimeoutError';
+      const fetchMock = vi.fn().mockRejectedValue(timeoutErr);
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 5, baseMs: 1 },
+      });
+
+      // patchPage → PATCH /pages/:id (idempotent). Timeout cap still applies.
+      await expect(
+        client.patchPage('page-1', { Status: { status: { name: 'Done' } } }, { tracer }),
+      ).rejects.toThrow(/timeout/);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(tracer.suppressedCalls).toBe(0);
+    });
+
+    it('nonIdempotent unknown error shape surfaces (counter increments)', async () => {
+      const weirdErr = new Error('something weird');
+      const fetchMock = vi.fn().mockRejectedValue(weirdErr);
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      await expect(
+        client.request('POST', '/pages', { parent: {} }, { tracer }),
+      ).rejects.toThrow(/something weird/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(tracer.suppressedCalls).toBe(1);
+    });
+
+    it('idempotent unknown error shape retries (conservative default for unknown)', async () => {
+      const weirdErr = new Error('something weird');
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(weirdErr)
+        .mockResolvedValueOnce(ok({ id: 'page-1' }));
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.patchPage('page-1', { Status: { status: { name: 'Done' } } }, { tracer });
+      expect(result.id).toBe('page-1');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(tracer.suppressedCalls).toBe(0);
+    });
+
+    it('_requestWithSlot does not throw when tracer is absent', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(httpError(502));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      await expect(
+        client.request('POST', '/pages', { parent: {} }),
+      ).rejects.toThrow(/502/);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

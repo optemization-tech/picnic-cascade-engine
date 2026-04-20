@@ -1,4 +1,6 @@
 import { buildReportingText } from '../utils/reporting.js';
+import { classifyIdempotency } from './idempotency-classifier.js';
+import { classifyNotionError } from './error-classifier.js';
 
 const NOTION_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28';
@@ -65,11 +67,14 @@ export class NotionClient {
   async _requestWithSlot(slot, method, path, body, { tracer } = {}) {
     const maxAttempts = this.retry.maxAttempts || 5;
     const baseMs = this.retry.baseMs || 500;
+    const idempotency = classifyIdempotency(method, path);
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const tokenIndex = slot.index;
       await this._throttleSlot(slot.key);
+
+      let retryAfterMs = null;
 
       try {
         const response = await fetch(`${NOTION_BASE}${path}`, {
@@ -88,29 +93,50 @@ export class NotionClient {
         if (response.ok) return data;
 
         const retryAfterHeader = response.headers.get('retry-after');
-        const retryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
-        const retryable = response.status === 429 || response.status >= 500;
+        retryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
 
         const error = new Error(`Notion API ${response.status} ${response.statusText}: ${data?.message || text || 'unknown error'}`);
         error.status = response.status;
         error.data = data;
-        lastError = error;
-
-        if (!retryable || attempt === maxAttempts) throw error;
-        const jitter = Math.floor(Math.random() * 100);
-        const backoff = retryAfterMs ?? (baseMs * (2 ** (attempt - 1)) + jitter);
-        if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: response.status, tokenIndex });
-        console.log(JSON.stringify({ event: 'notion_retry', attempt, backoff, status: response.status, tokenIndex }));
-        await sleep(backoff);
+        throw error;
       } catch (err) {
         lastError = err;
+        const errClass = classifyNotionError(err);
+
+        // non_retryable — 4xx except 429. Surface immediately regardless
+        // of idempotency. Matches prior behavior.
+        if (errClass === 'non_retryable') break;
+
+        // unsafe_retry — 5xx, post-send timeouts, unknown shapes. For
+        // non-idempotent paths (POST /pages, PATCH /blocks/:id/children)
+        // surface immediately to avoid creating duplicates. For idempotent
+        // paths preserve prior behavior: retry with the PR #43 2-attempt
+        // cap on TimeoutError/AbortError.
+        if (errClass === 'unsafe_retry') {
+          if (idempotency === 'nonIdempotent') {
+            if (tracer) tracer.recordNarrowRetrySuppressed();
+            console.log(JSON.stringify({
+              event: 'notion_narrow_retry_suppressed',
+              attempt,
+              method,
+              path,
+              status: err.status || 0,
+              errorName: err.name || null,
+              tokenIndex,
+            }));
+            break;
+          }
+          // idempotent + unsafe_retry: preserve the 2-attempt timeout cap
+          // from PR #43 (30s × 5 = 150s was user-hostile).
+          if ((err.name === 'TimeoutError' || err.name === 'AbortError') && attempt >= 2) break;
+        }
+
+        // safe_retry (429, ECONNREFUSED/ENOTFOUND/ETIMEDOUT) and
+        // idempotent + unsafe_retry both fall through here.
         if (attempt === maxAttempts) break;
-        // Don't retry non-retryable HTTP errors (4xx except 429)
-        if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) break;
-        // Timeout errors: retry once (transient), but not all 5 attempts (30s × 5 = 150s)
-        if ((err.name === 'TimeoutError' || err.name === 'AbortError') && attempt >= 2) break;
+
         const jitter = Math.floor(Math.random() * 100);
-        const backoff = baseMs * (2 ** (attempt - 1)) + jitter;
+        const backoff = retryAfterMs ?? (baseMs * (2 ** (attempt - 1)) + jitter);
         if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: err.status || 0, tokenIndex });
         console.log(JSON.stringify({ event: 'notion_retry', attempt, backoff, status: err.status || 0, tokenIndex }));
         await sleep(backoff);
