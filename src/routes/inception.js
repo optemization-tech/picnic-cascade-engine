@@ -9,6 +9,7 @@ import { wireRemainingRelations } from '../provisioning/wire-relations.js';
 import { copyBlocks, prefetchTemplateBlocks } from '../provisioning/copy-blocks.js';
 import { flightTracker } from '../services/flight-tracker.js';
 import { withStudyLock } from '../services/study-lock.js';
+import * as duplicateSweep from '../services/duplicate-sweep.js';
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -226,6 +227,27 @@ async function processInception(body) {
         tracer,
       }),
     ]);
+
+    // ── Post-flight duplicate sweep ─────────────────────────────────────
+    // Safety net for silent duplicates caused by retry-after-commit. Runs
+    // under withStudyLock (from PR E0) so no other operation on this study
+    // can race. Waits config.sweepGraceMs for Notion's query index to
+    // settle, then archives any extras whose page IDs aren't in this run's
+    // trackedIds. See docs/ENGINE-BEHAVIOR-REFERENCE.md §11.
+    //
+    // trackedIds + tsids derived from createResult.idMapping (no change to
+    // createStudyTasks return shape). Sweep failure is non-fatal; errors
+    // land in tracer counters and flow through Activity Log details.
+    const trackedIds = new Set(Object.values(createResult.idMapping));
+    const tsids = Object.keys(createResult.idMapping);
+    await duplicateSweep.run({
+      studyPageId,
+      trackedIds,
+      tsids,
+      tracer,
+      notionClient,
+      studyTasksDbId: config.notion.studyTasksDbId,
+    });
 
     await Promise.all([
       activityLogService.logTerminalEvent({
