@@ -3,7 +3,6 @@ import { parseWebhookPayload, isImportMode, isFrozen } from '../gates/guards.js'
 import { classify } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
-import { enforceConstraints } from '../engine/constraints.js';
 import { buildReportingText } from '../utils/reporting.js';
 import { formatDate } from '../utils/business-days.js';
 import { cascadeClient as notionClient, commentClient } from '../notion/clients.js';
@@ -25,7 +24,7 @@ function summarizeFailure(error) {
   return `Date cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
 }
 
-function buildActivityDetails({ parsed, classified, patched, constrainedSource, cascadeResult, error, noActionReason, tracer }) {
+function buildActivityDetails({ parsed, classified, patched, sourceFinal, cascadeResult, error, noActionReason, tracer }) {
   const diagnostics = cascadeResult?.diagnostics || {};
   const base = {
     parentMode: classified?.parentMode || null,
@@ -38,8 +37,8 @@ function buildActivityDetails({ parsed, classified, patched, constrainedSource, 
     sourceDates: {
       originalStart: parsed?.refStart || null,
       originalEnd: parsed?.refEnd || null,
-      modifiedStart: constrainedSource?.newStart || parsed?.newStart || null,
-      modifiedEnd: constrainedSource?.newEnd || parsed?.newEnd || null,
+      modifiedStart: sourceFinal?.newStart || parsed?.newStart || null,
+      modifiedEnd: sourceFinal?.newEnd || parsed?.newEnd || null,
     },
     crossChain: {
       capHit: Boolean(diagnostics.capReached),
@@ -49,10 +48,6 @@ function buildActivityDetails({ parsed, classified, patched, constrainedSource, 
         : [],
       clampedEdges: Array.isArray(diagnostics.clampedEdges) ? diagnostics.clampedEdges : [],
     },
-    validation: {
-      constraintFixCount: diagnostics.constraintFixCount || 0,
-      constraintFixTaskIds: diagnostics.constraintFixTaskIds || [],
-    },
     error: error
       ? {
         errorCode: error.code || null,
@@ -61,8 +56,6 @@ function buildActivityDetails({ parsed, classified, patched, constrainedSource, 
       }
       : { errorCode: null, errorMessage: null, phase: null },
     noActionReason: noActionReason || null,
-    constrained: constrainedSource?.constrained ?? null,
-    merged: constrainedSource?.merged ?? null,
   };
   if (tracer) Object.assign(base, tracer.toActivityLogDetails());
   return base;
@@ -74,7 +67,7 @@ async function logTerminalEvent({
   status,
   summary,
   patched,
-  constrainedSource,
+  sourceFinal,
   cascadeResult,
   noActionReason,
   error,
@@ -97,7 +90,7 @@ async function logTerminalEvent({
       parsed,
       classified,
       patched,
-      constrainedSource,
+      sourceFinal,
       cascadeResult,
       noActionReason,
       error,
@@ -291,22 +284,12 @@ async function processDateCascade(payload) {
     });
     tracer.endPhase('parentSubtask');
 
-    tracer.startPhase('constraints');
-    const constrainedSource = enforceConstraints({
-      task: {
-        taskId: classified.sourceTaskId,
-        refStart: classified.refStart,
-        refEnd: classified.refEnd,
-        newStart: classified.newStart,
-        newEnd: classified.newEnd,
-      },
-      cascadeResult,
-      parentResult,
-      allTasks,
-    });
-    tracer.endPhase('constraints');
-
     tracer.startPhase('merge');
+    const sourceFinal = {
+      taskId: classified.sourceTaskId,
+      newStart: classified.newStart,
+      newEnd: classified.newEnd,
+    };
     const sourceRollUp = (parentResult.updates || []).find(
       (u) => u.taskId === classified.sourceTaskId && u._isRollUp,
     );
@@ -315,14 +298,14 @@ async function processDateCascade(payload) {
     for (const u of cascadeResult.updates || []) updatesByTaskId.set(u.taskId, { ...u });
     for (const u of parentResult.updates || []) updatesByTaskId.set(u.taskId, { ...u });
 
-    // Source task must have latest constrained + merged dates.
+    // Source task keeps the user's edited dates; no post-cascade source clamp runs.
     updatesByTaskId.set(classified.sourceTaskId, {
       taskId: classified.sourceTaskId,
       taskName: classified.sourceTaskName,
-      newStart: constrainedSource.newStart,
-      newEnd: constrainedSource.newEnd,
-      newReferenceStartDate: constrainedSource.newStart,
-      newReferenceEndDate: constrainedSource.newEnd,
+      newStart: sourceFinal.newStart,
+      newEnd: sourceFinal.newEnd,
+      newReferenceStartDate: sourceFinal.newStart,
+      newReferenceEndDate: sourceFinal.newEnd,
       _isRollUp: Boolean(sourceRollUp),
       _reportingMsg: `❇️ ${classified.cascadeMode} cascade: dates shifted (triggered by ${classified.sourceTaskName})`,
     });
@@ -343,7 +326,7 @@ async function processDateCascade(payload) {
           status: 'no_action',
           summary: `No action: no updates needed for ${parsed.taskName}`,
           patched: { updatedCount: 0 },
-          constrainedSource,
+          sourceFinal,
           cascadeResult,
           noActionReason: 'zero_updates',
           tracer,
@@ -394,7 +377,7 @@ async function processDateCascade(payload) {
               ? `Cascade unresolved after safety cap for ${parsed.taskName} (${residueCount} residue task(s))`
               : `${classified.cascadeMode}: ${parsed.taskName} (${patched.updatedCount} updates)`,
             patched,
-            constrainedSource,
+            sourceFinal,
             cascadeResult,
             noActionReason: null,
             tracer,

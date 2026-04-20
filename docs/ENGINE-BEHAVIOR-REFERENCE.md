@@ -73,8 +73,6 @@ Map each behavior to concrete modules/functions:
   - `pullRightUpstream()`
 - `src/engine/parent-subtask.js`
   - `runParentSubtask()` (Case A parent shift, Case B roll-up, cascade roll-up)
-- `src/engine/constraints.js`
-  - `enforceConstraints()` (source clamping + case-a merge + weekend snap)
 - `src/routes/date-cascade.js`
   - `processDateCascade()` (orchestration and terminal status semantics)
   - `buildActivityDetails()` (diagnostics mapping)
@@ -149,7 +147,7 @@ Terminal activity log entries are emitted by the route/orchestration layer and w
 - Expanded diagnostics (`details`) go in page body blocks, not in properties.
 
 #### 4.3 Terminal status semantics
-- `success`: Intended cascade objective completed and safety constraints satisfied.
+- `success`: Intended cascade objective completed and no safety cap residue remains.
 - `no_action`: Route completed without date movement due to valid no-op state (gates, unchanged dates, blocked mode, etc.).
 - `failed`: Execution error, or unresolved residue that violates cross-chain safety policy after cap.
 
@@ -157,14 +155,12 @@ Do not classify a run as success only because the process completed. Status refl
 
 ### 5) Invariants
 Non-negotiable safety invariants:
-- Dependency validity after cascade:
-  - No non-frozen dependent may start before the next business day after its effective blocker end.
 - Complete Freeze semantics:
   - Frozen tasks (`Done`, `N/A`) never move during cascades and are excluded from blocker constraints.
 - No recursive anti-loop regressions:
   - System-written date changes must be gated through LMBS and unlock flow; route must avoid infinite webhook loops.
 - Date math is business-day-only:
-  - Delta computation, pushes/pulls, and constraint snaps use business-day utilities only.
+  - Delta computation and directional shifts use business-day utilities only.
 - Cross-chain cascade completeness:
   - When a cascade moves a task that has dependencies in other chains, and that movement creates conflicts in those chains, the engine must continue cascading through all affected chains until no unresolved conflicts remain or the safety cap is reached. Cascades are graph-wide, not single-chain.
 - Determinism for identical input:
@@ -190,8 +186,7 @@ Cross-chain and safety:
 Parent/subtask:
 - `engine/test/engine/parent-subtask.test.js` (Case A, Case B, roll-up)
 
-Constraints + business-day:
-- `engine/test/engine/constraints.test.js`
+Business-day utilities:
 - `engine/test/utils/business-days.test.js`
 
 Classification and orchestration:

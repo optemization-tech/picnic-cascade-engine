@@ -1,0 +1,3498 @@
+[
+  {
+    "id": "34823867-60c2-81ba-bff2-cf75bada9854",
+    "name": "Insight Report Delivery",
+    "start": "2028-03-02",
+    "end": "2028-03-02",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-815e-92c3-d9380937b2d5"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-03-02",
+    "refEnd": "2028-03-02"
+  },
+  {
+    "id": "34823867-60c2-8121-a698-caffe502096d",
+    "name": "CSR Delivery",
+    "start": "2028-03-14",
+    "end": "2028-03-14",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8160-ab11-ff16c0c6c1cd"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-03-14",
+    "refEnd": "2028-03-14"
+  },
+  {
+    "id": "34823867-60c2-810d-b6b8-d62f59528eb9",
+    "name": "Client Review Round 2: Insights Report",
+    "start": "2028-02-15",
+    "end": "2028-02-22",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8199-afc4-fb59cf74c569"
+    ],
+    "blockingIds": [
+      "34823867-60c2-815e-92c3-d9380937b2d5"
+    ],
+    "parentId": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-02-15",
+    "refEnd": "2028-02-22"
+  },
+  {
+    "id": "34823867-60c2-815e-92c3-d9380937b2d5",
+    "name": "Internal Revisions Round 2: Insights Report ",
+    "start": "2028-02-23",
+    "end": "2028-03-01",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-810d-b6b8-d62f59528eb9"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81ba-bff2-cf75bada9854"
+    ],
+    "parentId": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-02-23",
+    "refEnd": "2028-03-01"
+  },
+  {
+    "id": "34823867-60c2-8160-ab11-ff16c0c6c1cd",
+    "name": "Internal Revisions Round 2: CSR",
+    "start": "2028-03-06",
+    "end": "2028-03-13",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81eb-8691-daf1e78b09d9"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8121-a698-caffe502096d"
+    ],
+    "parentId": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-03-06",
+    "refEnd": "2028-03-13"
+  },
+  {
+    "id": "34823867-60c2-81eb-8691-daf1e78b09d9",
+    "name": "Client Review Round 2: CSR",
+    "start": "2028-02-25",
+    "end": "2028-03-03",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8176-b0b9-dc2c854b01fb"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8160-ab11-ff16c0c6c1cd"
+    ],
+    "parentId": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-02-25",
+    "refEnd": "2028-03-03"
+  },
+  {
+    "id": "34823867-60c2-8199-afc4-fb59cf74c569",
+    "name": "Internal Revisions Round 1: Insights Report ",
+    "start": "2028-01-28",
+    "end": "2028-02-14",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-810a-b109-f1f6576c110b"
+    ],
+    "blockingIds": [
+      "34823867-60c2-810d-b6b8-d62f59528eb9"
+    ],
+    "parentId": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-01-28",
+    "refEnd": "2028-02-14"
+  },
+  {
+    "id": "34823867-60c2-8176-b0b9-dc2c854b01fb",
+    "name": "Internal Revisions Round 1: CSR",
+    "start": "2028-02-09",
+    "end": "2028-02-24",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f0-a3a5-da45c70dc979"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81eb-8691-daf1e78b09d9"
+    ],
+    "parentId": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-02-09",
+    "refEnd": "2028-02-24"
+  },
+  {
+    "id": "34823867-60c2-810a-b109-f1f6576c110b",
+    "name": "Client Review Round 1: Insights Report",
+    "start": "2028-01-10",
+    "end": "2028-01-27",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81a4-825b-c7f4e819a0e1"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8199-afc4-fb59cf74c569"
+    ],
+    "parentId": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-01-10",
+    "refEnd": "2028-01-27"
+  },
+  {
+    "id": "34823867-60c2-81f0-a3a5-da45c70dc979",
+    "name": "Client Review Round 1: CSR",
+    "start": "2028-01-24",
+    "end": "2028-02-08",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f2-9e92-f3f80fc82032"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8176-b0b9-dc2c854b01fb"
+    ],
+    "parentId": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-01-24",
+    "refEnd": "2028-02-08"
+  },
+  {
+    "id": "34823867-60c2-8105-9fd7-cdcd08b27da6",
+    "name": "Draft v1 insights report",
+    "start": "2027-12-14",
+    "end": "2027-12-29",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-819e-bd80-f0389878cf1c"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81a4-825b-c7f4e819a0e1"
+    ],
+    "parentId": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-14",
+    "refEnd": "2027-12-29"
+  },
+  {
+    "id": "34823867-60c2-81a4-825b-c7f4e819a0e1",
+    "name": "Internal Review & Revisions of v1 Insights Report",
+    "start": "2027-12-30",
+    "end": "2028-01-07",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8105-9fd7-cdcd08b27da6"
+    ],
+    "blockingIds": [
+      "34823867-60c2-810a-b109-f1f6576c110b"
+    ],
+    "parentId": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-30",
+    "refEnd": "2028-01-07"
+  },
+  {
+    "id": "34823867-60c2-81f2-9e92-f3f80fc82032",
+    "name": "Internal Review & Revisions of v0.1 CSR",
+    "start": "2028-01-10",
+    "end": "2028-01-21",
+    "duration": 10,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8188-99c5-d38e2021310c"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f0-a3a5-da45c70dc979"
+    ],
+    "parentId": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-01-10",
+    "refEnd": "2028-01-21"
+  },
+  {
+    "id": "34823867-60c2-8188-99c5-d38e2021310c",
+    "name": "Draft v0.1 CSR",
+    "start": "2027-12-14",
+    "end": "2028-01-07",
+    "duration": 19,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-819e-bd80-f0389878cf1c"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f2-9e92-f3f80fc82032"
+    ],
+    "parentId": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-14",
+    "refEnd": "2028-01-07"
+  },
+  {
+    "id": "34823867-60c2-81f0-a445-cf125cd74e3c",
+    "name": "Draft v1 TLF",
+    "start": "2027-08-04",
+    "end": "2027-10-01",
+    "duration": 43,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f3-ac75-fb7540362477",
+      "34823867-60c2-8166-b038-d2c5281a8ef0"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8112-865b-d2a9abb35d6f"
+    ],
+    "parentId": "34823867-60c2-81a5-ae43-ee4b1ee376bf",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-08-04",
+    "refEnd": "2027-10-01"
+  },
+  {
+    "id": "34823867-60c2-819e-bd80-f0389878cf1c",
+    "name": "TLF Delivery",
+    "start": "2027-12-13",
+    "end": "2027-12-13",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8172-ab3f-d4bc75170067"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8188-99c5-d38e2021310c",
+      "34823867-60c2-8105-9fd7-cdcd08b27da6"
+    ],
+    "parentId": "34823867-60c2-81a5-ae43-ee4b1ee376bf",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-13",
+    "refEnd": "2027-12-13"
+  },
+  {
+    "id": "34823867-60c2-8172-ab3f-d4bc75170067",
+    "name": "Internal Revisions Round 1: TLF",
+    "start": "2027-11-25",
+    "end": "2027-12-10",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-814d-830a-e67bb98a2913"
+    ],
+    "blockingIds": [
+      "34823867-60c2-819e-bd80-f0389878cf1c"
+    ],
+    "parentId": "34823867-60c2-81a5-ae43-ee4b1ee376bf",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-11-25",
+    "refEnd": "2027-12-10"
+  },
+  {
+    "id": "34823867-60c2-814d-830a-e67bb98a2913",
+    "name": "Client Review Round 1: TLF",
+    "start": "2027-11-05",
+    "end": "2027-11-24",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8112-865b-d2a9abb35d6f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8172-ab3f-d4bc75170067"
+    ],
+    "parentId": "34823867-60c2-81a5-ae43-ee4b1ee376bf",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-11-05",
+    "refEnd": "2027-11-24"
+  },
+  {
+    "id": "34823867-60c2-8112-865b-d2a9abb35d6f",
+    "name": "         Internal Review & Revisions of Draft TLF",
+    "start": "2027-10-04",
+    "end": "2027-11-04",
+    "duration": 24,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f0-a445-cf125cd74e3c"
+    ],
+    "blockingIds": [
+      "34823867-60c2-814d-830a-e67bb98a2913"
+    ],
+    "parentId": "34823867-60c2-81a5-ae43-ee4b1ee376bf",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-10-04",
+    "refEnd": "2027-11-04"
+  },
+  {
+    "id": "34823867-60c2-8152-b22d-f0626ded553a",
+    "name": "Initial Data Delivery ",
+    "start": "2027-08-04",
+    "end": "2027-08-04",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f3-ac75-fb7540362477",
+      "34823867-60c2-81de-ac19-e7963ff0fe1b",
+      "34823867-60c2-810c-b5f3-da670f603d97"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-08-04",
+    "refEnd": "2027-08-04"
+  },
+  {
+    "id": "34823867-60c2-81f3-ac75-fb7540362477",
+    "name": "Initial Delivery QC & Pre-Delivery Checklist",
+    "start": "2027-07-05",
+    "end": "2027-08-03",
+    "duration": 22,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-815f-ae03-c11c77499b25"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8152-b22d-f0626ded553a",
+      "34823867-60c2-81f0-a445-cf125cd74e3c"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-07-05",
+    "refEnd": "2027-08-03"
+  },
+  {
+    "id": "34823867-60c2-8166-a079-cbfc3953e85d",
+    "name": "Initial Customer Data Training & Window",
+    "start": "2027-05-18",
+    "end": "2027-05-24",
+    "duration": 5,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-812a-aae6-c6a9012cb280"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-05-18",
+    "refEnd": "2027-05-24"
+  },
+  {
+    "id": "34823867-60c2-815f-ae03-c11c77499b25",
+    "name": "Abstraction Launch",
+    "start": "2027-05-18",
+    "end": "2027-07-02",
+    "duration": 34,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-812a-aae6-c6a9012cb280"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f3-ac75-fb7540362477"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-05-18",
+    "refEnd": "2027-07-02"
+  },
+  {
+    "id": "34823867-60c2-812a-aae6-c6a9012cb280",
+    "name": "Hard Lock Patient List",
+    "start": "2027-05-17",
+    "end": "2027-05-17",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8150-a211-faf4d7f88db8"
+    ],
+    "blockingIds": [
+      "34823867-60c2-815f-ae03-c11c77499b25",
+      "34823867-60c2-8166-a079-cbfc3953e85d"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-05-17",
+    "refEnd": "2027-05-17"
+  },
+  {
+    "id": "34823867-60c2-8150-a211-faf4d7f88db8",
+    "name": "Abstraction Training",
+    "start": "2027-04-06",
+    "end": "2027-05-14",
+    "duration": 29,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8199-aa4b-ea364c35f565",
+      "34823867-60c2-81cd-99cc-decd40fdc781"
+    ],
+    "blockingIds": [
+      "34823867-60c2-812a-aae6-c6a9012cb280"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-04-06",
+    "refEnd": "2027-05-14"
+  },
+  {
+    "id": "34823867-60c2-81de-ac19-e7963ff0fe1b",
+    "name": "Data User Guide",
+    "start": "2027-04-06",
+    "end": "2027-05-07",
+    "duration": 24,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8150-a7de-c07a7f87ad04",
+      "34823867-60c2-8199-aa4b-ea364c35f565"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8152-b22d-f0626ded553a"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-04-06",
+    "refEnd": "2027-05-07"
+  },
+  {
+    "id": "34823867-60c2-8199-aa4b-ea364c35f565",
+    "name": "Soft Lock Patient List",
+    "start": "2027-04-05",
+    "end": "2027-04-05",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8152-af90-ce6916aeb541"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8150-a211-faf4d7f88db8",
+      "34823867-60c2-81de-ac19-e7963ff0fe1b"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-04-05",
+    "refEnd": "2027-04-05"
+  },
+  {
+    "id": "34823867-60c2-8188-92a9-f5eec4545bdd",
+    "name": "External Testing (UAT) & Adjustments",
+    "start": "2026-11-19",
+    "end": "2026-11-30",
+    "duration": 8,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-810e-bff2-f6abc6a4826a"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81ba-853c-d01adbd6bee3",
+      "34823867-60c2-816f-8fa0-cb3800d45d2d"
+    ],
+    "parentId": "34823867-60c2-8168-872b-c8eafd180892",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-11-19",
+    "refEnd": "2026-11-30"
+  },
+  {
+    "id": "34823867-60c2-8152-af90-ce6916aeb541",
+    "name": "Initial Delivery Recruitment Period (Time from FPI to Soft Lock for Initial Delivery)",
+    "start": "2026-12-11",
+    "end": "2027-04-02",
+    "duration": 81,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81a8-b5bd-e4710bc7e5c1"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8199-aa4b-ea364c35f565"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-11",
+    "refEnd": "2027-04-02"
+  },
+  {
+    "id": "34823867-60c2-8166-b038-d2c5281a8ef0",
+    "name": "SAP Delivery",
+    "start": "2027-02-11",
+    "end": "2027-02-11",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f1-b88b-d7620f101f6a"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f0-a445-cf125cd74e3c"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-02-11",
+    "refEnd": "2027-02-11"
+  },
+  {
+    "id": "34823867-60c2-81a8-b5bd-e4710bc7e5c1",
+    "name": "FPI First Patient In",
+    "start": "2026-12-04",
+    "end": "2026-12-10",
+    "duration": 5,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-814e-82c4-cfe85cc35f97"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8152-af90-ce6916aeb541"
+    ],
+    "parentId": "34823867-60c2-81f5-8eb3-c153eee46cd4",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-04",
+    "refEnd": "2026-12-10"
+  },
+  {
+    "id": "34823867-60c2-81f1-b88b-d7620f101f6a",
+    "name": "Internal Revisions Round 2: SAP",
+    "start": "2027-02-01",
+    "end": "2027-02-10",
+    "duration": 8,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8159-a118-d21ea3ae505f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8166-b038-d2c5281a8ef0"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-02-01",
+    "refEnd": "2027-02-10"
+  },
+  {
+    "id": "34823867-60c2-81db-9316-e789ccf5c844",
+    "name": "First Site(s) Activated",
+    "start": "2027-01-26",
+    "end": "2027-01-26",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8199-afa2-c79af4b711b3"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8178-909e-c8c46cab481f",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-01-26",
+    "refEnd": "2027-01-26"
+  },
+  {
+    "id": "34823867-60c2-814e-82c4-cfe85cc35f97",
+    "name": "Launch Enrollment",
+    "start": "2026-12-03",
+    "end": "2026-12-03",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-810c-a385-e7c336cb8d74",
+      "34823867-60c2-816f-8fa0-cb3800d45d2d",
+      "34823867-60c2-8148-b15b-f1ffcb74223c",
+      "34823867-60c2-819b-a8f1-e01d2fd13bbc",
+      "34823867-60c2-811d-8619-c06e4fadd7ab",
+      "34823867-60c2-81aa-be00-e0366ed93ae4"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81a8-b5bd-e4710bc7e5c1"
+    ],
+    "parentId": "34823867-60c2-81ba-853c-d01adbd6bee3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-03",
+    "refEnd": "2026-12-03"
+  },
+  {
+    "id": "34823867-60c2-8159-a118-d21ea3ae505f",
+    "name": "Client Review Round 2: SAP",
+    "start": "2027-01-21",
+    "end": "2027-01-29",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f7-93d2-fec1cbec540e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f1-b88b-d7620f101f6a"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-01-21",
+    "refEnd": "2027-01-29"
+  },
+  {
+    "id": "34823867-60c2-8199-afa2-c79af4b711b3",
+    "name": "         Configure & Test  First Site(s)",
+    "start": "2027-01-11",
+    "end": "2027-01-25",
+    "duration": 11,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8196-a0c6-e46ba0431b64"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81db-9316-e789ccf5c844"
+    ],
+    "parentId": "34823867-60c2-8178-909e-c8c46cab481f",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-01-11",
+    "refEnd": "2027-01-25"
+  },
+  {
+    "id": "34823867-60c2-816f-8fa0-cb3800d45d2d",
+    "name": "Launch Readiness Gate",
+    "start": "2026-12-01",
+    "end": "2026-12-02",
+    "duration": 2,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8188-92a9-f5eec4545bdd"
+    ],
+    "blockingIds": [
+      "34823867-60c2-814e-82c4-cfe85cc35f97"
+    ],
+    "parentId": "34823867-60c2-81ba-853c-d01adbd6bee3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-01",
+    "refEnd": "2026-12-02"
+  },
+  {
+    "id": "34823867-60c2-81f7-93d2-fec1cbec540e",
+    "name": "Internal Revisions Round 1: SAP",
+    "start": "2027-01-01",
+    "end": "2027-01-20",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81ba-9bed-f524e1123e88"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8159-a118-d21ea3ae505f"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-01-01",
+    "refEnd": "2027-01-20"
+  },
+  {
+    "id": "34823867-60c2-8196-a0c6-e46ba0431b64",
+    "name": "          First  Site(s) IRB Approval",
+    "start": "2026-12-21",
+    "end": "2027-01-08",
+    "duration": 15,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-816a-93a5-d6cf239f6cf4"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8199-afa2-c79af4b711b3"
+    ],
+    "parentId": "34823867-60c2-8178-909e-c8c46cab481f",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-21",
+    "refEnd": "2027-01-08"
+  },
+  {
+    "id": "34823867-60c2-810c-b5f3-da670f603d97",
+    "name": "Initial Delivery Config",
+    "start": "2027-04-01",
+    "end": "2027-04-23",
+    "duration": 17,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8188-a653-e6caf05d14b9"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8152-b22d-f0626ded553a"
+    ],
+    "parentId": "34823867-60c2-811e-b561-f42abd72e781",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-04-01",
+    "refEnd": "2027-04-23"
+  },
+  {
+    "id": "34823867-60c2-81ba-9bed-f524e1123e88",
+    "name": "Client Review Round 1: SAP",
+    "start": "2026-12-14",
+    "end": "2026-12-31",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-815b-b413-ea1e2d877ebf"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f7-93d2-fec1cbec540e"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-14",
+    "refEnd": "2026-12-31"
+  },
+  {
+    "id": "34823867-60c2-8108-9089-fdaff6ccdf63",
+    "name": "Document IRB Approval",
+    "start": "2026-11-13",
+    "end": "2026-11-13",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81e0-be53-c25dc5f5804f"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8128-bd23-c650ddaba30a",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-11-13",
+    "refEnd": "2026-11-13"
+  },
+  {
+    "id": "34823867-60c2-816a-93a5-d6cf239f6cf4",
+    "name": "         First  Site(s) IRB Submission",
+    "start": "2026-12-18",
+    "end": "2026-12-18",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8133-a2fc-e78f678925a1",
+      "34823867-60c2-81e0-be53-c25dc5f5804f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8196-a0c6-e46ba0431b64"
+    ],
+    "parentId": "34823867-60c2-8178-909e-c8c46cab481f",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-18",
+    "refEnd": "2026-12-18"
+  },
+  {
+    "id": "34823867-60c2-810e-bff2-f6abc6a4826a",
+    "name": "Post-Approval Config & Testing Check",
+    "start": "2026-11-13",
+    "end": "2026-11-18",
+    "duration": 4,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926",
+      "34823867-60c2-81e0-be53-c25dc5f5804f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8188-92a9-f5eec4545bdd"
+    ],
+    "parentId": "34823867-60c2-8168-872b-c8eafd180892",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-11-13",
+    "refEnd": "2026-11-18"
+  },
+  {
+    "id": "34823867-60c2-8188-a653-e6caf05d14b9",
+    "name": "Study Specific QC Rule Programming",
+    "start": "2027-03-16",
+    "end": "2027-03-31",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81cd-99cc-decd40fdc781"
+    ],
+    "blockingIds": [
+      "34823867-60c2-810c-b5f3-da670f603d97"
+    ],
+    "parentId": "34823867-60c2-8122-94bf-f425f5904171",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-03-16",
+    "refEnd": "2027-03-31"
+  },
+  {
+    "id": "34823867-60c2-815b-b413-ea1e2d877ebf",
+    "name": "         Internal Review & Revisions of Draft SAP",
+    "start": "2026-11-30",
+    "end": "2026-12-11",
+    "duration": 10,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8114-957d-fcc0fef3369d"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81ba-9bed-f524e1123e88"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-11-30",
+    "refEnd": "2026-12-11"
+  },
+  {
+    "id": "34823867-60c2-81e0-be53-c25dc5f5804f",
+    "name": "IRB Review & Approval",
+    "start": "2026-10-23",
+    "end": "2026-11-12",
+    "duration": 15,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8133-a948-ff9a1235dc8d"
+    ],
+    "blockingIds": [
+      "34823867-60c2-816a-93a5-d6cf239f6cf4",
+      "34823867-60c2-8108-9089-fdaff6ccdf63",
+      "34823867-60c2-810e-bff2-f6abc6a4826a"
+    ],
+    "parentId": "34823867-60c2-8128-bd23-c650ddaba30a",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-23",
+    "refEnd": "2026-11-12"
+  },
+  {
+    "id": "34823867-60c2-81cd-99cc-decd40fdc781",
+    "name": "Study Specific QC Rule Development",
+    "start": "2027-02-25",
+    "end": "2027-03-15",
+    "duration": 13,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8188-9a07-e7ebe87f7b80"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8150-a211-faf4d7f88db8",
+      "34823867-60c2-8188-a653-e6caf05d14b9"
+    ],
+    "parentId": "34823867-60c2-8122-94bf-f425f5904171",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-02-25",
+    "refEnd": "2027-03-15"
+  },
+  {
+    "id": "34823867-60c2-8114-957d-fcc0fef3369d",
+    "name": "Draft v1 SAP",
+    "start": "2026-10-20",
+    "end": "2026-11-27",
+    "duration": 29,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-810d-b760-eb1909a6f020"
+    ],
+    "blockingIds": [
+      "34823867-60c2-815b-b413-ea1e2d877ebf"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-20",
+    "refEnd": "2026-11-27"
+  },
+  {
+    "id": "34823867-60c2-8133-a948-ff9a1235dc8d",
+    "name": "Submit IRB",
+    "start": "2026-10-22",
+    "end": "2026-10-22",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8136-bd35-c7286dd0cbd4"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81e0-be53-c25dc5f5804f"
+    ],
+    "parentId": "34823867-60c2-8128-bd23-c650ddaba30a",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-22",
+    "refEnd": "2026-10-22"
+  },
+  {
+    "id": "34823867-60c2-81f5-98d7-ffc8459ea926",
+    "name": "Internal Testing",
+    "start": "2026-11-02",
+    "end": "2026-11-11",
+    "duration": 8,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81c7-938f-ff949a7b4542",
+      "34823867-60c2-8149-8a3b-e4e7cf29d0af",
+      "34823867-60c2-81ca-b288-e12a6910b37a",
+      "34823867-60c2-81c7-9167-edca07c66767",
+      "34823867-60c2-8143-b702-d577e40cb2f6",
+      "34823867-60c2-81a3-86cf-c9582829b31e",
+      "34823867-60c2-819a-a1c6-fe4283f31935",
+      "34823867-60c2-8171-80cd-ce23651c593b",
+      "34823867-60c2-81e4-961a-e4dd9cdcfb6a",
+      "34823867-60c2-8162-baff-d96e5e29e715",
+      "34823867-60c2-81b9-9b9b-e1c9c2f828ef",
+      "34823867-60c2-8182-a17b-c52715e96f1f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-810e-bff2-f6abc6a4826a"
+    ],
+    "parentId": "34823867-60c2-8168-872b-c8eafd180892",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-11-02",
+    "refEnd": "2026-11-11"
+  },
+  {
+    "id": "34823867-60c2-8170-ae55-d3e267d67cc2",
+    "name": "         Data Transfer Agreement",
+    "start": "2026-09-30",
+    "end": "2026-11-25",
+    "duration": 41,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81da-8333-f374842cb9c0"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8122-94bf-f425f5904171",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-30",
+    "refEnd": "2026-11-25"
+  },
+  {
+    "id": "34823867-60c2-8188-9a07-e7ebe87f7b80",
+    "name": "CRF Configuration & Guidelines",
+    "start": "2026-10-06",
+    "end": "2027-02-24",
+    "duration": 102,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81af-a036-dce72fe83adc"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81cd-99cc-decd40fdc781"
+    ],
+    "parentId": "34823867-60c2-8122-94bf-f425f5904171",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-06",
+    "refEnd": "2027-02-24"
+  },
+  {
+    "id": "34823867-60c2-810d-b760-eb1909a6f020",
+    "name": "SAP Kickoff Meeting Window",
+    "start": "2026-10-15",
+    "end": "2026-10-19",
+    "duration": 3,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8114-957d-fcc0fef3369d"
+    ],
+    "parentId": "34823867-60c2-8121-b428-c72a8143adc6",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-19"
+  },
+  {
+    "id": "34823867-60c2-8136-bd35-c7286dd0cbd4",
+    "name": "Prepare for IRB Submission",
+    "start": "2026-10-15",
+    "end": "2026-10-21",
+    "duration": 5,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8133-a948-ff9a1235dc8d"
+    ],
+    "parentId": "34823867-60c2-8107-968b-fc18836f4b6e",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-21"
+  },
+  {
+    "id": "34823867-60c2-81c7-9167-edca07c66767",
+    "name": "Activities Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-8162-baff-d96e5e29e715",
+    "name": "Study Notifications Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-819a-a1c6-fe4283f31935",
+    "name": "Wearables (if applicable)",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-81c7-938f-ff949a7b4542",
+    "name": "SoA Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8184-b9c4-cace0451cdfc",
+      "34823867-60c2-811a-a2c1-e1070f3dbab3",
+      "34823867-60c2-811d-8b53-ca2aad9a6441"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-8182-a17b-c52715e96f1f",
+    "name": "Sponsor & Site Portal Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-8149-8a3b-e4e7cf29d0af",
+    "name": "Dataset Components Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8157-9979-eb486af6d8bb",
+      "34823867-60c2-811a-a2c1-e1070f3dbab3",
+      "34823867-60c2-811d-8b53-ca2aad9a6441"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-81e4-961a-e4dd9cdcfb6a",
+    "name": "Surveys / ePROs Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-8143-b702-d577e40cb2f6",
+    "name": "Remote visits (if applicable)",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-81ca-b288-e12a6910b37a",
+    "name": "Onboarding Flow Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811d-8b53-ca2aad9a6441",
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-81d6-9bfc-ce070f5a2bc7",
+    "name": "         Data Management Plan",
+    "start": "2026-09-21",
+    "end": "2026-11-27",
+    "duration": 50,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-819b-9bcc-e5212921b495"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8122-94bf-f425f5904171",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-21",
+    "refEnd": "2026-11-27"
+  },
+  {
+    "id": "34823867-60c2-81b9-9b9b-e1c9c2f828ef",
+    "name": "Consent / Assent Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-810c-a385-e7c336cb8d74",
+    "name": "Configure & Implement Retrieval Guide",
+    "start": "2026-10-05",
+    "end": "2026-10-13",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8185-826d-e3aecd207c5a"
+    ],
+    "blockingIds": [
+      "34823867-60c2-814e-82c4-cfe85cc35f97"
+    ],
+    "parentId": "34823867-60c2-817a-9e26-f9a1cdf1fade",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-05",
+    "refEnd": "2026-10-13"
+  },
+  {
+    "id": "34823867-60c2-8171-80cd-ce23651c593b",
+    "name": "Landing Page Configuration",
+    "start": "2026-10-15",
+    "end": "2026-10-30",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-15",
+    "refEnd": "2026-10-30"
+  },
+  {
+    "id": "34823867-60c2-811a-a2c1-e1070f3dbab3",
+    "name": "Round 3/Customer Committee Review & Signatures",
+    "start": "2026-09-25",
+    "end": "2026-10-14",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81cf-a3b2-d8c1e395dd60",
+      "34823867-60c2-8158-ab7b-e8ed492b7ecd"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8149-8a3b-e4e7cf29d0af",
+      "34823867-60c2-8162-baff-d96e5e29e715",
+      "34823867-60c2-81e4-961a-e4dd9cdcfb6a",
+      "34823867-60c2-8182-a17b-c52715e96f1f",
+      "34823867-60c2-819a-a1c6-fe4283f31935",
+      "34823867-60c2-81b9-9b9b-e1c9c2f828ef",
+      "34823867-60c2-8136-bd35-c7286dd0cbd4",
+      "34823867-60c2-8143-b702-d577e40cb2f6",
+      "34823867-60c2-81c7-9167-edca07c66767",
+      "34823867-60c2-8171-80cd-ce23651c593b",
+      "34823867-60c2-81c7-938f-ff949a7b4542",
+      "34823867-60c2-810d-b760-eb1909a6f020",
+      "34823867-60c2-81ca-b288-e12a6910b37a"
+    ],
+    "parentId": "34823867-60c2-8107-968b-fc18836f4b6e",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-25",
+    "refEnd": "2026-10-14"
+  },
+  {
+    "id": "34823867-60c2-81da-8333-f374842cb9c0",
+    "name": "Data Dictionary",
+    "start": "2026-09-21",
+    "end": "2026-09-29",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-819b-9bcc-e5212921b495"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8170-ae55-d3e267d67cc2"
+    ],
+    "parentId": "34823867-60c2-8122-94bf-f425f5904171",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-21",
+    "refEnd": "2026-09-29"
+  },
+  {
+    "id": "34823867-60c2-81af-a036-dce72fe83adc",
+    "name": "Code List",
+    "start": "2026-09-21",
+    "end": "2026-10-05",
+    "duration": 11,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-819b-9bcc-e5212921b495"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8188-9a07-e7ebe87f7b80"
+    ],
+    "parentId": "34823867-60c2-8122-94bf-f425f5904171",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-21",
+    "refEnd": "2026-10-05"
+  },
+  {
+    "id": "34823867-60c2-8185-826d-e3aecd207c5a",
+    "name": "Create Retrieval Guide",
+    "start": "2026-09-24",
+    "end": "2026-10-02",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8157-9979-eb486af6d8bb",
+      "34823867-60c2-81df-8ab7-f97fb662f839"
+    ],
+    "blockingIds": [
+      "34823867-60c2-810c-a385-e7c336cb8d74"
+    ],
+    "parentId": "34823867-60c2-817a-9e26-f9a1cdf1fade",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-24",
+    "refEnd": "2026-10-02"
+  },
+  {
+    "id": "34823867-60c2-819b-9bcc-e5212921b495",
+    "name": "Notify CDQ Manager of Data Model Completion (Code List Handoff)",
+    "start": "2026-09-18",
+    "end": "2026-09-18",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8150-a7de-c07a7f87ad04"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81af-a036-dce72fe83adc",
+      "34823867-60c2-81d6-9bfc-ce070f5a2bc7",
+      "34823867-60c2-81da-8333-f374842cb9c0"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-18",
+    "refEnd": "2026-09-18"
+  },
+  {
+    "id": "34823867-60c2-8184-91fc-e89a329d5354",
+    "name": "Internal Revisions Round 1: Patient Materials",
+    "start": "2026-08-05",
+    "end": "2026-08-20",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f5-895c-f02869a9a4d7"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8163-83d9-d2bb895bb997"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-05",
+    "refEnd": "2026-08-20"
+  },
+  {
+    "id": "34823867-60c2-81a3-86cf-c9582829b31e",
+    "name": "Develop Test Plan and Test Cases",
+    "start": "2026-09-24",
+    "end": "2026-10-05",
+    "duration": 8,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81df-8ab7-f97fb662f839"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-98d7-ffc8459ea926"
+    ],
+    "parentId": "34823867-60c2-8168-872b-c8eafd180892",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-24",
+    "refEnd": "2026-10-05"
+  },
+  {
+    "id": "34823867-60c2-81cf-a3b2-d8c1e395dd60",
+    "name": "Leadership Review of Patient Facing Materials",
+    "start": "2026-09-24",
+    "end": "2026-09-24",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81d4-b2d9-f588217f3420"
+    ],
+    "blockingIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-24",
+    "refEnd": "2026-09-24"
+  },
+  {
+    "id": "34823867-60c2-8150-a7de-c07a7f87ad04",
+    "name": "Customer Approval on Data Model (v1.0) and Dataset Components ",
+    "start": "2026-09-17",
+    "end": "2026-09-17",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-814c-9e1e-e3253c7d2016"
+    ],
+    "blockingIds": [
+      "34823867-60c2-819b-9bcc-e5212921b495",
+      "34823867-60c2-81de-ac19-e7963ff0fe1b"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-17",
+    "refEnd": "2026-09-17"
+  },
+  {
+    "id": "34823867-60c2-81d4-b2d9-f588217f3420",
+    "name": "Project Management Review  & Revisions of Patient Facing Materials",
+    "start": "2026-09-16",
+    "end": "2026-09-23",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8194-828c-e30336a02ee5"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81cf-a3b2-d8c1e395dd60"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-16",
+    "refEnd": "2026-09-23"
+  },
+  {
+    "id": "34823867-60c2-81df-8ab7-f97fb662f839",
+    "name": "Testing Planning",
+    "start": "2026-09-16",
+    "end": "2026-09-23",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81ae-bf3f-eb86c6e752ce",
+      "34823867-60c2-81b1-8093-f4b28165d211",
+      "34823867-60c2-8194-828c-e30336a02ee5"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81a3-86cf-c9582829b31e",
+      "34823867-60c2-8185-826d-e3aecd207c5a"
+    ],
+    "parentId": "34823867-60c2-8190-844e-e4e98ff05521",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-16",
+    "refEnd": "2026-09-23"
+  },
+  {
+    "id": "34823867-60c2-8158-ab7b-e8ed492b7ecd",
+    "name": "Internal Revisions Round 2: ICF",
+    "start": "2026-09-07",
+    "end": "2026-09-15",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81d7-8565-f6050f30c53d"
+    ],
+    "blockingIds": [
+      "34823867-60c2-811a-a2c1-e1070f3dbab3"
+    ],
+    "parentId": "34823867-60c2-8170-a544-cd4bd52e0ed3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-07",
+    "refEnd": "2026-09-15"
+  },
+  {
+    "id": "34823867-60c2-814c-9e1e-e3253c7d2016",
+    "name": "Internal Revisions Round 2: Data Model",
+    "start": "2026-09-08",
+    "end": "2026-09-16",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81b1-8093-f4b28165d211"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8150-a7de-c07a7f87ad04"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-08",
+    "refEnd": "2026-09-16"
+  },
+  {
+    "id": "34823867-60c2-811d-8b53-ca2aad9a6441",
+    "name": "Qualification (I/E) Configuration & Completion Guidelines",
+    "start": "2026-09-01",
+    "end": "2026-09-21",
+    "duration": 15,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818c-bb21-fcaa78ae3761"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8149-8a3b-e4e7cf29d0af",
+      "34823867-60c2-81c7-938f-ff949a7b4542",
+      "34823867-60c2-81ca-b288-e12a6910b37a"
+    ],
+    "parentId": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-01",
+    "refEnd": "2026-09-21"
+  },
+  {
+    "id": "34823867-60c2-81ae-bf3f-eb86c6e752ce",
+    "name": "Configuration Planning",
+    "start": "2026-08-10",
+    "end": "2026-08-14",
+    "duration": 5,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81df-8980-f0e67aded8e8"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81df-8ab7-f97fb662f839",
+      "34823867-60c2-818c-bb21-fcaa78ae3761"
+    ],
+    "parentId": "34823867-60c2-8190-844e-e4e98ff05521",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-10",
+    "refEnd": "2026-08-14"
+  },
+  {
+    "id": "34823867-60c2-81bf-9af0-f8f51f0d03ef",
+    "name": "Internal Revisions Round 2: Patient Materials",
+    "start": "2026-09-01",
+    "end": "2026-09-04",
+    "duration": 4,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8163-83d9-d2bb895bb997",
+      "34823867-60c2-81df-8980-f0e67aded8e8"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8194-828c-e30336a02ee5"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-01",
+    "refEnd": "2026-09-04"
+  },
+  {
+    "id": "34823867-60c2-8194-828c-e30336a02ee5",
+    "name": "Round 2: Creation of Mockups",
+    "start": "2026-09-07",
+    "end": "2026-09-15",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81bf-9af0-f8f51f0d03ef"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81d4-b2d9-f588217f3420",
+      "34823867-60c2-81df-8ab7-f97fb662f839"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-07",
+    "refEnd": "2026-09-15"
+  },
+  {
+    "id": "34823867-60c2-81b1-8093-f4b28165d211",
+    "name": "Client Review Round 2: Data Model",
+    "start": "2026-08-28",
+    "end": "2026-09-07",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81e6-8b2f-d2d2c76120ff"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81df-8ab7-f97fb662f839",
+      "34823867-60c2-814c-9e1e-e3253c7d2016"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-28",
+    "refEnd": "2026-09-07"
+  },
+  {
+    "id": "34823867-60c2-818b-af43-d28300982e8d",
+    "name": "Draft ICF",
+    "start": "2026-07-01",
+    "end": "2026-07-09",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81e8-87a6-e94cc6ee053e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8107-a299-c77720126b5f"
+    ],
+    "parentId": "34823867-60c2-8170-a544-cd4bd52e0ed3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-01",
+    "refEnd": "2026-07-09"
+  },
+  {
+    "id": "34823867-60c2-81df-8980-f0e67aded8e8",
+    "name": "Internal Revisions Round 2: Protocol",
+    "start": "2026-07-30",
+    "end": "2026-08-07",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8120-8c49-cbf0d4ba6566"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81bf-9af0-f8f51f0d03ef",
+      "34823867-60c2-81d7-8565-f6050f30c53d",
+      "34823867-60c2-81ae-bf3f-eb86c6e752ce"
+    ],
+    "parentId": "34823867-60c2-8170-8e8d-dd335455807d",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-30",
+    "refEnd": "2026-08-07"
+  },
+  {
+    "id": "34823867-60c2-813b-8e5e-fbb5b92352e0",
+    "name": "Internal Clinical Review & Revisions of Draft Data Model",
+    "start": "2026-07-17",
+    "end": "2026-07-22",
+    "duration": 4,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8157-9979-eb486af6d8bb"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8164-81e8-e3899b1ce44d"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-17",
+    "refEnd": "2026-07-22"
+  },
+  {
+    "id": "34823867-60c2-818c-bb21-fcaa78ae3761",
+    "name": "Finalize I/Es and Onboarding Questions",
+    "start": "2026-08-17",
+    "end": "2026-08-31",
+    "duration": 11,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81ae-bf3f-eb86c6e752ce",
+      "34823867-60c2-8157-9979-eb486af6d8bb"
+    ],
+    "blockingIds": [
+      "34823867-60c2-811d-8b53-ca2aad9a6441"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-17",
+    "refEnd": "2026-08-31"
+  },
+  {
+    "id": "34823867-60c2-81d7-8565-f6050f30c53d",
+    "name": "Client Review Round 2: ICF",
+    "start": "2026-08-27",
+    "end": "2026-09-04",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8177-877b-e421432a7977",
+      "34823867-60c2-81df-8980-f0e67aded8e8"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8158-ab7b-e8ed492b7ecd"
+    ],
+    "parentId": "34823867-60c2-8170-a544-cd4bd52e0ed3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-27",
+    "refEnd": "2026-09-04"
+  },
+  {
+    "id": "34823867-60c2-8177-877b-e421432a7977",
+    "name": "Internal Revisions Round 1: ICF",
+    "start": "2026-08-10",
+    "end": "2026-08-26",
+    "duration": 13,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81d9-bb62-c3bf718defcf"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81d7-8565-f6050f30c53d"
+    ],
+    "parentId": "34823867-60c2-8170-a544-cd4bd52e0ed3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-10",
+    "refEnd": "2026-08-26"
+  },
+  {
+    "id": "34823867-60c2-81e6-8b2f-d2d2c76120ff",
+    "name": "Internal Revisions Round 1: Data Model",
+    "start": "2026-08-11",
+    "end": "2026-08-27",
+    "duration": 13,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8164-81e8-e3899b1ce44d"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81b1-8093-f4b28165d211"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-11",
+    "refEnd": "2026-08-27"
+  },
+  {
+    "id": "34823867-60c2-8163-83d9-d2bb895bb997",
+    "name": "Client Review Round 2: Patient Materials",
+    "start": "2026-08-21",
+    "end": "2026-08-31",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8184-91fc-e89a329d5354"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81bf-9af0-f8f51f0d03ef"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-21",
+    "refEnd": "2026-08-31"
+  },
+  {
+    "id": "34823867-60c2-81d9-bb62-c3bf718defcf",
+    "name": "Client Review Round 1: ICF",
+    "start": "2026-07-21",
+    "end": "2026-08-07",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8107-a299-c77720126b5f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8177-877b-e421432a7977"
+    ],
+    "parentId": "34823867-60c2-8170-a544-cd4bd52e0ed3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-21",
+    "refEnd": "2026-08-07"
+  },
+  {
+    "id": "34823867-60c2-8164-81e8-e3899b1ce44d",
+    "name": "Client Review Round 1: Data Model",
+    "start": "2026-07-23",
+    "end": "2026-08-10",
+    "duration": 13,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-813b-8e5e-fbb5b92352e0"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81e6-8b2f-d2d2c76120ff"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-23",
+    "refEnd": "2026-08-10"
+  },
+  {
+    "id": "34823867-60c2-8107-a299-c77720126b5f",
+    "name": "Initial Internal ICF Draft Reviews & Revisions",
+    "start": "2026-07-10",
+    "end": "2026-07-20",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818b-af43-d28300982e8d"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81d9-bb62-c3bf718defcf"
+    ],
+    "parentId": "34823867-60c2-8170-a544-cd4bd52e0ed3",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-10",
+    "refEnd": "2026-07-20"
+  },
+  {
+    "id": "34823867-60c2-81f5-895c-f02869a9a4d7",
+    "name": "Client Review Round 1: Patient Materials",
+    "start": "2026-07-20",
+    "end": "2026-08-04",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8171-ae81-d11b03979960"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8184-91fc-e89a329d5354"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-20",
+    "refEnd": "2026-08-04"
+  },
+  {
+    "id": "34823867-60c2-8153-ad72-d1564a92fbf4",
+    "name": "Internal Revisions Round 1: Protocol",
+    "start": "2026-07-01",
+    "end": "2026-07-20",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81e8-87a6-e94cc6ee053e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8120-8c49-cbf0d4ba6566"
+    ],
+    "parentId": "34823867-60c2-8170-8e8d-dd335455807d",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-01",
+    "refEnd": "2026-07-20"
+  },
+  {
+    "id": "34823867-60c2-8134-83e0-dea62917f90c",
+    "name": "Additional Site(s) Activated",
+    "start": "2027-07-06",
+    "end": "2027-07-06",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81c9-8efc-cb124bcabe74"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-07-06",
+    "refEnd": "2027-07-06"
+  },
+  {
+    "id": "34823867-60c2-8157-9979-eb486af6d8bb",
+    "name": "Draft Data Model & Dataset Components",
+    "start": "2026-07-01",
+    "end": "2026-07-16",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81e8-87a6-e94cc6ee053e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8149-8a3b-e4e7cf29d0af",
+      "34823867-60c2-813b-8e5e-fbb5b92352e0",
+      "34823867-60c2-8185-826d-e3aecd207c5a",
+      "34823867-60c2-818c-bb21-fcaa78ae3761"
+    ],
+    "parentId": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-01",
+    "refEnd": "2026-07-16"
+  },
+  {
+    "id": "34823867-60c2-8171-ae81-d11b03979960",
+    "name": "Initial Internal Review & Revisions of Draft Patient Materials",
+    "start": "2026-07-13",
+    "end": "2026-07-17",
+    "duration": 5,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-812f-83e1-d611ec0fcba1",
+      "34823867-60c2-81e8-87a6-e94cc6ee053e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81f5-895c-f02869a9a4d7"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-13",
+    "refEnd": "2026-07-17"
+  },
+  {
+    "id": "34823867-60c2-8120-8c49-cbf0d4ba6566",
+    "name": "Client Review Round 2: Protocol",
+    "start": "2026-07-21",
+    "end": "2026-07-29",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8153-ad72-d1564a92fbf4"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81df-8980-f0e67aded8e8"
+    ],
+    "parentId": "34823867-60c2-8170-8e8d-dd335455807d",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-21",
+    "refEnd": "2026-07-29"
+  },
+  {
+    "id": "34823867-60c2-81ef-9f16-ff8cc6d66c7c",
+    "name": "Last Site(s) Activated",
+    "start": "2028-08-24",
+    "end": "2028-08-24",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81c5-9595-c664732722f6"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81ac-9274-d1842768af55",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-08-24",
+    "refEnd": "2028-08-24"
+  },
+  {
+    "id": "34823867-60c2-81e8-87a6-e94cc6ee053e",
+    "name": "Client Review Round 1: Protocol",
+    "start": "2026-06-11",
+    "end": "2026-06-30",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8118-a2f8-d888831a35c1"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8153-ad72-d1564a92fbf4",
+      "34823867-60c2-818b-af43-d28300982e8d",
+      "34823867-60c2-8157-9979-eb486af6d8bb",
+      "34823867-60c2-8171-ae81-d11b03979960"
+    ],
+    "parentId": "34823867-60c2-8170-8e8d-dd335455807d",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-06-11",
+    "refEnd": "2026-06-30"
+  },
+  {
+    "id": "34823867-60c2-8149-ae02-cebf81cc7287",
+    "name": "Final Data Delivery #",
+    "start": "2033-08-10",
+    "end": "2033-08-29",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8132-bb69-ec4d34c865c4"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-08-10",
+    "refEnd": "2033-08-29"
+  },
+  {
+    "id": "34823867-60c2-81c9-8efc-cb124bcabe74",
+    "name": "Configure & Test Additional Site(s)",
+    "start": "2027-06-21",
+    "end": "2027-07-05",
+    "duration": 11,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8114-9b59-cc575f138be6"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8134-83e0-dea62917f90c"
+    ],
+    "parentId": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-06-21",
+    "refEnd": "2027-07-05"
+  },
+  {
+    "id": "34823867-60c2-81c5-9595-c664732722f6",
+    "name": "         Configure & Test Last Site(s)",
+    "start": "2028-08-08",
+    "end": "2028-08-23",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8182-953c-c2341a733f5f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81ef-9f16-ff8cc6d66c7c"
+    ],
+    "parentId": "34823867-60c2-81ac-9274-d1842768af55",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-08-08",
+    "refEnd": "2028-08-23"
+  },
+  {
+    "id": "34823867-60c2-81da-bea7-d1fc6e846fd9",
+    "name": "Data Delivery #2",
+    "start": "2028-01-06",
+    "end": "2028-01-06",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-813f-9e63-ec20bf1225a4"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-01-06",
+    "refEnd": "2028-01-06"
+  },
+  {
+    "id": "34823867-60c2-8111-9813-cb8abe556b15",
+    "name": "        Last Site(s) IRB Submission",
+    "start": "2028-07-17",
+    "end": "2028-07-17",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-815a-aae1-ca6865b7225e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8182-953c-c2341a733f5f"
+    ],
+    "parentId": "34823867-60c2-81ac-9274-d1842768af55",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-07-17",
+    "refEnd": "2028-07-17"
+  },
+  {
+    "id": "34823867-60c2-8184-b9c4-cace0451cdfc",
+    "name": "Finalize SoA and Journey Map",
+    "start": "2026-06-16",
+    "end": "2026-06-24",
+    "duration": 7,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81fa-8033-cb5b572b193e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81c7-938f-ff949a7b4542"
+    ],
+    "parentId": "34823867-60c2-81fd-a21a-cc1f07e6032b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-06-16",
+    "refEnd": "2026-06-24"
+  },
+  {
+    "id": "34823867-60c2-8132-bb69-ec4d34c865c4",
+    "name": "Delivery QC (final)",
+    "start": "2033-07-19",
+    "end": "2033-08-09",
+    "duration": 16,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-810f-afac-c1db54c5f823"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8149-ae02-cebf81cc7287"
+    ],
+    "parentId": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-07-19",
+    "refEnd": "2033-08-09"
+  },
+  {
+    "id": "34823867-60c2-8118-a2f8-d888831a35c1",
+    "name": "Initial Internal Review & Revisions of Draft Protocol",
+    "start": "2026-06-03",
+    "end": "2026-06-10",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8129-af0f-fb4f4f4e4af5"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81e8-87a6-e94cc6ee053e"
+    ],
+    "parentId": "34823867-60c2-8170-8e8d-dd335455807d",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-06-03",
+    "refEnd": "2026-06-10"
+  },
+  {
+    "id": "34823867-60c2-8123-be1b-f72ccdf7d76a",
+    "name": "Archive Study",
+    "start": "2033-11-15",
+    "end": "2033-11-17",
+    "duration": 3,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8133-b367-ca1ea5118ba3"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8177-8eb8-d1366163a81b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-11-15",
+    "refEnd": "2033-11-17"
+  },
+  {
+    "id": "34823867-60c2-813f-9e63-ec20bf1225a4",
+    "name": "Repeat QC",
+    "start": "2027-12-10",
+    "end": "2028-01-05",
+    "duration": 19,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8164-99a6-e0668b8e2e0a"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81da-bea7-d1fc6e846fd9"
+    ],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-10",
+    "refEnd": "2028-01-05"
+  },
+  {
+    "id": "34823867-60c2-81fa-8033-cb5b572b193e",
+    "name": "Draft SoA",
+    "start": "2026-06-09",
+    "end": "2026-06-15",
+    "duration": 5,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81ab-9eb6-d95391f49bfa"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8184-b9c4-cace0451cdfc"
+    ],
+    "parentId": "34823867-60c2-81fd-a21a-cc1f07e6032b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-06-09",
+    "refEnd": "2026-06-15"
+  },
+  {
+    "id": "34823867-60c2-8129-af0f-fb4f4f4e4af5",
+    "name": "Draft Protocol (v0.1)",
+    "start": "2026-05-26",
+    "end": "2026-06-02",
+    "duration": 6,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81fd-9311-ca1eed471bf9"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8118-a2f8-d888831a35c1"
+    ],
+    "parentId": "34823867-60c2-8170-8e8d-dd335455807d",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-26",
+    "refEnd": "2026-06-02"
+  },
+  {
+    "id": "34823867-60c2-8114-9b59-cc575f138be6",
+    "name": "Additional Site(s) IRB Approval",
+    "start": "2027-05-31",
+    "end": "2027-06-18",
+    "duration": 15,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8152-8438-fd21f7c9bd77"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81c9-8efc-cb124bcabe74"
+    ],
+    "parentId": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-05-31",
+    "refEnd": "2027-06-18"
+  },
+  {
+    "id": "34823867-60c2-8182-953c-c2341a733f5f",
+    "name": "        Last Site(s) IRB Approval",
+    "start": "2028-07-18",
+    "end": "2028-08-07",
+    "duration": 15,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8111-9813-cb8abe556b15"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81c5-9595-c664732722f6"
+    ],
+    "parentId": "34823867-60c2-81ac-9274-d1842768af55",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-07-18",
+    "refEnd": "2028-08-07"
+  },
+  {
+    "id": "34823867-60c2-812f-83e1-d611ec0fcba1",
+    "name": "Draft Patient Facing Materials",
+    "start": "2026-06-08",
+    "end": "2026-07-10",
+    "duration": 25,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8168-b447-cc1fb6f4fa18"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8171-ae81-d11b03979960"
+    ],
+    "parentId": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-06-08",
+    "refEnd": "2026-07-10"
+  },
+  {
+    "id": "34823867-60c2-8148-b15b-f1ffcb74223c",
+    "name": "Study Team CVs & Training Documentation (Required)",
+    "start": "2026-05-08",
+    "end": "2026-10-14",
+    "duration": 114,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [
+      "34823867-60c2-814e-82c4-cfe85cc35f97"
+    ],
+    "parentId": "34823867-60c2-81b6-99a4-f06852aa82cb",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-10-14"
+  },
+  {
+    "id": "34823867-60c2-8133-b367-ca1ea5118ba3",
+    "name": "Sites IRB Closure",
+    "start": "2033-10-28",
+    "end": "2033-11-14",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81ad-b0f4-fd28569f7d34"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8123-be1b-f72ccdf7d76a"
+    ],
+    "parentId": "34823867-60c2-8177-8eb8-d1366163a81b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-10-28",
+    "refEnd": "2033-11-14"
+  },
+  {
+    "id": "34823867-60c2-8171-8c73-f56cf981b674",
+    "name": "Confirm delivery method window (final)",
+    "start": "2033-06-08",
+    "end": "2033-06-30",
+    "duration": 17,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81a4-a702-cb6a3ebe61f2"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-06-08",
+    "refEnd": "2033-06-30"
+  },
+  {
+    "id": "34823867-60c2-810f-afac-c1db54c5f823",
+    "name": "Abstraction (final)",
+    "start": "2033-06-08",
+    "end": "2033-07-18",
+    "duration": 29,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81a4-a702-cb6a3ebe61f2"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8132-bb69-ec4d34c865c4"
+    ],
+    "parentId": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-06-08",
+    "refEnd": "2033-07-18"
+  },
+  {
+    "id": "34823867-60c2-8164-99a6-e0668b8e2e0a",
+    "name": "Repeat Abstraction",
+    "start": "2027-10-26",
+    "end": "2027-12-09",
+    "duration": 33,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8102-a6de-fe7bffcebc3e"
+    ],
+    "blockingIds": [
+      "34823867-60c2-813f-9e63-ec20bf1225a4"
+    ],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-10-26",
+    "refEnd": "2027-12-09"
+  },
+  {
+    "id": "34823867-60c2-8106-8d89-dc38a24517e7",
+    "name": "Confirm delivery method window ",
+    "start": "2027-10-26",
+    "end": "2027-11-29",
+    "duration": 25,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8102-a6de-fe7bffcebc3e"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-10-26",
+    "refEnd": "2027-11-29"
+  },
+  {
+    "id": "34823867-60c2-8152-8438-fd21f7c9bd77",
+    "name": "Additional Site(s) IRB Submission",
+    "start": "2027-05-28",
+    "end": "2027-05-28",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-816c-b85d-c332b20ed2a3"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8114-9b59-cc575f138be6"
+    ],
+    "parentId": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-05-28",
+    "refEnd": "2027-05-28"
+  },
+  {
+    "id": "34823867-60c2-81aa-be00-e0366ed93ae4",
+    "name": "Patient Experience Document (Required)",
+    "start": "2026-05-08",
+    "end": "2026-10-14",
+    "duration": 114,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [
+      "34823867-60c2-814e-82c4-cfe85cc35f97"
+    ],
+    "parentId": "34823867-60c2-81b6-99a4-f06852aa82cb",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-10-14"
+  },
+  {
+    "id": "34823867-60c2-81fd-9311-ca1eed471bf9",
+    "name": "Protocol Kickoff Meeting Window",
+    "start": "2026-05-08",
+    "end": "2026-05-25",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8129-af0f-fb4f4f4e4af5"
+    ],
+    "parentId": "34823867-60c2-8170-8e8d-dd335455807d",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-25"
+  },
+  {
+    "id": "34823867-60c2-819b-a8f1-e01d2fd13bbc",
+    "name": "Safety Management Plan (Required)",
+    "start": "2026-05-08",
+    "end": "2026-10-14",
+    "duration": 114,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [
+      "34823867-60c2-814e-82c4-cfe85cc35f97"
+    ],
+    "parentId": "34823867-60c2-81b6-99a4-f06852aa82cb",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-10-14"
+  },
+  {
+    "id": "34823867-60c2-817c-8189-c6cabc1736a6",
+    "name": "Create Recruitment Planning Documents ",
+    "start": "2026-05-08",
+    "end": "2026-05-27",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-812d-b718-cd1ff14c9271",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-27"
+  },
+  {
+    "id": "34823867-60c2-8170-b913-ddfc4e704e07",
+    "name": "Vendor Planning (as needed)",
+    "start": "2026-05-08",
+    "end": "2026-06-04",
+    "duration": 20,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8129-bf48-fb2130410d81",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-06-04"
+  },
+  {
+    "id": "34823867-60c2-8159-a2c1-ee8c055cda09",
+    "name": "Internal Governance Setup",
+    "start": "2026-05-08",
+    "end": "2026-05-25",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8129-bf48-fb2130410d81",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-25"
+  },
+  {
+    "id": "34823867-60c2-811d-8619-c06e4fadd7ab",
+    "name": "Device Management & Logistics Plan (only if devices)",
+    "start": "2026-05-08",
+    "end": "2026-10-14",
+    "duration": 114,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [
+      "34823867-60c2-814e-82c4-cfe85cc35f97"
+    ],
+    "parentId": "34823867-60c2-81b6-99a4-f06852aa82cb",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-10-14"
+  },
+  {
+    "id": "34823867-60c2-81d5-95aa-f2b4aeeb370c",
+    "name": "Primary Data Capture Plan",
+    "start": "2026-05-08",
+    "end": "2026-10-12",
+    "duration": 112,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-812d-b718-cd1ff14c9271",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-10-12"
+  },
+  {
+    "id": "34823867-60c2-81ad-b0f4-fd28569f7d34",
+    "name": "Study IRB Closure",
+    "start": "2033-10-06",
+    "end": "2033-10-27",
+    "duration": 16,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8185-b215-c475ea6b929c"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8133-b367-ca1ea5118ba3"
+    ],
+    "parentId": "34823867-60c2-8177-8eb8-d1366163a81b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-10-06",
+    "refEnd": "2033-10-27"
+  },
+  {
+    "id": "34823867-60c2-8132-8ce7-fbbd710e5c36",
+    "name": "IRB Selection",
+    "start": "2026-05-08",
+    "end": "2026-05-25",
+    "duration": 12,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8129-bf48-fb2130410d81",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-25"
+  },
+  {
+    "id": "34823867-60c2-8123-a6a6-fc00fb2c1069",
+    "name": "Optional Project Startup Documentation",
+    "start": "2026-05-08",
+    "end": "2026-05-29",
+    "duration": 16,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8129-bf48-fb2130410d81",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-29"
+  },
+  {
+    "id": "34823867-60c2-816b-993a-eb2758aedee9",
+    "name": "Create Study Budget",
+    "start": "2026-05-08",
+    "end": "2026-05-29",
+    "duration": 16,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8129-bf48-fb2130410d81",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-29"
+  },
+  {
+    "id": "34823867-60c2-8104-91ab-e897a8952d2f",
+    "name": "ePRO Licensing (as needed)",
+    "start": "2026-05-08",
+    "end": "2026-05-29",
+    "duration": 16,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-8129-bf48-fb2130410d81",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-29"
+  },
+  {
+    "id": "34823867-60c2-8168-b447-cc1fb6f4fa18",
+    "name": "Create Study Materials Checklist",
+    "start": "2026-05-08",
+    "end": "2026-06-05",
+    "duration": 21,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [
+      "34823867-60c2-812f-83e1-d611ec0fcba1"
+    ],
+    "parentId": "34823867-60c2-8129-bf48-fb2130410d81",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-06-05"
+  },
+  {
+    "id": "34823867-60c2-81ab-9eb6-d95391f49bfa",
+    "name": "Patient Journey Mapping",
+    "start": "2026-05-08",
+    "end": "2026-06-08",
+    "duration": 22,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81fa-8033-cb5b572b193e"
+    ],
+    "parentId": "34823867-60c2-81fd-a21a-cc1f07e6032b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-06-08"
+  },
+  {
+    "id": "34823867-60c2-8133-a2fc-e78f678925a1",
+    "name": "         First  Site(s) Training",
+    "start": "2026-12-07",
+    "end": "2026-12-17",
+    "duration": 9,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-815b-8391-cde705c65aec"
+    ],
+    "blockingIds": [
+      "34823867-60c2-816a-93a5-d6cf239f6cf4"
+    ],
+    "parentId": "34823867-60c2-8178-909e-c8c46cab481f",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-07",
+    "refEnd": "2026-12-17"
+  },
+  {
+    "id": "34823867-60c2-817c-8e51-d7c2719ba38f",
+    "name": "Site Identification",
+    "start": "2026-05-08",
+    "end": "2026-05-28",
+    "duration": 15,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-814d-b8c9-f58b91a91a30",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-05-28"
+  },
+  {
+    "id": "34823867-60c2-8155-86b3-f3dec3ff1265",
+    "name": "Site Management Plan",
+    "start": "2026-05-08",
+    "end": "2026-07-03",
+    "duration": 41,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-814d-b8c9-f58b91a91a30",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-08",
+    "refEnd": "2026-07-03"
+  },
+  {
+    "id": "34823867-60c2-81a4-a702-cb6a3ebe61f2",
+    "name": "Hard Lock Abstraction List",
+    "start": "2033-06-07",
+    "end": "2033-06-07",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8112-9a99-c330f7379839"
+    ],
+    "blockingIds": [
+      "34823867-60c2-810f-afac-c1db54c5f823",
+      "34823867-60c2-8171-8c73-f56cf981b674"
+    ],
+    "parentId": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-06-07",
+    "refEnd": "2033-06-07"
+  },
+  {
+    "id": "34823867-60c2-815a-aae1-ca6865b7225e",
+    "name": "         Last Site(s) Training",
+    "start": "2028-06-09",
+    "end": "2028-07-14",
+    "duration": 26,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8182-97f6-e3ddb8d7f779"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8111-9813-cb8abe556b15"
+    ],
+    "parentId": "34823867-60c2-81ac-9274-d1842768af55",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-06-09",
+    "refEnd": "2028-07-14"
+  },
+  {
+    "id": "34823867-60c2-8190-844e-e4e98ff05521",
+    "name": "Configuration & Testing Planning",
+    "start": "2026-08-10",
+    "end": "2026-09-18",
+    "duration": 30,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-08-10",
+    "refEnd": "2026-09-18"
+  },
+  {
+    "id": "34823867-60c2-818f-aa98-c64a7b6e89ee",
+    "name": "External Kickoff Meeting",
+    "start": "2026-05-07",
+    "end": "2026-05-07",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-816d-873a-c5fb91431980",
+      "34823867-60c2-81ac-96a5-de45fbe5e1c8"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8123-a6a6-fc00fb2c1069",
+      "34823867-60c2-8168-b447-cc1fb6f4fa18",
+      "34823867-60c2-8104-91ab-e897a8952d2f",
+      "34823867-60c2-81d5-95aa-f2b4aeeb370c",
+      "34823867-60c2-8148-b15b-f1ffcb74223c",
+      "34823867-60c2-8159-a2c1-ee8c055cda09",
+      "34823867-60c2-8132-8ce7-fbbd710e5c36",
+      "34823867-60c2-817c-8189-c6cabc1736a6",
+      "34823867-60c2-81fd-9311-ca1eed471bf9",
+      "34823867-60c2-819b-a8f1-e01d2fd13bbc",
+      "34823867-60c2-8170-b913-ddfc4e704e07",
+      "34823867-60c2-817c-8e51-d7c2719ba38f",
+      "34823867-60c2-81ab-9eb6-d95391f49bfa",
+      "34823867-60c2-816b-993a-eb2758aedee9",
+      "34823867-60c2-81aa-be00-e0366ed93ae4",
+      "34823867-60c2-811d-8619-c06e4fadd7ab",
+      "34823867-60c2-8155-86b3-f3dec3ff1265"
+    ],
+    "parentId": "34823867-60c2-813c-a8f8-e10cce88a136",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-07",
+    "refEnd": "2026-05-07"
+  },
+  {
+    "id": "34823867-60c2-8102-a6de-fe7bffcebc3e",
+    "name": "Hard Lock Abstraction List ",
+    "start": "2027-10-25",
+    "end": "2027-10-25",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81a1-aa2d-e16f0c24a97d"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8106-8d89-dc38a24517e7",
+      "34823867-60c2-8164-99a6-e0668b8e2e0a"
+    ],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-10-25",
+    "refEnd": "2027-10-25"
+  },
+  {
+    "id": "34823867-60c2-81a5-ae43-ee4b1ee376bf",
+    "name": "TLF",
+    "start": "2027-08-03",
+    "end": "2027-12-10",
+    "duration": 94,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-08-03",
+    "refEnd": "2027-12-10"
+  },
+  {
+    "id": "34823867-60c2-816c-b85d-c332b20ed2a3",
+    "name": "Additional Site(s) Training",
+    "start": "2027-05-17",
+    "end": "2027-05-27",
+    "duration": 9,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8148-a79e-dd3c662d6ef7"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8152-8438-fd21f7c9bd77"
+    ],
+    "parentId": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-05-17",
+    "refEnd": "2027-05-27"
+  },
+  {
+    "id": "34823867-60c2-8170-a544-cd4bd52e0ed3",
+    "name": "ICF / Assents",
+    "start": "2026-07-02",
+    "end": "2026-09-16",
+    "duration": 55,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-02",
+    "refEnd": "2026-09-16"
+  },
+  {
+    "id": "34823867-60c2-8182-97f6-e3ddb8d7f779",
+    "name": "         Last Site(s) Selection, Contracting, & Budgeting",
+    "start": "2028-05-02",
+    "end": "2028-06-08",
+    "duration": 28,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8157-a78b-cb1134dfd28f"
+    ],
+    "blockingIds": [
+      "34823867-60c2-815a-aae1-ca6865b7225e"
+    ],
+    "parentId": "34823867-60c2-81ac-9274-d1842768af55",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-05-02",
+    "refEnd": "2028-06-08"
+  },
+  {
+    "id": "34823867-60c2-816d-873a-c5fb91431980",
+    "name": "Prep Timeline",
+    "start": "2026-04-24",
+    "end": "2026-05-06",
+    "duration": 9,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81b6-956f-e1a0c7928730",
+      "34823867-60c2-8107-8250-e168bd40f3a6"
+    ],
+    "blockingIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "parentId": "34823867-60c2-813c-a8f8-e10cce88a136",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-04-24",
+    "refEnd": "2026-05-06"
+  },
+  {
+    "id": "34823867-60c2-815b-8391-cde705c65aec",
+    "name": "          First Site(s) Selection, Contracting & Budgeting",
+    "start": "2026-10-29",
+    "end": "2026-12-04",
+    "duration": 27,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81f4-9411-db1fbfeea59c"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8133-a2fc-e78f678925a1"
+    ],
+    "parentId": "34823867-60c2-8178-909e-c8c46cab481f",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-29",
+    "refEnd": "2026-12-04"
+  },
+  {
+    "id": "34823867-60c2-8177-8eb8-d1366163a81b",
+    "name": "Closure Activities",
+    "start": "2033-09-06",
+    "end": "2033-11-17",
+    "duration": 53,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-09-06",
+    "refEnd": "2033-11-17"
+  },
+  {
+    "id": "34823867-60c2-8185-b215-c475ea6b929c",
+    "name": " Prepare Study Closure",
+    "start": "2033-09-07",
+    "end": "2033-10-05",
+    "duration": 21,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8146-b7f8-d32634d9c145"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81ad-b0f4-fd28569f7d34"
+    ],
+    "parentId": "34823867-60c2-8177-8eb8-d1366163a81b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-09-07",
+    "refEnd": "2033-10-05"
+  },
+  {
+    "id": "34823867-60c2-81ab-9530-e9a1f52a68e7",
+    "name": "LPI Last Patient In",
+    "start": "2032-10-20",
+    "end": "2032-10-20",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81f5-8eb3-c153eee46cd4",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2032-10-20",
+    "refEnd": "2032-10-20"
+  },
+  {
+    "id": "34823867-60c2-81ac-96a5-de45fbe5e1c8",
+    "name": "Prep Slides",
+    "start": "2026-04-24",
+    "end": "2026-05-06",
+    "duration": 9,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81b6-956f-e1a0c7928730",
+      "34823867-60c2-8107-8250-e168bd40f3a6"
+    ],
+    "blockingIds": [
+      "34823867-60c2-818f-aa98-c64a7b6e89ee"
+    ],
+    "parentId": "34823867-60c2-813c-a8f8-e10cce88a136",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-04-24",
+    "refEnd": "2026-05-06"
+  },
+  {
+    "id": "34823867-60c2-81b6-956f-e1a0c7928730",
+    "name": "Contract Signed",
+    "start": "2026-04-20",
+    "end": "2026-04-20",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-816d-873a-c5fb91431980",
+      "34823867-60c2-81ac-96a5-de45fbe5e1c8"
+    ],
+    "parentId": "34823867-60c2-81c8-9e58-d141b64031e9",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-04-20",
+    "refEnd": "2026-04-20"
+  },
+  {
+    "id": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "name": "Final Data Delivery (#) Activities",
+    "start": "2033-05-10",
+    "end": "2033-07-21",
+    "duration": 53,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-05-10",
+    "refEnd": "2033-07-21"
+  },
+  {
+    "id": "34823867-60c2-8158-b5e1-f8194695b4f3",
+    "name": "Add Additional Repeat Deliveries to Project Plan",
+    "start": "2027-12-09",
+    "end": "2027-12-09",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-09",
+    "refEnd": "2027-12-09"
+  },
+  {
+    "id": "34823867-60c2-81f4-9411-db1fbfeea59c",
+    "name": "First Site(s) Feasibility",
+    "start": "2026-10-06",
+    "end": "2026-10-28",
+    "duration": 17,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-815b-8391-cde705c65aec"
+    ],
+    "parentId": "34823867-60c2-8178-909e-c8c46cab481f",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-06",
+    "refEnd": "2026-10-28"
+  },
+  {
+    "id": "34823867-60c2-81a2-8e07-ed8b2b2b6646",
+    "name": "Soft Lock Abstraction List ",
+    "start": "2027-09-27",
+    "end": "2027-09-27",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-81a1-aa2d-e16f0c24a97d"
+    ],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-09-27",
+    "refEnd": "2027-09-27"
+  },
+  {
+    "id": "34823867-60c2-8157-a78b-cb1134dfd28f",
+    "name": "Last Site(s) Feasibility",
+    "start": "2028-04-07",
+    "end": "2028-05-01",
+    "duration": 17,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-8182-97f6-e3ddb8d7f779"
+    ],
+    "parentId": "34823867-60c2-81ac-9274-d1842768af55",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-04-07",
+    "refEnd": "2028-05-01"
+  },
+  {
+    "id": "34823867-60c2-81ac-9274-d1842768af55",
+    "name": "Last Sites Prep & Activation",
+    "start": "2028-04-07",
+    "end": "2028-08-29",
+    "duration": 103,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2028-04-07",
+    "refEnd": "2028-08-29"
+  },
+  {
+    "id": "34823867-60c2-8148-a79e-dd3c662d6ef7",
+    "name": "Additional Site(s) Selection, Contracting & Budgeting",
+    "start": "2027-04-08",
+    "end": "2027-05-14",
+    "duration": 27,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8141-80af-c46407f6f367"
+    ],
+    "blockingIds": [
+      "34823867-60c2-816c-b85d-c332b20ed2a3"
+    ],
+    "parentId": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-04-08",
+    "refEnd": "2027-05-14"
+  },
+  {
+    "id": "34823867-60c2-81a1-aa2d-e16f0c24a97d",
+    "name": "Delivery Retrieval Wrap-Up Window",
+    "start": "2027-09-28",
+    "end": "2027-10-22",
+    "duration": 19,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-81a2-8e07-ed8b2b2b6646"
+    ],
+    "blockingIds": [
+      "34823867-60c2-8102-a6de-fe7bffcebc3e"
+    ],
+    "parentId": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-09-28",
+    "refEnd": "2027-10-22"
+  },
+  {
+    "id": "34823867-60c2-8181-8603-c6aa44dadfcd",
+    "name": "Soft Lock Abstraction List (final)",
+    "start": "2033-05-10",
+    "end": "2033-05-10",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-8112-9a99-c330f7379839"
+    ],
+    "parentId": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-05-10",
+    "refEnd": "2033-05-10"
+  },
+  {
+    "id": "34823867-60c2-8112-9a99-c330f7379839",
+    "name": "Final Delivery Retrieval Wrap-Up Window",
+    "start": "2033-05-11",
+    "end": "2033-06-06",
+    "duration": 19,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8181-8603-c6aa44dadfcd"
+    ],
+    "blockingIds": [
+      "34823867-60c2-81a4-a702-cb6a3ebe61f2"
+    ],
+    "parentId": "34823867-60c2-81df-bfa5-c90a5cdf2d61",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-05-11",
+    "refEnd": "2033-06-06"
+  },
+  {
+    "id": "34823867-60c2-8178-909e-c8c46cab481f",
+    "name": "First Sites Prep & Activation",
+    "start": "2026-10-06",
+    "end": "2027-01-27",
+    "duration": 82,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-06",
+    "refEnd": "2027-01-27"
+  },
+  {
+    "id": "34823867-60c2-8146-b7f8-d32634d9c145",
+    "name": "Study Closure (Contract End Date)",
+    "start": "2033-09-06",
+    "end": "2033-09-06",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-8185-b215-c475ea6b929c"
+    ],
+    "parentId": "34823867-60c2-8177-8eb8-d1366163a81b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-09-06",
+    "refEnd": "2033-09-06"
+  },
+  {
+    "id": "34823867-60c2-815a-a782-ec9db2435341",
+    "name": "Last Patient Out",
+    "start": "2033-04-26",
+    "end": "2033-04-26",
+    "duration": 1,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": "34823867-60c2-81f5-8eb3-c153eee46cd4",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2033-04-26",
+    "refEnd": "2033-04-26"
+  },
+  {
+    "id": "34823867-60c2-817c-bbfd-ca7b55bef7c2",
+    "name": "CSR",
+    "start": "2027-12-13",
+    "end": "2028-03-13",
+    "duration": 66,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-13",
+    "refEnd": "2028-03-13"
+  },
+  {
+    "id": "34823867-60c2-8141-80af-c46407f6f367",
+    "name": "Additional Site(s) Feasibility",
+    "start": "2027-03-16",
+    "end": "2027-04-07",
+    "duration": 17,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-8148-a79e-dd3c662d6ef7"
+    ],
+    "parentId": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-03-16",
+    "refEnd": "2027-04-07"
+  },
+  {
+    "id": "34823867-60c2-81a5-b7e3-cd7a368ace72",
+    "name": "Data Delivery #2 Activities",
+    "start": "2027-09-27",
+    "end": "2027-12-09",
+    "duration": 54,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-09-27",
+    "refEnd": "2027-12-09"
+  },
+  {
+    "id": "34823867-60c2-8107-8250-e168bd40f3a6",
+    "name": "Handoff & Handoff Materials Complete",
+    "start": "2026-04-20",
+    "end": "2026-04-23",
+    "duration": 4,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [
+      "34823867-60c2-816d-873a-c5fb91431980",
+      "34823867-60c2-81ac-96a5-de45fbe5e1c8"
+    ],
+    "parentId": "34823867-60c2-81c8-9e58-d141b64031e9",
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-04-20",
+    "refEnd": "2026-04-23"
+  },
+  {
+    "id": "34823867-60c2-8122-94bf-f425f5904171",
+    "name": "CRF & Data Preparation",
+    "start": "2026-09-23",
+    "end": "2027-04-02",
+    "duration": 138,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-23",
+    "refEnd": "2027-04-02"
+  },
+  {
+    "id": "34823867-60c2-8168-872b-c8eafd180892",
+    "name": "Testing",
+    "start": "2026-09-21",
+    "end": "2026-11-27",
+    "duration": 50,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-21",
+    "refEnd": "2026-11-27"
+  },
+  {
+    "id": "34823867-60c2-81d5-b7c5-f7196490665b",
+    "name": "Additional Site(s) Prep & Activation",
+    "start": "2027-03-16",
+    "end": "2027-07-06",
+    "duration": 81,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-03-16",
+    "refEnd": "2027-07-06"
+  },
+  {
+    "id": "34823867-60c2-81f5-8eb3-c153eee46cd4",
+    "name": "First & Last Patient Milestones",
+    "start": "2026-12-03",
+    "end": "2033-04-22",
+    "duration": 1667,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-03",
+    "refEnd": "2033-04-22"
+  },
+  {
+    "id": "34823867-60c2-8122-abb3-c58e0b6377b6",
+    "name": "Insights Report",
+    "start": "2027-12-13",
+    "end": "2028-03-01",
+    "duration": 58,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2027-12-13",
+    "refEnd": "2028-03-01"
+  },
+  {
+    "id": "34823867-60c2-811e-b561-f42abd72e781",
+    "name": "Initial Data Delivery Activities",
+    "start": "2026-12-10",
+    "end": "2027-08-03",
+    "duration": 169,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-10",
+    "refEnd": "2027-08-03"
+  },
+  {
+    "id": "34823867-60c2-8107-968b-fc18836f4b6e",
+    "name": "Final Client Review of Study Materials",
+    "start": "2026-09-22",
+    "end": "2026-10-16",
+    "duration": 19,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-22",
+    "refEnd": "2026-10-16"
+  },
+  {
+    "id": "34823867-60c2-8128-bd23-c650ddaba30a",
+    "name": "IRB",
+    "start": "2026-10-19",
+    "end": "2026-11-12",
+    "duration": 19,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-19",
+    "refEnd": "2026-11-12"
+  },
+  {
+    "id": "34823867-60c2-81ba-853c-d01adbd6bee3",
+    "name": "Launch Activities",
+    "start": "2026-12-01",
+    "end": "2026-12-03",
+    "duration": 3,
+    "status": "Not started",
+    "blockedByIds": [
+      "34823867-60c2-8188-92a9-f5eec4545bdd"
+    ],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-12-01",
+    "refEnd": "2026-12-03"
+  },
+  {
+    "id": "34823867-60c2-8151-a6f3-f2dc41b9961c",
+    "name": "Patient Facing Materials",
+    "start": "2026-06-03",
+    "end": "2026-09-21",
+    "duration": 79,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-06-03",
+    "refEnd": "2026-09-21"
+  },
+  {
+    "id": "34823867-60c2-8105-9646-d9df5a8ef202",
+    "name": "Data Model Planning",
+    "start": "2026-07-02",
+    "end": "2026-09-21",
+    "duration": 58,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-07-02",
+    "refEnd": "2026-09-21"
+  },
+  {
+    "id": "34823867-60c2-8121-b428-c72a8143adc6",
+    "name": "SAP",
+    "start": "2026-10-13",
+    "end": "2027-02-09",
+    "duration": 86,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-10-13",
+    "refEnd": "2027-02-09"
+  },
+  {
+    "id": "34823867-60c2-8170-8e8d-dd335455807d",
+    "name": "Protocol",
+    "start": "2026-05-06",
+    "end": "2026-08-07",
+    "duration": 68,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-06",
+    "refEnd": "2026-08-07"
+  },
+  {
+    "id": "34823867-60c2-81b6-99a4-f06852aa82cb",
+    "name": "Pre-Launch Documentation",
+    "start": "2026-05-05",
+    "end": "2026-10-09",
+    "duration": 114,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-05",
+    "refEnd": "2026-10-09"
+  },
+  {
+    "id": "34823867-60c2-81fd-a21a-cc1f07e6032b",
+    "name": "Patient Journey & SoA",
+    "start": "2026-05-05",
+    "end": "2026-06-19",
+    "duration": 34,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-05",
+    "refEnd": "2026-06-19"
+  },
+  {
+    "id": "34823867-60c2-817a-9e26-f9a1cdf1fade",
+    "name": "Retrieval Planning",
+    "start": "2026-09-22",
+    "end": "2026-10-09",
+    "duration": 14,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-22",
+    "refEnd": "2026-10-09"
+  },
+  {
+    "id": "34823867-60c2-812d-b718-cd1ff14c9271",
+    "name": "Recruitment Planning",
+    "start": "2026-05-06",
+    "end": "2026-10-08",
+    "duration": 112,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-06",
+    "refEnd": "2026-10-08"
+  },
+  {
+    "id": "34823867-60c2-81c3-b08b-e1f8df3b4d91",
+    "name": "Configuration",
+    "start": "2026-09-22",
+    "end": "2026-10-29",
+    "duration": 28,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-09-22",
+    "refEnd": "2026-10-29"
+  },
+  {
+    "id": "34823867-60c2-8129-bf48-fb2130410d81",
+    "name": "Project Governance",
+    "start": "2026-05-05",
+    "end": "2026-06-01",
+    "duration": 20,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-05",
+    "refEnd": "2026-06-01"
+  },
+  {
+    "id": "34823867-60c2-814d-b8c9-f58b91a91a30",
+    "name": "Sites Planning",
+    "start": "2026-05-05",
+    "end": "2026-06-30",
+    "duration": 41,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-05-05",
+    "refEnd": "2026-06-30"
+  },
+  {
+    "id": "34823867-60c2-813c-a8f8-e10cce88a136",
+    "name": "External Kickoff",
+    "start": "2026-04-21",
+    "end": "2026-05-04",
+    "duration": 10,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-04-21",
+    "refEnd": "2026-05-04"
+  },
+  {
+    "id": "34823867-60c2-81c8-9e58-d141b64031e9",
+    "name": "Contract & Handoff",
+    "start": "2026-04-20",
+    "end": "2026-04-23",
+    "duration": 4,
+    "status": "Not started",
+    "blockedByIds": [],
+    "blockingIds": [],
+    "parentId": null,
+    "studyId": "34823867-60c2-80fd-b9f6-c1e1b7017797",
+    "refStart": "2026-04-20",
+    "refEnd": "2026-04-23"
+  }
+]

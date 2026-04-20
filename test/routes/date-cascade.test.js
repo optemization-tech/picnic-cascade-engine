@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   classify: vi.fn(),
   runCascade: vi.fn(),
   runParentSubtask: vi.fn(),
-  enforceConstraints: vi.fn(),
   queryStudyTasks: vi.fn(),
   activityLogService: {
     logTerminalEvent: vi.fn(),
@@ -53,7 +52,6 @@ vi.mock('../../src/gates/guards.js', () => ({
 vi.mock('../../src/engine/classify.js', () => ({ classify: mocks.classify }));
 vi.mock('../../src/engine/cascade.js', () => ({ runCascade: mocks.runCascade }));
 vi.mock('../../src/engine/parent-subtask.js', () => ({ runParentSubtask: mocks.runParentSubtask }));
-vi.mock('../../src/engine/constraints.js', () => ({ enforceConstraints: mocks.enforceConstraints }));
 vi.mock('../../src/notion/queries.js', () => ({ queryStudyTasks: mocks.queryStudyTasks }));
 vi.mock('../../src/services/activity-log.js', () => ({
   ActivityLogService: vi.fn(() => mocks.activityLogService),
@@ -246,7 +244,7 @@ describe('date-cascade route safety', () => {
       endDelta: 1,
       cascadeMode: 'push-right',
       parentTaskId: null,
-      parentMode: 'case-a',
+      parentMode: null,
     });
     mocks.runCascade.mockReturnValue({
       updates: [{ taskId: 'a', newStart: '2026-04-02', newEnd: '2026-04-03' }],
@@ -256,15 +254,9 @@ describe('date-cascade route safety', () => {
     });
     mocks.runParentSubtask.mockReturnValue({
       updates: [{ taskId: 'parent-rollup', newStart: '2026-04-01', newEnd: '2026-04-03', _isRollUp: true }],
-      parentMode: 'case-a',
+      parentMode: null,
       rolledUpStart: null,
       rolledUpEnd: null,
-    });
-    mocks.enforceConstraints.mockReturnValue({
-      newStart: '2026-04-01',
-      newEnd: '2026-04-02',
-      constrained: false,
-      merged: false,
     });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchPages.mockResolvedValueOnce({
@@ -352,7 +344,7 @@ describe('date-cascade route safety', () => {
       endDelta: 1,
       cascadeMode: 'push-right',
       parentTaskId: null,
-      parentMode: 'case-a',
+      parentMode: null,
     });
     mocks.runCascade.mockReturnValue({
       updates: [{ taskId: 'task-a', newStart: '2026-04-06', newEnd: '2026-04-07' }],
@@ -360,8 +352,7 @@ describe('date-cascade route safety', () => {
       movedTaskMap: { 'task-a': { newStart: '2026-04-06', newEnd: '2026-04-07' } },
       diagnostics: {},
     });
-    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: 'case-a', rolledUpStart: null, rolledUpEnd: null });
-    mocks.enforceConstraints.mockReturnValue({ newStart: '2026-04-01', newEnd: '2026-04-03', constrained: false, merged: false });
+    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: null, rolledUpStart: null, rolledUpEnd: null });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchPages.mockResolvedValueOnce({ updatedCount: 2, taskIds: ['source', 'task-a'] });
 
@@ -412,7 +403,7 @@ describe('date-cascade route safety', () => {
       endDelta: 1,
       cascadeMode: 'push-right',
       parentTaskId: null,
-      parentMode: 'case-a',
+      parentMode: null,
     });
     mocks.runCascade.mockReturnValue({
       updates: [{ taskId: 'a', newStart: '2026-04-02', newEnd: '2026-04-03' }],
@@ -420,8 +411,7 @@ describe('date-cascade route safety', () => {
       movedTaskMap: { a: { newStart: '2026-04-02', newEnd: '2026-04-03' } },
       diagnostics: {},
     });
-    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: 'case-a', rolledUpStart: null, rolledUpEnd: null });
-    mocks.enforceConstraints.mockReturnValue({ newStart: '2026-04-01', newEnd: '2026-04-02', constrained: false, merged: false });
+    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: null, rolledUpStart: null, rolledUpEnd: null });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchPages.mockResolvedValueOnce({ updatedCount: 2, taskIds: ['source', 'a'] });
 
@@ -491,7 +481,7 @@ describe('date-cascade route safety', () => {
       endDelta: 1,
       cascadeMode: 'push-right',
       parentTaskId: null,
-      parentMode: 'case-a',
+      parentMode: null,
     });
     mocks.runCascade.mockReturnValue({
       updates: [{ taskId: 'a', newStart: '2026-04-02', newEnd: '2026-04-03' }],
@@ -499,8 +489,7 @@ describe('date-cascade route safety', () => {
       movedTaskMap: { a: { newStart: '2026-04-02', newEnd: '2026-04-03' } },
       diagnostics: {},
     });
-    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: 'case-a', rolledUpStart: null, rolledUpEnd: null });
-    mocks.enforceConstraints.mockReturnValue({ newStart: '2026-04-01', newEnd: '2026-04-02', constrained: false, merged: false });
+    mocks.runParentSubtask.mockReturnValue({ updates: [], parentMode: null, rolledUpStart: null, rolledUpEnd: null });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.patchPages.mockResolvedValueOnce({ updatedCount: 2, taskIds: ['source', 'a'] });
 

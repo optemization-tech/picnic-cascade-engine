@@ -212,8 +212,8 @@ The distinction from pull-right is semantic (both deltas are positive vs. only s
 **Definition**: `FROZEN_STATUSES = new Set(['Done', 'N/A'])` (cascade.js line 20, parent-subtask.js line 10, guards.js line 99).
 
 **Rules**:
-- Frozen tasks are never moved by any cascade pass (checked in `conflictOnlyDownstream` line 89, `pullLeftUpstream` line 155, `gapPreservingDownstream` line 275, `pullRightUpstream` line 355, `validateConstraints` line 570).
-- Frozen blockers are excluded from constraint calculations in `conflictOnlyDownstream` (line 95), `enforceConstraints` (constraints.js line 53), and `validateConstraints` (line 577).
+- Frozen tasks are never moved by any cascade pass (checked in `conflictOnlyDownstream`, `pullLeftUpstream`, `gapPreservingDownstream`, and `pullRightUpstream`).
+- Frozen blockers are excluded from blocker calculations in the mode-specific cascade passes.
 - Frozen blockers still participate in frustration detection: they can prevent a task from reaching its desired position (cascade.js lines 448-455), but the engine won't try to move them.
 - Route-level: frozen source tasks trigger `no_action` (date-cascade.js line 155-165).
 
@@ -253,22 +253,6 @@ task.start must be >= earliestAllowed
 All cascade movements preserve original task duration:
 - `newEnd = addBusinessDays(newStart, duration - 1)` (cascade.js line 108, 315, etc.)
 - Duration is computed as `countBDInclusive(start, end)` when not stored (minimum 1).
-
-### 4.6 Weekend Snap Safety Net
-
-`enforceConstraints()` (constraints.js lines 79-86): After all cascade and parent processing, if the final start date falls on a weekend, snaps it to the next business day and recalculates end from the snapped start while preserving duration.
-
-### 4.7 Post-Cascade Constraint Validation
-
-`validateConstraints()` (cascade.js lines 533-617):
-1. Topological sort over ALL tasks (not just moved ones).
-2. For each non-frozen task with predecessors: checks if `effectiveStart >= earliestAllowed`.
-3. Violations are snapped forward (push-right) to the earliest allowed position.
-4. Mutates `taskById` so downstream tasks in topo order see corrected positions.
-5. Detects cycles: if topo sort is incomplete, sets `cycleDetected: true`.
-6. Returns `fixedCount`, `fixedTaskIds`, `cycleDetected`.
-
-Called after every mode dispatch in `runCascade()` (lines 736-743). Catches pre-existing violations and edge cases the mode-specific passes missed.
 
 ---
 
@@ -316,46 +300,6 @@ parent-subtask.js lines 334-382:
 
 **Pre-applied dates** (lines 62-68): Before any roll-up computation, cascade-moved dates from `movedTaskMap` are applied to `taskById`. This prevents Case B from using stale sibling positions.
 
-### 5.5 Case A Roll-Up Override in Constraints
-
-`enforceConstraints()` (constraints.js lines 71-76): When `parentMode === 'case-a'` and `rolledUpStart`/`rolledUpEnd` are present, the roll-up dates override any other constraint result. The case-a roll-up is authoritative.
-
----
-
-## 6. Constraint Enforcement
-
-Implemented in `src/engine/constraints.js`, function `enforceConstraints()` (lines 14-102).
-
-### 6.1 Inputs
-
-- `task`: The source task with `taskId`, `newStart`, `newEnd`, `refStart`, `refEnd`.
-- `cascadeResult`: Contains `movedTaskMap` (task positions after cascade).
-- `parentResult`: Contains `parentMode`, `rolledUpStart`, `rolledUpEnd`.
-- `allTasks`: Full task graph for blocker lookups.
-
-### 6.2 Blocker Constraint on Source
-
-constraints.js lines 41-68:
-1. For each blocker of the source task (`blockedByIds`):
-   - Uses cascade-moved end date if blocker was moved, otherwise DB end date.
-   - Skips frozen blockers (`Done`/`N/A`).
-   - Computes `candidate = nextBusinessDay(blockerEnd)`.
-2. `earliestAllowed = max(all candidates)`.
-3. If source's `newStart < earliestAllowed`: snaps start forward, recalculates end preserving original duration.
-4. Sets `constrained: true`.
-
-### 6.3 Case-A Merge
-
-constraints.js lines 71-76: If `parentMode === 'case-a'`, the rolled-up start/end from the parent subtask resolver replace whatever the constraint enforcement produced. Sets `merged: true`.
-
-### 6.4 Weekend Snap
-
-constraints.js lines 79-86: If final start is not a business day, snaps to `nextBusinessDay()` and recomputes end preserving duration.
-
-### 6.5 Execution Order in Route
-
-date-cascade.js lines 259-272: Constraint enforcement runs AFTER both `runCascade()` and `runParentSubtask()`, receiving both results. It is the final date authority for the source task.
-
 ---
 
 ## 7. Edge Cases
@@ -365,8 +309,6 @@ date-cascade.js lines 259-272: Constraint enforcement runs AFTER both `runCascad
 When a task has multiple `blockedByIds`:
 - `conflictOnlyDownstream`: Takes `max(nextBusinessDay(blocker.effectiveEnd))` across all blockers (cascade.js lines 92-102).
 - `gapPreservingDownstream`: Same max-constraint logic (lines 297-309).
-- `validateConstraints`: Same (lines 574-584).
-- `enforceConstraints`: Same (constraints.js lines 44-56).
 
 The task's start is governed by its latest-finishing non-frozen blocker.
 
@@ -398,11 +340,7 @@ When `gapPreservingDownstream()` shifts a task that is also blocked by tasks in 
 5. Re-running `gapPreservingDownstream()` from scratch.
 6. Repeating until stable or 5 rounds.
 
-### 7.5 Cycle Detection
-
-`validateConstraints()` (cascade.js lines 564, 610-612): If the topological sort does not cover all tasks (`sorted.length < allIds.length`), cycles exist. Sets `cycleDetected: true` and `cycleMissedCount`. Tasks in cycles are not processed by validation (they never enter the topo order).
-
-### 7.6 Safety Caps
+### 7.5 Safety Caps
 
 | Cap | Location | Value | Effect |
 |---|---|---|---|
@@ -411,11 +349,11 @@ When `gapPreservingDownstream()` shifts a task that is also blocked by tasks in 
 
 When `capReached` is true, the terminal status is `failed` (date-cascade.js line 347).
 
-### 7.7 Source Task Patching
+### 7.6 Source Task Patching
 
 `runCascade()` (cascade.js lines 677-679): The source task's dates in `taskById` are patched with webhook dates BEFORE mode dispatch. This ensures all downstream calculations see the user's intended dates, not stale DB dates.
 
-### 7.8 Undo Capability
+### 7.7 Undo Capability
 
 `src/services/undo-store.js`: After a successful cascade, a pre-snapshot of all affected task dates is saved (date-cascade.js lines 359-379). The undo manifest maps `taskId -> { oldStart, oldEnd, newStart, newEnd }`. TTL is 15 minutes. One undo per study (latest cascade wins).
 
@@ -439,12 +377,11 @@ When `capReached` is true, the terminal status is `failed` (date-cascade.js line
 6. Classification skip gate       -- logged no_action (or Error 1 side effects)
 7. runCascade()                   -- execute mode-specific cascade algorithm
 8. runParentSubtask()             -- execute parent/subtask resolution
-9. enforceConstraints()           -- source task constraint enforcement + case-a merge
-10. Merge updates                 -- combine cascade + parent + constrained source
-11. patchBatch()                  -- write all date updates to Notion
-12. Report status                 -- write success summary to study page
-13. Log terminal event            -- write activity log entry
-14. Save undo manifest            -- store pre-cascade snapshot (15-min TTL)
+9. Merge updates                  -- combine cascade + parent results and keep source edit authoritative
+10. patchBatch()                  -- write all date updates to Notion
+11. Report status                 -- write success summary to study page
+12. Log terminal event            -- write activity log entry
+13. Save undo manifest            -- store pre-cascade snapshot (15-min TTL)
 ```
 
 ### 8.1 HTTP Response Timing

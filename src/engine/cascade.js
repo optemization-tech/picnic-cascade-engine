@@ -506,98 +506,6 @@ function pullRightUpstream(sourceId, refStart, deltaBD, updatesMap, taskById) {
   }
 }
 
-// -----------------------------------------------------------
-// validateConstraints: post-cascade safety net.
-// Topological sort over ALL tasks. For each task with
-// predecessors, verify start >= nextBD(max(predecessor ends)).
-// Fixes violations only — does NOT collapse gaps.
-// -----------------------------------------------------------
-function validateConstraints(updatesMap, taskById) {
-  const allIds = Object.keys(taskById);
-  const fixedTaskIds = [];
-
-  // Topological sort (Kahn's)
-  const inDegree = {};
-  for (const id of allIds) inDegree[id] = 0;
-  for (const id of allIds) {
-    const t = taskById[id];
-    if (!t) continue;
-    for (const bid of (t.blockedByIds || [])) {
-      if (taskById[bid]) inDegree[id]++;
-    }
-  }
-  const queue = [];
-  for (const id of allIds) {
-    if (inDegree[id] === 0) queue.push(id);
-  }
-  const sorted = [];
-  while (queue.length > 0) {
-    const cur = queue.shift();
-    sorted.push(cur);
-    for (const depId of (taskById[cur]?.blockingIds || [])) {
-      if (inDegree[depId] !== undefined) {
-        inDegree[depId]--;
-        if (inDegree[depId] === 0) queue.push(depId);
-      }
-    }
-  }
-
-  // Detect cycles: if topo sort is incomplete, some tasks are in cycles
-  const cycleDetected = sorted.length < allIds.length;
-
-  // Process in topo order: fix violations only
-  for (const taskId of sorted) {
-    const task = taskById[taskId];
-    if (!task || !task.start || !task.end) continue;
-    if (isFrozen(task)) continue;
-    if ((task.blockedByIds || []).length === 0) continue;
-
-    let earliestAllowed = null;
-    for (const blockerId of task.blockedByIds) {
-      const blocker = taskById[blockerId];
-      if (!blocker) continue;
-      if (isFrozen(blocker)) continue;
-      const blockerEnd = updatesMap[blockerId]
-        ? parseDate(updatesMap[blockerId].newEnd)
-        : blocker.end;
-      if (!blockerEnd) continue;
-      const candidate = nextBusinessDay(blockerEnd);
-      if (!earliestAllowed || candidate > earliestAllowed) earliestAllowed = candidate;
-    }
-    if (!earliestAllowed) continue;
-
-    const effectiveStart = updatesMap[taskId]
-      ? parseDate(updatesMap[taskId].newStart)
-      : task.start;
-    if (effectiveStart >= earliestAllowed) continue;
-
-    // Violation — snap forward
-    const duration = updatesMap[taskId]?.duration || task.duration || 1;
-    const newEnd = addBusinessDays(earliestAllowed, duration - 1);
-
-    updatesMap[taskId] = {
-      taskId,
-      taskName: task.name,
-      newStart: formatDate(earliestAllowed),
-      newEnd: formatDate(newEnd),
-      duration,
-    };
-    // Mutate taskById so downstream tasks in topo order see corrected position
-    taskById[taskId].start = earliestAllowed;
-    taskById[taskId].end = newEnd;
-
-    fixedTaskIds.push(taskId);
-  }
-
-  return {
-    fixedCount: fixedTaskIds.length,
-    fixedTaskIds,
-    cycleDetected,
-    sortedCount: sorted.length,
-    totalCount: allIds.length,
-  };
-}
-
 // ============================================================
 // MAIN EXPORT
 // ============================================================
@@ -698,6 +606,9 @@ export function runCascade({
 
     case 'pull-right': {
       pullRightUpstream(sourceTaskId, refStart, startDelta, updatesMap, taskById);
+      // Upstream blockers can fan out into sibling downstream branches.
+      // Retighten those branches so pull-right does not leave fresh overlaps.
+      conflictOnlyDownstream(new Set([sourceTaskId, ...Object.keys(updatesMap)]), updatesMap, taskById);
       break;
     }
 
@@ -709,16 +620,6 @@ export function runCascade({
 
     default:
       return { updates: [], movedTaskMap: {}, movedTaskIds: [], summary: `Unknown cascadeMode: ${cascadeMode}` };
-  }
-
-  // Post-cascade constraint validation — catches pre-existing violations
-  // and any edge cases the mode-specific passes missed
-  const validationResult = validateConstraints(updatesMap, taskById);
-  diagnostics.constraintFixCount = validationResult.fixedCount;
-  diagnostics.constraintFixTaskIds = validationResult.fixedTaskIds;
-  if (validationResult.cycleDetected) {
-    diagnostics.cycleDetected = true;
-    diagnostics.cycleMissedCount = validationResult.totalCount - validationResult.sortedCount;
   }
 
   // Build output
