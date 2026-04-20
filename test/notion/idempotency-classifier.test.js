@@ -24,6 +24,10 @@ describe('classifyIdempotency', () => {
         classifyIdempotency('PATCH', '/blocks/abc-123/children?page_size=100'),
       ).toBe('nonIdempotent');
     });
+
+    it('POST /comments is nonIdempotent (creates a new comment each call)', () => {
+      expect(classifyIdempotency('POST', '/comments')).toBe('nonIdempotent');
+    });
   });
 
   describe('idempotent endpoints', () => {

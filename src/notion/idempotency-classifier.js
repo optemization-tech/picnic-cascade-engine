@@ -7,6 +7,7 @@
  *
  * Path table (source of truth):
  *   POST   /pages                        → nonIdempotent (creates a new page each call)
+ *   POST   /comments                     → nonIdempotent (creates a new comment each call)
  *   PATCH  /blocks/{uuid}/children       → nonIdempotent (appends blocks positionally)
  *   everything else                      → idempotent (default; preserves current behavior)
  *
@@ -24,6 +25,9 @@ export function classifyIdempotency(method, path) {
   const upperMethod = method.toUpperCase();
 
   if (upperMethod === 'POST' && path === '/pages') {
+    return 'nonIdempotent';
+  }
+  if (upperMethod === 'POST' && path === '/comments') {
     return 'nonIdempotent';
   }
   if (upperMethod === 'PATCH' && BLOCK_CHILDREN_PATH.test(path)) {

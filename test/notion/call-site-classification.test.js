@@ -50,10 +50,10 @@ const callSites = [
   },
   {
     caller: 'src/services/study-comment.js:66',
-    via: 'client.request POST /comments (not /pages)',
+    via: 'client.request POST /comments (creates a new comment each call)',
     method: 'POST',
     path: '/comments',
-    expected: 'idempotent',
+    expected: 'nonIdempotent',
   },
   {
     caller: 'src/services/activity-log.js:171',
@@ -267,17 +267,18 @@ describe('Unit 6: classifier matches every existing call site', () => {
     });
   }
 
-  it('covers the only three non-idempotent call sites', () => {
+  it('covers all non-idempotent call sites', () => {
     const nonIdempotent = callSites.filter((s) => s.expected === 'nonIdempotent');
     // Two copy-blocks PATCH sites + one createPages (create-tasks) + one
-    // activity-log POST /pages = four total.
-    expect(nonIdempotent).toHaveLength(4);
-    // All must be either POST /pages or PATCH /blocks/{id}/children.
+    // activity-log POST /pages + one study-comment POST /comments = five total.
+    expect(nonIdempotent).toHaveLength(5);
+    // All must be POST /pages, POST /comments, or PATCH /blocks/{id}/children.
     for (const site of nonIdempotent) {
       const isPagesPost = site.method === 'POST' && site.path === '/pages';
+      const isCommentsPost = site.method === 'POST' && site.path === '/comments';
       const isBlocksChildrenPatch =
         site.method === 'PATCH' && /^\/blocks\/[^/]+\/children/.test(site.path);
-      expect(isPagesPost || isBlocksChildrenPatch).toBe(true);
+      expect(isPagesPost || isCommentsPost || isBlocksChildrenPatch).toBe(true);
     }
   });
 });
