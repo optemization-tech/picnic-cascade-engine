@@ -22,4 +22,4 @@ function withStudyLock(studyId, fn) {
 // Exposed for test cleanup
 function _resetStudyLocks() { _studyLocks.clear(); }
 
-export { withStudyLock, _resetStudyLocks, _studyLocks };
+export { withStudyLock, _resetStudyLocks };

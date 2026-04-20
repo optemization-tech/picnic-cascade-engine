@@ -63,14 +63,16 @@ When the engine patches a task's dates, Notion fires a "When Dates changes" webh
 
 LMBS is set per-task during the cascade's patch phase and cleared afterward. The 3-second sleep between LMBS set and patch has been eliminated — the debounce + editedByBot detection handles echo prevention.
 
-### 1.5 withStudyLock — Add-Task-Set Serialization
+### 1.5 withStudyLock — Per-Study Serialization
 
-**File:** `src/routes/add-task-set.js` (function `withStudyLock`)
-**Used by:** `add-task-set` only
+**File:** `src/services/study-lock.js`
+**Used by:** `add-task-set`, `inception` (shared via module-scope `_studyLocks` Map; added to inception in PR E0)
 
-A lightweight per-study Promise chain that serializes concurrent add-task-set operations. When two "Add TLF" button clicks fire for the same study within seconds, the second waits for the first to complete before running.
+A lightweight per-study Promise chain that serializes operations on the same study — across both add-task-set and inception. When two button clicks fire for the same study within seconds (e.g., two "Add TLF" clicks, or an inception and an add-task-set overlapping), the second waits for the first to complete before running.
 
-This is separate from CascadeQueue because add-task-set doesn't need debounce — it's a fire-once button click, not a stream of date-change webhooks.
+Because both routes import from the same shared module, the underlying `_studyLocks` Map is shared: an in-flight inception on a study will block an add-task-set on that same study, and vice versa. Different studies remain fully concurrent.
+
+This is separate from CascadeQueue because these routes don't need debounce — they're fire-once button clicks, not a stream of date-change webhooks.
 
 ### 1.6 Graceful Shutdown
 
@@ -95,8 +97,8 @@ On startup:
 | `/webhook/date-cascade` | CascadeQueue | Disables (finally) | ✓ editedByBot | Per-study FIFO |
 | `/webhook/undo-cascade` | CascadeQueue | Disables (3 paths) | ✓ editedByBot | Per-study FIFO |
 | `/webhook/status-rollup` | FlightTracker | Checks (early return if ON) | ✓ editedByBot | None |
-| `/webhook/inception` | FlightTracker | Enables → Disables | ✓ editedByBot | Import Mode blocks cascades |
-| `/webhook/add-task-set` | FlightTracker + withStudyLock | Enables → Disables | ✓ editedByBot | Per-study Promise chain |
+| `/webhook/inception` | FlightTracker + withStudyLock | Enables → Disables | ✓ editedByBot | Per-study Promise chain (shared with add-task-set) |
+| `/webhook/add-task-set` | FlightTracker + withStudyLock | Enables → Disables | ✓ editedByBot | Per-study Promise chain (shared with inception) |
 | `/webhook/deletion` | FlightTracker | — | ✓ editedByBot | None |
 | `/webhook/copy-blocks` | FlightTracker | — | — | None |
 
@@ -120,6 +122,7 @@ Import Mode bridges the two: button routes enable it, which causes CascadeQueue 
 | **PM A and PM B edit different tasks in the SAME study simultaneously** | Both webhooks enter debounce (different task IDs, independent timers). Both fire after 5s. Per-study FIFO serializes them: PM A's cascade runs first, PM B's cascade runs second (re-querying the graph after A's changes). |
 | **PM clicks add-task-set during an active date cascade** | Import Mode is already OFF (cascade doesn't set it). The button automation sets Import Mode ON before firing the webhook. Any concurrent cascades in the queue will see Import Mode ON and skip. After add-task-set completes and disables Import Mode, queued cascades resume normally. |
 | **PM clicks add-task-set twice rapidly on the same study** | `withStudyLock` serializes: second click waits for the first to finish. Both use Import Mode. No duplicate tasks because the second operation re-queries after the first completes. |
+| **PM clicks inception and add-task-set on the same study in quick succession** | Same-study `withStudyLock` serializes across routes (since PR E0): whichever fires first runs to completion; the second waits. Both use Import Mode. No overlapping provisioning writes. |
 | **PM clicks Undo Last Automation during an active cascade** | Undo webhook enters CascadeQueue (same queue as date-cascade). It waits for the in-flight cascade to finish, then runs. The undo restores pre-cascade dates. |
 | **PM clicks Undo Last Automation when no cascade has occurred** | Undo store is empty for this study. Route returns "No recent automation to undo" via Automation Reporting property. No date changes. |
 
@@ -128,7 +131,7 @@ Import Mode bridges the two: button routes enable it, which causes CascadeQueue 
 | Scenario | What Happens |
 |---|---|
 | **PM A edits Study 1, PM B edits Study 2 simultaneously** | Fully concurrent. Different study IDs → different queues. No interaction. |
-| **3 PMs click add-task-set on 3 different studies simultaneously** | Fully concurrent. Each study has its own `withStudyLock`. Import Mode is per-study. No cross-study blocking. |
+| **3 PMs click add-task-set on 3 different studies simultaneously** | Fully concurrent. `withStudyLock` is keyed by study id. Import Mode is per-study. No cross-study blocking. Same holds for mixed inception + add-task-set clicks across different studies. |
 | **PM edits Study 1, triggering a cascade that takes 30 seconds. Another PM tries inception on Study 2.** | No interaction. Inception on Study 2 runs immediately and concurrently with Study 1's cascade. |
 
 ### Deployment Scenarios
@@ -151,7 +154,7 @@ Import Mode bridges the two: button routes enable it, which causes CascadeQueue 
 |---|---|
 | CascadeQueue per-study FIFO | Two replicas could process cascades for the same study concurrently — no serialization across processes |
 | UndoStore per-study entries | Undo saved on replica A is invisible to replica B — PM's undo request hits the wrong replica |
-| withStudyLock Promise chain | Same-study add-task-set clicks routed to different replicas run concurrently |
+| withStudyLock Promise chain | Same-study inception and add-task-set clicks routed to different replicas run concurrently |
 | FlightTracker graceful shutdown | Each replica only drains its own in-flight work |
 | Debounce timers | Two webhooks for the same task routed to different replicas both fire — no deduplication |
 
@@ -169,7 +172,7 @@ Import Mode bridges the two: button routes enable it, which causes CascadeQueue 
 - `src/services/cascade-queue.js` — CascadeQueue implementation
 - `src/services/flight-tracker.js` — FlightTracker implementation
 - `src/services/undo-store.js` — UndoStore (in-memory undo manifests)
-- `src/routes/add-task-set.js` — withStudyLock implementation
+- `src/services/study-lock.js` — withStudyLock implementation (shared by add-task-set and inception)
 - `src/index.js` — Graceful shutdown + import-mode startup sweep
 - `src/config.js` — `CASCADE_DEBOUNCE_MS` env var (default 5000ms)
 - Railway deployment: single-replica confirmed (no scaling config, no replica env vars as of 2026-04-15)
