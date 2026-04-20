@@ -17,6 +17,11 @@ export class CascadeTracer {
     this.metadata = new Map();
     this.retries = [];
     this._activePhases = new Map();
+    // Sweep-specific details — lets support un-archive if mis-archived.
+    // Keeps sweep payload structured in Activity Log without colliding with
+    // free-form metadata via set().
+    this.sweepArchivedIds = [];
+    this.sweepFailedArchives = [];
   }
 
   startPhase(name) {
@@ -48,6 +53,30 @@ export class CascadeTracer {
     this.retries.push({ attempt, backoffMs, status, tokenIndex, ts: Date.now() });
   }
 
+  recordSweepArchived({ tsid, pageId }) {
+    this.count('sweepDuplicatesFound');
+    this.count('sweepDuplicatesArchived');
+    this.sweepArchivedIds.push({ tsid, pageId });
+  }
+
+  recordSweepArchiveFailed({ tsid, pageId, error }) {
+    this.count('sweepDuplicatesFound');
+    this.count('sweepDuplicatesFailed');
+    this.sweepFailedArchives.push({
+      tsid,
+      pageId,
+      error: String(error?.message || error).slice(0, 200),
+    });
+  }
+
+  recordSweepQueryFailed(error) {
+    this.count('sweepQueryFailed');
+    this.set(
+      'sweepQueryError',
+      String(error?.message || error).slice(0, 200),
+    );
+  }
+
   toJSON() {
     const phases = {};
     for (const [name, duration] of this.phases) {
@@ -75,7 +104,7 @@ export class CascadeTracer {
       phases[name] = duration;
     }
     const totalBackoffMs = this.retries.reduce((sum, r) => sum + (r.backoffMs || 0), 0);
-    return {
+    const details = {
       timing: {
         totalMs: Date.now() - this.startTime,
         phases,
@@ -85,5 +114,22 @@ export class CascadeTracer {
         totalBackoffMs,
       },
     };
+    // Sweep details — only include when sweep emitted anything. Keeps the
+    // happy-path Activity Log body clean.
+    const sweepFound = this.counters.get('sweepDuplicatesFound') || 0;
+    const sweepArchived = this.counters.get('sweepDuplicatesArchived') || 0;
+    const sweepFailed = this.counters.get('sweepDuplicatesFailed') || 0;
+    const sweepQueryFailed = this.counters.get('sweepQueryFailed') || 0;
+    if (sweepFound > 0 || sweepFailed > 0 || sweepQueryFailed > 0) {
+      details.sweepStats = {
+        duplicatesFound: sweepFound,
+        duplicatesArchived: sweepArchived,
+        duplicatesFailed: sweepFailed,
+        queryFailed: sweepQueryFailed,
+        archivedIds: this.sweepArchivedIds.slice(0, 50),
+        failedArchives: this.sweepFailedArchives.slice(0, 50),
+      };
+    }
+    return details;
   }
 }
