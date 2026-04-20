@@ -140,4 +140,39 @@ describe('ActivityLogService', () => {
     const payload = notionClient.request.mock.calls[0][2];
     expect(payload.properties['Tested by']).toBeUndefined();
   });
+
+  it('renders narrowRetrySuppressed line in body when present', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Provisioning',
+      status: 'failed',
+      summary: 'createPages partial failure',
+      details: {
+        narrowRetrySuppressed: 3,
+        retryStats: { count: 1, totalBackoffMs: 500 },
+      },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    const bodyText = JSON.stringify(children);
+    expect(bodyText).toContain('Narrow retry suppressed: 3');
+  });
+
+  it('omits narrowRetrySuppressed line when zero or missing', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Provisioning',
+      status: 'success',
+      summary: 'clean run',
+      details: { narrowRetrySuppressed: 0 },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    const bodyText = JSON.stringify(children);
+    expect(bodyText).not.toContain('Narrow retry suppressed');
+  });
 });
