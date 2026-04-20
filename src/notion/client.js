@@ -155,13 +155,25 @@ export class NotionClient {
 
     const results = new Array(items.length);
     let nextIndex = 0;
+    let aborted = false;
 
     const worker = async (slot) => {
       for (;;) {
+        // Stop scheduling new items after any worker has thrown. In-flight
+        // items continue to run — they have their own fate. This is the
+        // R1-7 batch semantics: abort-on-first-unsafe, let in-flight
+        // complete, return per-operation outcomes.
+        if (aborted) return;
         const index = nextIndex;
         nextIndex += 1;
         if (index >= items.length) return;
-        results[index] = await processItem(items[index], slot, index);
+        try {
+          results[index] = await processItem(items[index], slot, index);
+        } catch (err) {
+          results[index] = err;
+          aborted = true;
+          return;
+        }
       }
     };
 
@@ -192,13 +204,27 @@ export class NotionClient {
   }
 
   async requestBatch(operations, { tracer, workersPerToken, maxWorkers } = {}) {
-    return this.runParallel(
+    const results = await this.runParallel(
       operations,
       async (operation, slot) => this._requestWithSlot(slot, operation.method, operation.path, operation.body, {
         tracer: operation.tracer ?? tracer,
       }),
       { workersPerToken, maxWorkers },
     );
+
+    // Full-batch failure: every slot is either undefined (never picked up
+    // after abort) or an Error. Throw the first real error so callers that
+    // treat the entire batch as atomic (today's behavior) keep working.
+    const errors = results.filter((r) => r instanceof Error);
+    const successes = results.filter((r) => r !== undefined && !(r instanceof Error));
+    if (successes.length === 0 && errors.length > 0) {
+      throw errors[0];
+    }
+
+    // Partial success: return the array as-is. Callers inspect each slot
+    // and decide what to do. See R1-7 / Unit 4 in
+    // docs/plans/2026-04-20-002-refactor-narrow-retry-non-idempotent-writes-plan.md
+    return results;
   }
 
   async queryDatabase(dbId, filter, pageSize = 100, { tracer } = {}) {
@@ -248,7 +274,7 @@ export class NotionClient {
       return { updatedCount: 0, taskIds: [] };
     }
 
-    await this.requestBatch(
+    const results = await this.requestBatch(
       updates.map((update) => ({
         method: 'PATCH',
         path: `/pages/${update.taskId}`,
@@ -256,6 +282,14 @@ export class NotionClient {
       })),
       { tracer, workersPerToken },
     );
+
+    // PATCH /pages/:id is idempotent — errors only happen after the retry
+    // loop exhausts. Preserve today's fail-loudly semantics for this
+    // caller: if any slot errored, throw so the route handler surfaces it.
+    // Unlike createPages, partial success here isn't useful (the remaining
+    // updates are desired invariants, not a creation log).
+    const firstError = results.find((r) => r instanceof Error);
+    if (firstError) throw firstError;
 
     return { updatedCount: updates.length, taskIds: updates.map((update) => update.taskId) };
   }

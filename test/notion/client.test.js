@@ -564,4 +564,231 @@ describe('NotionClient', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('batch abort semantics (Unit 4)', () => {
+    function makeTracer() {
+      return {
+        suppressedCalls: 0,
+        retries: [],
+        recordNarrowRetrySuppressed() { this.suppressedCalls += 1; },
+        recordRetry(entry) { this.retries.push(entry); },
+      };
+    }
+
+    it('all-success createPages returns page objects in input order', async () => {
+      const fetchMock = vi.fn(async (url, options) => {
+        const body = JSON.parse(options.body);
+        const templateId = body.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+        return {
+          ok: true,
+          status: 200, statusText: 'OK', headers: { get: () => null },
+          text: async () => JSON.stringify({ id: `page-${templateId}` }),
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.createPages([
+        { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'a' } }] } } },
+        { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'b' } }] } } },
+      ], { tracer });
+
+      expect(result.length).toBe(2);
+      expect(result[0].id).toBe('page-a');
+      expect(result[1].id).toBe('page-b');
+      expect(tracer.suppressedCalls).toBe(0);
+    });
+
+    it('all-fail createPages throws the first error (preserves prior behavior)', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502, statusText: 'Bad Gateway', headers: { get: () => null },
+        text: async () => JSON.stringify({ message: 'bad gateway' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      await expect(client.createPages([
+        { properties: {} },
+        { properties: {} },
+      ], { tracer })).rejects.toThrow(/502/);
+    });
+
+    it('partial-fail createPages returns mixed array (errors + pages)', async () => {
+      // Two workers run slots 0 and 1 concurrently. Slot 0 is slow-success,
+      // slot 1 is fast-fail. Abort fires, slot 2 (queued) never starts.
+      let callCount = 0;
+      const fetchMock = vi.fn(async () => {
+        const myCall = ++callCount;
+        if (myCall === 1) {
+          // slow success
+          await new Promise((r) => setTimeout(r, 30));
+          return {
+            ok: true,
+            status: 200, statusText: 'OK', headers: { get: () => null },
+            text: async () => JSON.stringify({ id: 'page-1' }),
+          };
+        }
+        if (myCall === 2) {
+          // immediate 502 → suppression → abort
+          return {
+            ok: false,
+            status: 502, statusText: 'Bad Gateway', headers: { get: () => null },
+            text: async () => JSON.stringify({ message: 'bad gateway' }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200, statusText: 'OK', headers: { get: () => null },
+          text: async () => JSON.stringify({ id: `page-${myCall}` }),
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1', 't2'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.createPages([
+        { properties: { name: '1' } },
+        { properties: { name: '2' } },
+        { properties: { name: '3' } },
+      ], { tracer, workersPerToken: 1 });
+
+      expect(result.length).toBe(3);
+      // Slot 0 is slow-success; slot 1 is the error; slot 2 never started.
+      expect(result[0]?.id).toBe('page-1');
+      expect(result[1]).toBeInstanceOf(Error);
+      expect(result[1].message).toMatch(/502/);
+      expect(result[2]).toBeUndefined();
+      expect(tracer.suppressedCalls).toBe(1);
+    });
+
+    it('non_retryable (400) does not increment narrowRetrySuppressed counter', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400, statusText: 'Bad Request', headers: { get: () => null },
+        text: async () => JSON.stringify({ message: 'invalid' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      await expect(client.createPages([
+        { properties: {} },
+      ], { tracer })).rejects.toThrow(/400/);
+      // non_retryable should NOT count as a narrow-retry suppression
+      expect(tracer.suppressedCalls).toBe(0);
+    });
+
+    it('in-flight workers complete after another worker aborts', async () => {
+      let callCount = 0;
+      const calls = [];
+      const fetchMock = vi.fn(async (url, options) => {
+        callCount += 1;
+        const myCall = callCount;
+        calls.push(myCall);
+        // First call: slow, succeeds. Second call: fast, fails.
+        // This simulates a scenario where worker 2 throws while worker 1 is in-flight.
+        if (myCall === 1) {
+          await new Promise((r) => setTimeout(r, 25));
+          return {
+            ok: true,
+            status: 200, statusText: 'OK', headers: { get: () => null },
+            text: async () => JSON.stringify({ id: 'page-slow' }),
+          };
+        }
+        // Immediate 502
+        return {
+          ok: false,
+          status: 502, statusText: 'Bad Gateway', headers: { get: () => null },
+          text: async () => JSON.stringify({ message: 'bad gateway' }),
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1', 't2'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.createPages([
+        { properties: { name: '1' } },
+        { properties: { name: '2' } },
+        { properties: { name: '3' } },
+      ], { tracer, workersPerToken: 1 });
+
+      expect(result.length).toBe(3);
+      // Slot 0 should be the slow success.
+      expect(result[0]?.id).toBe('page-slow');
+      // Slot 1 should be the error that triggered abort.
+      expect(result[1]).toBeInstanceOf(Error);
+      // Slot 2 should never have started.
+      expect(result[2]).toBeUndefined();
+      expect(tracer.suppressedCalls).toBe(1);
+    });
+
+    it('requestBatch returns mixed array and does not throw on partial success', async () => {
+      // Two workers: slow-success on slot 0, fast-fail on slot 1, slot 2 never starts.
+      let callCount = 0;
+      const fetchMock = vi.fn(async () => {
+        const myCall = ++callCount;
+        if (myCall === 1) {
+          await new Promise((r) => setTimeout(r, 30));
+          return {
+            ok: true,
+            status: 200, statusText: 'OK', headers: { get: () => null },
+            text: async () => JSON.stringify({ id: 'page-1' }),
+          };
+        }
+        return {
+          ok: false,
+          status: 502, statusText: 'Bad Gateway', headers: { get: () => null },
+          text: async () => JSON.stringify({ message: 'bad gateway' }),
+        };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const tracer = makeTracer();
+
+      const client = new NotionClient({
+        tokens: ['t1', 't2'],
+        rateLimit: { maxPerSecond: 100 },
+        retry: { maxAttempts: 3, baseMs: 1 },
+      });
+
+      const result = await client.requestBatch([
+        { method: 'POST', path: '/pages', body: {} },
+        { method: 'POST', path: '/pages', body: {} },
+        { method: 'POST', path: '/pages', body: {} },
+      ], { tracer, workersPerToken: 1 });
+
+      expect(result.length).toBe(3);
+      expect(result[0]?.id).toBe('page-1');
+      expect(result[1]).toBeInstanceOf(Error);
+      expect(result[2]).toBeUndefined();
+      expect(tracer.suppressedCalls).toBe(1);
+    });
+  });
 });
