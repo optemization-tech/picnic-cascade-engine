@@ -9,6 +9,7 @@ import { withStudyLock } from '../services/study-lock.js';
 import { fetchBlueprint, buildTaskTree, filterBlueprintSubtree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
+import * as duplicateSweep from '../services/duplicate-sweep.js';
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -530,6 +531,23 @@ async function processAddTaskSet(req) {
         newIdMapping[templateId] = productionId;
       }
     }
+
+    // ── Post-flight duplicate sweep ─────────────────────────────────────
+    // Safety net for silent duplicates caused by retry-after-commit. Scoped
+    // to THIS run's TSIDs (derived from newIdMapping — only the new pages
+    // from this add-task-set call, not the external deps reused from
+    // existingIdMapping). Under existing withStudyLock coverage.
+    // See docs/ENGINE-BEHAVIOR-REFERENCE.md §11.
+    const sweepTrackedIds = new Set(Object.values(newIdMapping));
+    const sweepTsids = Object.keys(newIdMapping);
+    await duplicateSweep.run({
+      studyPageId,
+      trackedIds: sweepTrackedIds,
+      tsids: sweepTsids,
+      tracer,
+      notionClient,
+      studyTasksDbId: config.notion.studyTasksDbId,
+    });
 
     const successSummary = `Add Task Set complete (${buttonType}): ${createResult.totalCreated} tasks created, ${wireResult.parentsPatchedCount} parents wired, ${wireResult.depsPatchedCount} deps wired`;
     const commentSummary = `${buttonType} tasks added — ${createResult.totalCreated} tasks created`;

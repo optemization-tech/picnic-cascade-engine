@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     reportStatus: vi.fn(),
     request: vi.fn(),
     patchPages: vi.fn(),
+    archivePage: vi.fn(),
   },
   fetchBlueprint: vi.fn(),
   buildTaskTree: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   createStudyTasks: vi.fn(),
   wireRemainingRelations: vi.fn(),
   copyBlocks: vi.fn(),
+  sweepRun: vi.fn(),
   activityLogService: {
     logTerminalEvent: vi.fn(),
   },
@@ -59,6 +61,10 @@ vi.mock('../../src/provisioning/wire-relations.js', () => ({
 
 vi.mock('../../src/provisioning/copy-blocks.js', () => ({
   copyBlocks: mocks.copyBlocks,
+}));
+
+vi.mock('../../src/services/duplicate-sweep.js', () => ({
+  run: mocks.sweepRun,
 }));
 
 vi.mock('../../src/services/activity-log.js', () => ({
@@ -111,6 +117,8 @@ describe('add-task-set route', () => {
     mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
     mocks.mockClient.reportStatus.mockResolvedValue({});
     mocks.mockClient.request.mockResolvedValue({});
+    mocks.sweepRun.mockReset();
+    mocks.sweepRun.mockResolvedValue(undefined);
   });
 
   it('returns 200 immediately', async () => {
@@ -1293,6 +1301,87 @@ describe('add-task-set route', () => {
 
       resolveFirst();
       await flush(40);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Post-flight duplicate sweep (PR E2)
+  // ────────────────────────────────────────────────────────────────────
+  describe('post-flight duplicate sweep', () => {
+    it('invokes duplicateSweep.run with only NEW tsids (not reused external deps)', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([
+        // Pre-existing task the new run reuses as an external dep (not swept)
+        {
+          id: 'existing-prod',
+          properties: {
+            'Template Source ID': { rich_text: [{ plain_text: 'tsid-existing' }] },
+          },
+        },
+      ]);
+      mocks.fetchBlueprint.mockResolvedValue([
+        { id: 'bp-new', properties: {} },
+      ]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-new', _taskName: 'New Task' }], isLastLevel: true },
+      ]);
+      // createStudyTasks merges existingIdMapping into its return, so idMapping
+      // has both the existing and the new; newIdMapping strips the existing.
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: {
+          'tsid-existing': 'existing-prod', // reused external dep
+          'bp-new': 'new-prod', // newly created
+        },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-sweep-ats' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'New Task' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      expect(mocks.sweepRun).toHaveBeenCalledTimes(1);
+      const args = mocks.sweepRun.mock.calls[0][0];
+      expect(args.studyPageId).toBe('study-sweep-ats');
+      // tsids should include ONLY the newly created tsid, not the reused one
+      expect(args.tsids).toEqual(['bp-new']);
+      expect([...args.trackedIds]).toEqual(['new-prod']);
+      expect(args.studyTasksDbId).toBe('db-study-tasks');
+      expect(args.tracer).toBeDefined();
+      expect(args.notionClient).toBeDefined();
+    });
+
+    it('add-task-set reports success when sweep is called (non-fatal)', async () => {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-1', _taskName: 'Task' }], isLastLevel: true },
+      ]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: { 'bp-1': 'prod-1' },
+        totalCreated: 1,
+        depTracking: [],
+        parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'Task' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      expect(mocks.sweepRun).toHaveBeenCalled();
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ workflow: 'Add Task Set', status: 'success' }),
+      );
     });
   });
 });
