@@ -244,6 +244,22 @@ On process start, the engine clears any `Import Mode = true` studies left over f
 
 See [CONCURRENCY-MODEL.md](CONCURRENCY-MODEL.md) for the full concurrency documentation: per-study FIFO queuing (CascadeQueue), debounce, Import Mode lifecycle, LMBS echo prevention, withStudyLock (add-task-set serialization), graceful shutdown, and the multi-replica migration warning.
 
+### 11) Duplicate Prevention
+
+The engine's create path (POST `/pages`) is not idempotent at Notion's side — a retry-after-commit creates a second page with the same payload. This produces "silent duplicates": the engine thinks it succeeded once, but two tasks exist in the database with the same `Template Source ID`. Three layered safety nets address this, sequenced as PR E0 / E1 / E2:
+
+**Layer 1 — Shared study lock (PR E0).** `withStudyLock(studyId, fn)` (in `src/services/study-lock.js`) is shared across inception and add-task-set. Same-study operations serialize through a module-level Promise chain; different studies run in parallel. Necessary foundation for L2 and L3 — without the lock, the post-flight sweep could race with a concurrent create on the same study.
+
+**Layer 2 — Path-based narrow retry (PR E1).** `_requestWithSlot` classifies non-GET Notion endpoints by `method + path` into `idempotent`, `non_idempotent`, or `block_append`. Non-idempotent endpoints (notably POST `/pages`) skip the retry loop on ambiguous failures (transient network errors where the server may have committed). This eliminates the dominant source of client-side retry-after-commit duplicates. `archivePage` (PATCH `/pages/:id` with top-level `archived`) is classified as idempotent; archiving an already-archived page is a server-side no-op, so normal retries apply.
+
+**Layer 3 — Post-flight + weekly sweep (PR E2).** After `createStudyTasks` completes in inception / add-task-set, `duplicateSweep.run({studyPageId, trackedIds, tsids, tracer, notionClient, studyTasksDbId})` waits `config.sweepGraceMs` (default 45s, configurable via `SWEEP_GRACE_MS` env var) for Notion's query index to catch up with recent writes, then queries all tasks in the study via a single `Study contains X` filter, groups by `Template Source ID`, and archives any extras whose page IDs are not in `trackedIds`. `trackedIds` is derived from `createStudyTasks.idMapping` at the call site — no change to the function signature. Runs under `withStudyLock` coverage; the 45s grace extends lock hold time by 45-80s per provisioning run. Different studies unaffected. Webhook response (`res.status(200)`) is acknowledged immediately — only the async worker (tracked by `flightTracker`) is delayed, so no webhook-layer timeout. Sweep failure is non-fatal — errors land in tracer counters and flow through Activity Log details.
+
+**Weekly workspace sweep (`scripts/sweep-all-studies.js`).** Scheduled script — Railway Cron or GitHub Actions — catches duplicates that slipped past the 45s grace window (rare) AND any pre-E2 backlog. Dry-run by default; `--archive` executes after operator review. Keep-rule: prefer fully-wired pages, fall back to earliest `created_time`. Flags pages with non-empty comments, non-bot `last_edited_by`, or non-default `Status` — flagged pages are skipped, require manual resolution.
+
+**Observable signals:** `retryStats` (all endpoints — existing), `narrowRetrySuppressed` (PR E1 — retries the classifier skipped), `sweepDuplicatesFound / sweepDuplicatesArchived / sweepDuplicatesFailed / sweepQueryFailed` (PR E2). Sweep details in Activity Log body include the archived page IDs (up to 50 per run) for support un-archive if ever needed.
+
+**For future maintainers:** when adding a new non-GET Notion endpoint, update PR E1's path-based classifier in `src/notion/client.js` to the correct category. Default (`idempotent`) retries as today; if the endpoint is actually non-idempotent or block-append, duplicates will slip through until the weekly sweep catches them. Not zero-cost — bounded by the sweep cadence.
+
 ## Change Protocol
 For every behavior change:
 1. Update L1 statement
