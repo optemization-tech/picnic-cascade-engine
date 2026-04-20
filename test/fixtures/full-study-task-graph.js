@@ -4,7 +4,7 @@ import { parseDate, formatDate, addBusinessDays, signedBDDelta } from '../../src
 import { findBlockerStartViolations } from '../../src/verify/blocker-starts.js';
 
 const fixture = JSON.parse(
-  readFileSync(new URL('./seb-test-3.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('./full-study-task-graph.json', import.meta.url), 'utf8'),
 );
 
 function cloneTask(task) {
@@ -19,13 +19,13 @@ function cloneTask(task) {
   };
 }
 
-export function makeSebTest3Fixture() {
+export function makeFullStudyTaskGraphFixture() {
   return fixture.map(cloneTask);
 }
 
 export function getTaskByName(tasks, taskName) {
   const task = tasks.find((candidate) => candidate.name === taskName);
-  if (!task) throw new Error(`Missing task in Seb test 3 fixture: ${taskName}`);
+  if (!task) throw new Error(`Missing task in full study task graph fixture: ${taskName}`);
   return task;
 }
 
@@ -101,7 +101,7 @@ export function findFixtureGapViolations(tasks) {
 }
 
 export function runFixtureScenario(runCascade, sourceTaskName, cascadeMode, deltas = {}) {
-  const tasks = makeSebTest3Fixture();
+  const tasks = makeFullStudyTaskGraphFixture();
   const params = makeCascadeParams(tasks, sourceTaskName, cascadeMode, deltas);
   const result = runCascade({
     ...params,

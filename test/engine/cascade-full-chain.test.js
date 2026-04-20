@@ -6,7 +6,7 @@ import {
   findFixtureGapViolations,
   getTaskByName,
   runFixtureScenario,
-} from '../fixtures/seb-test-3.js';
+} from '../fixtures/full-study-task-graph.js';
 
 describe('runCascade full study invariants', () => {
   it('starts from an invariant-clean 200-task fixture', () => {
