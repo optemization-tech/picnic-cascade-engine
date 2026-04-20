@@ -158,6 +158,19 @@ export class NotionClient {
     return this.request('PATCH', `/pages/${pageId}`, { properties }, { tracer });
   }
 
+  /**
+   * Archives a page by PATCHing `archived: true` at the top level (not under
+   * `properties`). Dedicated method because `patchPage` always wraps args under
+   * `{properties: ...}`, which Notion rejects for the top-level `archived` flag.
+   *
+   * Used by the post-flight duplicate sweep (`src/services/duplicate-sweep.js`).
+   * PATCH /pages/:id is idempotent at Notion's side (archiving an already-archived
+   * page is a no-op), so the standard retry path is safe.
+   */
+  async archivePage(pageId, { tracer } = {}) {
+    return this.request('PATCH', `/pages/${pageId}`, { archived: true }, { tracer });
+  }
+
   async createPages(pageBodies, { tracer, workersPerToken } = {}) {
     return this.requestBatch(
       pageBodies.map((pageBody) => ({ method: 'POST', path: '/pages', body: pageBody })),

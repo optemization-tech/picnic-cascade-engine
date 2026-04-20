@@ -63,6 +63,78 @@ describe('NotionClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('archivePage sends {archived: true} at top level (not under properties)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'page-x', archived: true }),
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+    const result = await client.archivePage('page-x');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0];
+    expect(call[0]).toContain('/pages/page-x');
+    expect(call[1].method).toBe('PATCH');
+    const body = JSON.parse(call[1].body);
+    // Critical: archived is top-level, NOT wrapped under properties
+    expect(body).toEqual({ archived: true });
+    expect(body.properties).toBeUndefined();
+    expect(result.archived).toBe(true);
+  });
+
+  it('archivePage is idempotent — archiving already-archived page returns success', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'page-x', archived: true }),
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+
+    // Archive twice; both succeed
+    await client.archivePage('page-x');
+    const result = await client.archivePage('page-x');
+    expect(result.archived).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('archivePage surfaces 404 (non-existent page) as non-retryable', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      text: async () => JSON.stringify({ message: 'Could not find page' }),
+      status: 404,
+      statusText: 'Not Found',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 3, baseMs: 1 },
+    });
+
+    await expect(client.archivePage('missing-page')).rejects.toThrow('404');
+    // 404 is non-retryable (4xx except 429); exactly 1 call
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('patchPage only sends the properties provided', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
