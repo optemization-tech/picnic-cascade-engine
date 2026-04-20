@@ -71,6 +71,7 @@ vi.mock('../../src/provisioning/copy-blocks.js', () => ({
 }));
 
 import { handleInception } from '../../src/routes/inception.js';
+import { _resetStudyLocks } from '../../src/services/study-lock.js';
 
 function makeReqRes(body = {}) {
   const req = { body };
@@ -94,6 +95,7 @@ describe('inception route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    _resetStudyLocks();
     mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
     mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
     mocks.mockClient.reportStatus.mockResolvedValue({});
@@ -679,5 +681,135 @@ describe('inception route', () => {
         && call[2]?.properties?.['Import Mode']?.checkbox === false,
     );
     expect(disableCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Per-study serialization (withStudyLock coverage on handleInception).
+  // Two back-to-back webhooks for the same study must serialize so the
+  // second sees the tasks the first created — double-inception guard at
+  // inception.js:107 can then catch it. Without the lock, both races
+  // past `existingTasks.length === 0` and both create the full task set.
+  // ────────────────────────────────────────────────────────────────────
+  describe('per-study serialization', () => {
+    it('serializes concurrent inception webhooks for the same study', async () => {
+      const order = [];
+      let resolveFirst;
+      const firstGate = new Promise(r => { resolveFirst = r; });
+
+      // First call blocks on getPage until we release it. Second call also
+      // hits getPage — if the lock works, it runs only after firstGate resolves.
+      mocks.mockClient.getPage
+        .mockImplementationOnce(async () => {
+          order.push('call-1-start');
+          await firstGate;
+          order.push('call-1-end');
+          return {
+            properties: {
+              'Contract Sign Date': { date: { start: '2026-01-15' } },
+              'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+            },
+          };
+        })
+        .mockImplementationOnce(async () => {
+          order.push('call-2-start');
+          return {
+            properties: {
+              'Contract Sign Date': { date: { start: '2026-01-15' } },
+              'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+            },
+          };
+        });
+
+      // First call: no existing tasks (proceeds to create).
+      // Second call: tasks exist (the guard at line 107 fires).
+      mocks.mockClient.queryDatabase
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: 'existing-task' }]);
+
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
+      mocks.buildTaskTree.mockReturnValue([]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: {}, totalCreated: 200, depTracking: [], parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req: req1, res: res1 } = makeReqRes({ data: { id: 'study-1' } });
+      const { req: req2, res: res2 } = makeReqRes({ data: { id: 'study-1' } });
+
+      await handleInception(req1, res1);
+      await handleInception(req2, res2);
+
+      // Only call 1 should have started — call 2 is queued behind the lock.
+      await flush();
+      expect(order).toEqual(['call-1-start']);
+
+      // Release call 1 and flush enough to let the whole first run + queued
+      // second run complete.
+      resolveFirst();
+      for (let i = 0; i < 60; i++) await Promise.resolve();
+
+      // Call 2 starts only after call 1 finished.
+      expect(order).toEqual(['call-1-start', 'call-1-end', 'call-2-start']);
+
+      // Call 2 hits the double-inception guard (queryDatabase returned one task).
+      // Abort path: reportStatus with error message, activity log 'failed'.
+      const doubleInceptionErrors = mocks.mockClient.reportStatus.mock.calls.filter(
+        (call) => call[1] === 'error' && call[2] === 'Study already has tasks — aborting inception',
+      );
+      expect(doubleInceptionErrors.length).toBe(1);
+
+      // createStudyTasks ran exactly once (for call 1, not again for call 2).
+      expect(mocks.createStudyTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows concurrent inception webhooks for different studies', async () => {
+      const order = [];
+      let resolveA;
+      const aGate = new Promise(r => { resolveA = r; });
+
+      mocks.mockClient.getPage
+        .mockImplementationOnce(async () => {
+          order.push('study-A-start');
+          await aGate;
+          order.push('study-A-end');
+          return {
+            properties: {
+              'Contract Sign Date': { date: { start: '2026-01-15' } },
+              'Study Name (Internal)': { title: [{ text: { content: 'Study A' } }] },
+            },
+          };
+        })
+        .mockImplementationOnce(async () => {
+          order.push('study-B-start');
+          return {
+            properties: {
+              'Contract Sign Date': { date: { start: '2026-01-15' } },
+              'Study Name (Internal)': { title: [{ text: { content: 'Study B' } }] },
+            },
+          };
+        });
+
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
+      mocks.buildTaskTree.mockReturnValue([]);
+      mocks.createStudyTasks.mockResolvedValue({
+        idMapping: {}, totalCreated: 0, depTracking: [], parentTracking: [],
+      });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+
+      const { req: reqA, res: resA } = makeReqRes({ data: { id: 'study-A' } });
+      const { req: reqB, res: resB } = makeReqRes({ data: { id: 'study-B' } });
+
+      await handleInception(reqA, resA);
+      await handleInception(reqB, resB);
+      await flush();
+
+      // Both should have started in parallel — different studies don't block.
+      expect(order).toContain('study-A-start');
+      expect(order).toContain('study-B-start');
+
+      resolveA();
+      for (let i = 0; i < 40; i++) await Promise.resolve();
+    });
   });
 });
