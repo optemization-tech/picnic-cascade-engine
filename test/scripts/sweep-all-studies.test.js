@@ -4,6 +4,7 @@ const {
   confirmArchive,
   pickCanonical,
   classifyPage,
+  computeFlags,
 } = await import('../../scripts/sweep-all-studies.js');
 
 // Helper — build a minimal Notion-shaped page object for pickCanonical tests.
@@ -179,5 +180,61 @@ describe('sweep-all-studies: pickCanonical tri-state keep-rule', () => {
     const result = pickCanonical([]);
     expect(result.canonical).toBeNull();
     expect(result.groupState).toBe('empty');
+  });
+});
+
+describe('sweep-all-studies: computeFlags (engine-bot protection)', () => {
+  // Helper — build a minimal page shape with a last_edited_by metadata block.
+  function makePageWithEditor({ type, id, status = 'Backlog' }) {
+    return {
+      id: 'page-x',
+      last_edited_by: { type, id },
+      properties: {
+        Status: { status: { name: status } },
+      },
+    };
+  }
+
+  it('ENGINE_BOT_USER_ID set + bot edit matches → no flag', () => {
+    const page = makePageWithEditor({ type: 'bot', id: 'engine-bot-id' });
+    const flags = computeFlags(page, false, { engineBotUserId: 'engine-bot-id' });
+    expect(flags).toEqual([]);
+  });
+
+  it('ENGINE_BOT_USER_ID set + bot edit from different bot → not-engine-bot flag', () => {
+    const page = makePageWithEditor({ type: 'bot', id: 'other-bot-id' });
+    const flags = computeFlags(page, false, { engineBotUserId: 'engine-bot-id' });
+    expect(flags).toContain('not-engine-bot');
+  });
+
+  it('ENGINE_BOT_USER_ID unset + bot edit → flagged conservatively as not-engine-bot', () => {
+    const page = makePageWithEditor({ type: 'bot', id: 'some-bot-id' });
+    const flags = computeFlags(page, false, { engineBotUserId: null });
+    expect(flags).toContain('not-engine-bot');
+  });
+
+  it('ENGINE_BOT_USER_ID unset + human edit → flagged as human (always)', () => {
+    const page = makePageWithEditor({ type: 'person', id: 'user-id' });
+    const flags = computeFlags(page, false, { engineBotUserId: null });
+    expect(flags).toContain('last_edited_by_human');
+    expect(flags).not.toContain('not-engine-bot'); // bot-specific flag doesn't apply to humans
+  });
+
+  it('ENGINE_BOT_USER_ID set + human edit → flagged as human', () => {
+    const page = makePageWithEditor({ type: 'person', id: 'user-id' });
+    const flags = computeFlags(page, false, { engineBotUserId: 'engine-bot-id' });
+    expect(flags).toContain('last_edited_by_human');
+  });
+
+  it('hasComments flag propagates', () => {
+    const page = makePageWithEditor({ type: 'bot', id: 'engine-bot-id' });
+    const flags = computeFlags(page, true, { engineBotUserId: 'engine-bot-id' });
+    expect(flags).toContain('has_comments');
+  });
+
+  it('non-default status flagged', () => {
+    const page = makePageWithEditor({ type: 'bot', id: 'engine-bot-id', status: 'In Progress' });
+    const flags = computeFlags(page, false, { engineBotUserId: 'engine-bot-id' });
+    expect(flags).toContain('status:In Progress');
   });
 });

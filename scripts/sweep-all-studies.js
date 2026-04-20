@@ -164,15 +164,44 @@ async function pageHasComments(pageId) {
   }
 }
 
-function computeFlags(page, hasCommentsFlag) {
+/**
+ * Compute the set of protection flags for a duplicate page. Any non-empty
+ * flag list disqualifies the page from automatic archiving — it requires
+ * manual review.
+ *
+ * Engine-bot protection has two modes:
+ *   - `ENGINE_BOT_USER_ID` set → flag when `last_edited_by.id` doesn't match
+ *     (precise; only pages touched by a foreign bot or human fire).
+ *   - `ENGINE_BOT_USER_ID` unset → conservatively flag ALL bot-edited pages
+ *     as `not-engine-bot` since we can't confirm authorship. This bias is
+ *     intentional: if the operator forgot to export the env var, we would
+ *     rather over-flag than silently archive a page another bot owned.
+ * Human edits are always flagged (either path).
+ */
+export function computeFlags(page, hasCommentsFlag, { engineBotUserId = ENGINE_BOT_USER_ID } = {}) {
   const flags = [];
   const lastEditedByType = page.last_edited_by?.type;
   const lastEditedById = page.last_edited_by?.id;
   if (hasCommentsFlag) flags.push('has_comments');
-  if (lastEditedByType && lastEditedByType !== 'bot') flags.push('last_edited_by_human');
-  if (ENGINE_BOT_USER_ID && lastEditedById && lastEditedById !== ENGINE_BOT_USER_ID) {
-    flags.push('last_edited_by_other_bot');
+
+  // Human edits always flag, regardless of engineBotUserId config.
+  if (lastEditedByType && lastEditedByType !== 'bot') {
+    flags.push('last_edited_by_human');
   }
+
+  // Bot-edit protection — precise when we have the engine bot ID, otherwise
+  // conservative (flag all bot edits as potentially non-engine).
+  if (lastEditedByType === 'bot') {
+    if (engineBotUserId) {
+      if (lastEditedById && lastEditedById !== engineBotUserId) {
+        flags.push('not-engine-bot');
+      }
+    } else {
+      // Unset → can't confirm engine ownership; flag conservatively.
+      flags.push('not-engine-bot');
+    }
+  }
+
   const status = extractStatus(page);
   if (!DEFAULT_STATUS_VALUES.has(status)) flags.push(`status:${status}`);
   return flags;
@@ -358,7 +387,12 @@ async function main() {
   console.log(`\n=== Workspace Duplicate Sweep ===`);
   console.log(`Mode: ${DRY_RUN ? 'DRY-RUN' : 'ARCHIVE'}`);
   console.log(`Scope: ${STUDY_ID_ARG ? `study=${STUDY_ID_ARG}` : 'all active studies'}`);
-  console.log(`Engine bot user ID check: ${ENGINE_BOT_USER_ID ? 'enabled' : 'disabled (all non-bot edits flagged)'}`);
+  if (ENGINE_BOT_USER_ID) {
+    console.log(`Engine bot user ID check: enabled (id=${ENGINE_BOT_USER_ID.slice(0, 8)}...)`);
+  } else {
+    console.log('Engine bot user ID check: disabled');
+    console.warn('WARN: ENGINE_BOT_USER_ID unset — flagging ALL bot-edited pages as potentially not-engine-bot.');
+  }
 
   let studies;
   if (STUDY_ID_ARG) {
