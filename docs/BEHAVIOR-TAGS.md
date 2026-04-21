@@ -19,8 +19,7 @@ For the behavior contract itself (governance matrix, cross-chain algorithm, chan
 - `BEH-PULLRIGHT-ALL-UPSTREAM`: Start-only-right shifts all reachable upstream blockers by the same business-day delta, even when there were gaps.
 - `BEH-DRAG-LEFT-FANOUT`: Drag-left translates every reachable branch in a dependency fan-out by the same delta.
 - `BEH-CROSSCHAIN-PROPAGATION`: Stationary cross-chain blockers clamp end-only-left movement; drag modes move the connected cross-chain graph instead of using a separate blocker-moving heuristic.
-- `BEH-CONSTRAINT-VALIDATION`: After the mode-specific pass, the engine validates dependency constraints topologically and only snaps tasks forward when a violation remains.
-- `BEH-CROSSCHAIN-FIXEDPOINT`: A single cascade execution plus constraint validation should converge to a dependency-consistent fixed point for the edited graph.
+- `BEH-CROSSCHAIN-FIXEDPOINT`: A single cascade execution should converge to the mode-specific fixed point for the edited graph, or report unresolved residue after the safety cap.
 - `BEH-SAFETY-CAP`: The iterative upstream pull for `start-left` has a hard safety cap.
 - `BEH-RESIDUE-REPORTING`: If the safety cap is hit, unresolved residue is surfaced in diagnostics.
 - `BEH-MONOTONIC-SAFETY`: Directional passes must move tasks monotonically in the intended direction within one execution.
