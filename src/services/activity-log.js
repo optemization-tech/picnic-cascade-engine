@@ -64,6 +64,10 @@ function detailLines(details = {}) {
     lines.push(`API retries: ${retryStats.count} (${retryStats.totalBackoffMs}ms total backoff)`);
   }
 
+  if (typeof details.narrowRetrySuppressed === 'number' && details.narrowRetrySuppressed > 0) {
+    lines.push(`Narrow retry suppressed: ${details.narrowRetrySuppressed} (non-idempotent write surfaced on unsafe error)`);
+  }
+
   return lines;
 }
 

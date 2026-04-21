@@ -180,4 +180,43 @@ describe('CascadeTracer', () => {
       expect(tracer.toJSON().totalDurationMs).toBe(5000);
     });
   });
+
+  describe('narrowRetrySuppressed', () => {
+    it('defaults to 0 and is omitted from toActivityLogDetails', () => {
+      const tracer = new CascadeTracer('t-nr-1');
+      expect(tracer.narrowRetrySuppressedCount).toBe(0);
+      const details = tracer.toActivityLogDetails();
+      expect(details.narrowRetrySuppressed).toBeUndefined();
+    });
+
+    it('recordNarrowRetrySuppressed increments the counter', () => {
+      const tracer = new CascadeTracer('t-nr-2');
+      tracer.recordNarrowRetrySuppressed();
+      tracer.recordNarrowRetrySuppressed();
+      expect(tracer.narrowRetrySuppressedCount).toBe(2);
+    });
+
+    it('emits narrowRetrySuppressed in toActivityLogDetails when > 0', () => {
+      const tracer = new CascadeTracer('t-nr-3');
+      tracer.recordNarrowRetrySuppressed();
+      const details = tracer.toActivityLogDetails();
+      expect(details.narrowRetrySuppressed).toBe(1);
+    });
+
+    it('emits the correct count for multiple suppressions', () => {
+      const tracer = new CascadeTracer('t-nr-4');
+      for (let i = 0; i < 5; i++) tracer.recordNarrowRetrySuppressed();
+      const details = tracer.toActivityLogDetails();
+      expect(details.narrowRetrySuppressed).toBe(5);
+    });
+
+    it('narrowRetrySuppressed is independent of retryStats', () => {
+      const tracer = new CascadeTracer('t-nr-5');
+      tracer.recordRetry({ attempt: 1, backoffMs: 100, status: 429, tokenIndex: 0 });
+      tracer.recordNarrowRetrySuppressed();
+      const details = tracer.toActivityLogDetails();
+      expect(details.retryStats.count).toBe(1);
+      expect(details.narrowRetrySuppressed).toBe(1);
+    });
+  });
 });

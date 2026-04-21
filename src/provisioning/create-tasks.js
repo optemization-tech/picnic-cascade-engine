@@ -248,8 +248,12 @@ export async function createStudyTasks(client, levels, { studyPageId, contractSi
   let totalCreated = 0;
   if (entries.length > 0) {
     const createdPages = await createBatch(client, entries, { tracer });
-    accumulateIdMappings(createdPages, entries, idMapping, depTracking, parentTracking);
-    totalCreated = createdPages.length;
+    // createdPages may contain Error instances (narrow-retry suppressed
+    // or other post-flight failures) or undefined (batch aborted before
+    // this slot was picked up). Only count real page objects.
+    const successes = createdPages.filter((p) => p && !(p instanceof Error));
+    accumulateIdMappings(successes, entries, idMapping, depTracking, parentTracking);
+    totalCreated = successes.length;
   }
 
   if (tracer) tracer.endPhase('createStudyTasks');

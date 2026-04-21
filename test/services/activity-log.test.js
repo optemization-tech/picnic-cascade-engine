@@ -140,4 +140,79 @@ describe('ActivityLogService', () => {
     const payload = notionClient.request.mock.calls[0][2];
     expect(payload.properties['Tested by']).toBeUndefined();
   });
+
+  it('renders narrowRetrySuppressed line in body when present', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Provisioning',
+      status: 'failed',
+      summary: 'createPages partial failure',
+      details: {
+        narrowRetrySuppressed: 3,
+        retryStats: { count: 1, totalBackoffMs: 500 },
+      },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    const bodyText = JSON.stringify(children);
+    expect(bodyText).toContain('Narrow retry suppressed: 3');
+  });
+
+  it('omits narrowRetrySuppressed line when zero or missing', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Provisioning',
+      status: 'success',
+      summary: 'clean run',
+      details: { narrowRetrySuppressed: 0 },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    const bodyText = JSON.stringify(children);
+    expect(bodyText).not.toContain('Narrow retry suppressed');
+  });
+
+  // Regression lock — narrow retry for non-idempotent writes (PR E1) surfaces
+  // post-send 5xx errors from POST /pages instead of retrying. The activity
+  // log is a graceful-degradation caller: it must catch the error and return
+  // { logged: false, reason: 'notion-write-failed', ... } rather than
+  // propagating. This test fails fast if a future refactor removes the
+  // try/catch wrapper in logTerminalEvent.
+  it('degrades gracefully when notionClient throws a post-send 5xx (narrow retry surface)', async () => {
+    const notionClient = {
+      request: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Notion API 502 Bad Gateway: upstream failed'), {
+          status: 502,
+        }),
+      ),
+    };
+    const logger = { warn: vi.fn() };
+    const service = new ActivityLogService({
+      notionClient,
+      activityLogDbId: 'db-activity',
+      logger,
+    });
+
+    const result = await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'ok despite log failure',
+      details: {},
+    });
+
+    expect(result).toEqual({
+      logged: false,
+      reason: 'notion-write-failed',
+      error: 'Notion API 502 Bad Gateway: upstream failed',
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[activity-log] failed to create entry:',
+      'Notion API 502 Bad Gateway: upstream failed',
+    );
+    expect(notionClient.request).toHaveBeenCalledTimes(1);
+  });
 });

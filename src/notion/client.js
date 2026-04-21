@@ -1,4 +1,6 @@
 import { buildReportingText } from '../utils/reporting.js';
+import { classifyIdempotency } from './idempotency-classifier.js';
+import { classifyNotionError } from './error-classifier.js';
 
 const NOTION_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28';
@@ -65,11 +67,14 @@ export class NotionClient {
   async _requestWithSlot(slot, method, path, body, { tracer } = {}) {
     const maxAttempts = this.retry.maxAttempts || 5;
     const baseMs = this.retry.baseMs || 500;
+    const idempotency = classifyIdempotency(method, path);
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const tokenIndex = slot.index;
       await this._throttleSlot(slot.key);
+
+      let retryAfterMs = null;
 
       try {
         const response = await fetch(`${NOTION_BASE}${path}`, {
@@ -88,29 +93,50 @@ export class NotionClient {
         if (response.ok) return data;
 
         const retryAfterHeader = response.headers.get('retry-after');
-        const retryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
-        const retryable = response.status === 429 || response.status >= 500;
+        retryAfterMs = retryAfterHeader ? Number.parseFloat(retryAfterHeader) * 1000 : null;
 
         const error = new Error(`Notion API ${response.status} ${response.statusText}: ${data?.message || text || 'unknown error'}`);
         error.status = response.status;
         error.data = data;
-        lastError = error;
-
-        if (!retryable || attempt === maxAttempts) throw error;
-        const jitter = Math.floor(Math.random() * 100);
-        const backoff = retryAfterMs ?? (baseMs * (2 ** (attempt - 1)) + jitter);
-        if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: response.status, tokenIndex });
-        console.log(JSON.stringify({ event: 'notion_retry', attempt, backoff, status: response.status, tokenIndex }));
-        await sleep(backoff);
+        throw error;
       } catch (err) {
         lastError = err;
+        const errClass = classifyNotionError(err);
+
+        // non_retryable — 4xx except 429. Surface immediately regardless
+        // of idempotency. Matches prior behavior.
+        if (errClass === 'non_retryable') break;
+
+        // unsafe_retry — 5xx, post-send timeouts, unknown shapes. For
+        // non-idempotent paths (POST /pages, PATCH /blocks/:id/children)
+        // surface immediately to avoid creating duplicates. For idempotent
+        // paths preserve prior behavior: retry with the PR #43 2-attempt
+        // cap on TimeoutError/AbortError.
+        if (errClass === 'unsafe_retry') {
+          if (idempotency === 'nonIdempotent') {
+            if (tracer) tracer.recordNarrowRetrySuppressed();
+            console.log(JSON.stringify({
+              event: 'notion_narrow_retry_suppressed',
+              attempt,
+              method,
+              path,
+              status: err.status || 0,
+              errorName: err.name || null,
+              tokenIndex,
+            }));
+            break;
+          }
+          // idempotent + unsafe_retry: preserve the 2-attempt timeout cap
+          // from PR #43 (30s × 5 = 150s was user-hostile).
+          if ((err.name === 'TimeoutError' || err.name === 'AbortError') && attempt >= 2) break;
+        }
+
+        // safe_retry (429, ECONNREFUSED/ENOTFOUND/ETIMEDOUT) and
+        // idempotent + unsafe_retry both fall through here.
         if (attempt === maxAttempts) break;
-        // Don't retry non-retryable HTTP errors (4xx except 429)
-        if (err.status && err.status >= 400 && err.status < 500 && err.status !== 429) break;
-        // Timeout errors: retry once (transient), but not all 5 attempts (30s × 5 = 150s)
-        if ((err.name === 'TimeoutError' || err.name === 'AbortError') && attempt >= 2) break;
+
         const jitter = Math.floor(Math.random() * 100);
-        const backoff = baseMs * (2 ** (attempt - 1)) + jitter;
+        const backoff = retryAfterMs ?? (baseMs * (2 ** (attempt - 1)) + jitter);
         if (tracer) tracer.recordRetry({ attempt, backoffMs: backoff, status: err.status || 0, tokenIndex });
         console.log(JSON.stringify({ event: 'notion_retry', attempt, backoff, status: err.status || 0, tokenIndex }));
         await sleep(backoff);
@@ -124,18 +150,40 @@ export class NotionClient {
     return this._requestWithSlot(this._nextSlot(), method, path, body, { tracer });
   }
 
-  async runParallel(items, processItem, { workersPerToken = this.workersPerToken, maxWorkers } = {}) {
+  async runParallel(items, processItem, { workersPerToken = this.workersPerToken, maxWorkers, bubbleErrors = false } = {}) {
     if (!Array.isArray(items) || items.length === 0) return [];
 
     const results = new Array(items.length);
     let nextIndex = 0;
+    let aborted = false;
+    let bubbledError = null;
 
     const worker = async (slot) => {
       for (;;) {
+        // Stop scheduling new items after any worker has thrown. In-flight
+        // items continue to run — they have their own fate. This is the
+        // R1-7 batch semantics: abort-on-first-unsafe, let in-flight
+        // complete, return per-operation outcomes.
+        //
+        // When bubbleErrors is true, inner throws are captured and rethrown
+        // from runParallel after all workers drain — restoring the original
+        // throw-propagation semantics for direct callers like
+        // prefetchTemplateBlocks that never wired up try/catch around the
+        // runParallel invocation itself.
+        if (aborted) return;
         const index = nextIndex;
         nextIndex += 1;
         if (index >= items.length) return;
-        results[index] = await processItem(items[index], slot, index);
+        try {
+          results[index] = await processItem(items[index], slot, index);
+        } catch (err) {
+          if (bubbleErrors && bubbledError === null) {
+            bubbledError = err;
+          }
+          results[index] = err;
+          aborted = true;
+          return;
+        }
       }
     };
 
@@ -147,6 +195,9 @@ export class NotionClient {
     }
 
     await Promise.all(workers);
+    if (bubbleErrors && bubbledError !== null) {
+      throw bubbledError;
+    }
     return results;
   }
 
@@ -166,13 +217,27 @@ export class NotionClient {
   }
 
   async requestBatch(operations, { tracer, workersPerToken, maxWorkers } = {}) {
-    return this.runParallel(
+    const results = await this.runParallel(
       operations,
       async (operation, slot) => this._requestWithSlot(slot, operation.method, operation.path, operation.body, {
         tracer: operation.tracer ?? tracer,
       }),
       { workersPerToken, maxWorkers },
     );
+
+    // Full-batch failure: every slot is either undefined (never picked up
+    // after abort) or an Error. Throw the first real error so callers that
+    // treat the entire batch as atomic (today's behavior) keep working.
+    const errors = results.filter((r) => r instanceof Error);
+    const successes = results.filter((r) => r !== undefined && !(r instanceof Error));
+    if (successes.length === 0 && errors.length > 0) {
+      throw errors[0];
+    }
+
+    // Partial success: return the array as-is. Callers inspect each slot
+    // and decide what to do. See R1-7 / Unit 4 in
+    // docs/plans/2026-04-20-002-refactor-narrow-retry-non-idempotent-writes-plan.md
+    return results;
   }
 
   async queryDatabase(dbId, filter, pageSize = 100, { tracer } = {}) {
@@ -222,7 +287,7 @@ export class NotionClient {
       return { updatedCount: 0, taskIds: [] };
     }
 
-    await this.requestBatch(
+    const results = await this.requestBatch(
       updates.map((update) => ({
         method: 'PATCH',
         path: `/pages/${update.taskId}`,
@@ -230,6 +295,14 @@ export class NotionClient {
       })),
       { tracer, workersPerToken },
     );
+
+    // PATCH /pages/:id is idempotent — errors only happen after the retry
+    // loop exhausts. Preserve today's fail-loudly semantics for this
+    // caller: if any slot errored, throw so the route handler surfaces it.
+    // Unlike createPages, partial success here isn't useful (the remaining
+    // updates are desired invariants, not a creation log).
+    const firstError = results.find((r) => r instanceof Error);
+    if (firstError) throw firstError;
 
     return { updatedCount: updates.length, taskIds: updates.map((update) => update.taskId) };
   }

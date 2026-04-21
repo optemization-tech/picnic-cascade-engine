@@ -26,14 +26,23 @@ export async function deleteStudyTasks(client, { studyTasksDbId, studyId, tracer
     if (tasks.length === 0) break;
 
     if (tracer) tracer.startPhase('archive');
-    await client.requestBatch(tasks.map((task) => ({
+    const archiveResults = await client.requestBatch(tasks.map((task) => ({
       method: 'PATCH',
       path: `/pages/${task.id}`,
       body: { archived: true },
     })), { tracer });
     if (tracer) tracer.endPhase('archive');
 
-    totalArchived += tasks.length;
+    // Archive is idempotent — any error in the batch indicates a persistent
+    // failure (retries exhausted). Fail loudly so the caller sees it,
+    // matching today's pre-narrow-retry behavior.
+    const firstError = archiveResults.find((r) => r instanceof Error);
+    if (firstError) throw firstError;
+
+    // Count only slots that actually completed. Partial completion is
+    // theoretically possible if the batch aborted mid-flight (it shouldn't
+    // for idempotent paths, but count defensively).
+    totalArchived += archiveResults.filter((r) => r !== undefined && !(r instanceof Error)).length;
     if (!data.has_more) break;
   }
 

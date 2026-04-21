@@ -16,6 +16,7 @@ export class CascadeTracer {
     this.counters = new Map();
     this.metadata = new Map();
     this.retries = [];
+    this.narrowRetrySuppressedCount = 0;
     this._activePhases = new Map();
   }
 
@@ -48,6 +49,15 @@ export class CascadeTracer {
     this.retries.push({ attempt, backoffMs, status, tokenIndex, ts: Date.now() });
   }
 
+  /**
+   * Increment counter when _requestWithSlot would have retried today but
+   * chose not to because the path is non-idempotent and the error is
+   * unsafe_retry. Surfaces in the Activity Log body as narrowRetrySuppressed.
+   */
+  recordNarrowRetrySuppressed() {
+    this.narrowRetrySuppressedCount += 1;
+  }
+
   toJSON() {
     const phases = {};
     for (const [name, duration] of this.phases) {
@@ -75,7 +85,7 @@ export class CascadeTracer {
       phases[name] = duration;
     }
     const totalBackoffMs = this.retries.reduce((sum, r) => sum + (r.backoffMs || 0), 0);
-    return {
+    const details = {
       timing: {
         totalMs: Date.now() - this.startTime,
         phases,
@@ -85,5 +95,11 @@ export class CascadeTracer {
         totalBackoffMs,
       },
     };
+    // Emit only when narrow retry actually fired — keeps the common-case
+    // log clean so the signal, when present, is meaningful.
+    if (this.narrowRetrySuppressedCount > 0) {
+      details.narrowRetrySuppressed = this.narrowRetrySuppressedCount;
+    }
+    return details;
   }
 }
