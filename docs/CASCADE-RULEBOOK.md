@@ -1,6 +1,6 @@
 # Cascade Engine Rulebook
 
-Extracted from code as of 2026-04-07. Source files under `engine/src/`.
+Extracted from code as of 2026-04-20. Source files under `src/`.
 
 ---
 
@@ -14,10 +14,10 @@ Classification happens in `src/engine/classify.js`, function `computeCascadeMode
 |---|---|---|
 | `0` | `> 0` | `push-right` |
 | `0` | `< 0` | `pull-left` |
-| `< 0` | `0` | `pull-left` |
+| `< 0` | `0` | `start-left` |
 | `> 0` | `0` | `pull-right` |
 | `> 0` | `> 0` | `drag-right` |
-| `< 0` | `< 0` | `pull-left` |
+| `< 0` | `< 0` | `drag-left` |
 | all other combos | | `null` (no cascade) |
 
 Deltas are signed business-day differences computed in `parseWebhookPayload()` (`src/gates/guards.js` lines 53-66) via `signedBDDelta(refDate, newDate)`.
@@ -111,23 +111,23 @@ After `classify()` runs, if `classified.skip === true` or `classified.cascadeMod
 
 ## 3. Per-Mode Behavior
 
-All mode dispatch happens in `runCascade()` (cascade.js lines 640-757).
+All mode dispatch happens in `runCascade()` in `src/engine/cascade.js`.
 
 ### 3.1 Push-Right
 
 **Trigger**: `startDelta === 0 && endDelta > 0` (end moved later, start unchanged).
 
-**Behavior** (cascade.js lines 691-694):
+**Behavior**:
 1. Seeds = `{ sourceTaskId }`.
 2. Runs `conflictOnlyDownstream(seeds, updatesMap, taskById)`.
 
-**`conflictOnlyDownstream()`** (cascade.js lines 32-119):
+**`conflictOnlyDownstream()`**:
 1. **DFS reachability**: Walks downstream from seeds via `blockingIds` edges to find all reachable tasks.
 2. **Topological sort**: Kahn's algorithm over reachable set.
 3. **Effective ends map**: Seeds' ends come from `updatesMap` or `taskById`.
 4. **Conflict-only push**: Processes tasks in topo order. For each non-seed, non-frozen task:
    - Computes `latestConstraint = max(nextBusinessDay(effectiveEnd))` across all non-frozen blockers that have effective ends.
-   - If `task.start >= latestConstraint` -- no conflict, skip (line 105).
+   - If `task.start >= latestConstraint` -- no conflict, skip.
    - If conflict: `newStart = latestConstraint`, `newEnd = addBusinessDays(newStart, duration - 1)`.
    - Records update, sets `effectiveEnds[taskId]` for downstream propagation.
 
@@ -135,73 +135,82 @@ All mode dispatch happens in `runCascade()` (cascade.js lines 640-757).
 
 ### 3.2 Pull-Left
 
-**Trigger**: `(startDelta === 0 && endDelta < 0)` or `(startDelta < 0 && endDelta === 0)` or `(startDelta < 0 && endDelta < 0)`.
+**Trigger**: `startDelta === 0 && endDelta < 0` (end moved earlier, start unchanged).
 
-**Behavior** (cascade.js lines 697-718):
+**Behavior**:
+1. Runs `gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById)`.
+2. Computes a uniform negative business-day delta from the source end contraction.
+3. Walks downstream from the source via `blockingIds`.
+4. Topologically processes reachable downstream tasks.
+5. For each reachable non-frozen task:
+   - computes `shiftedStart = addBusinessDays(originalStart, deltaBD)`
+   - computes `earliestAllowed = max(nextBusinessDay(blockerEnd))` across all blockers, using `updatesMap` when a blocker already moved and `taskById` otherwise
+   - clamps to `earliestAllowed` if the uniform shift would violate a blocker
+   - skips the task if the result would not move it left
+   - preserves duration and mutates `taskById` so later downstream tasks see the updated position
 
-**Pass 1 -- Upstream pull** via `pullLeftUpstream()` (lines 128-194):
-1. Bellman-Ford relaxation: BFS upstream from source via `blockedByIds` edges.
-2. For each blocker: if `nextBusinessDay(blockerEffEnd) > effectiveStartD`, blocker finishes too late. Pull it earlier:
-   - `newBlockerEnd = prevBusinessDay(effectiveStartD)`
-   - `newBlockerStart = addBusinessDays(newBlockerEnd, -(duration - 1))`
-3. Takes the most aggressive (earliest) pull when a blocker is reachable via multiple paths.
-4. Re-queues blockers for further upstream propagation (Bellman-Ford re-relaxation).
-5. Safety cap: `MAX_ITER = 2000`. If exhausted with items remaining, returns `capReached: true` and `unresolvedResidue` list.
-6. Tracks `monotonicSafe` flag (false if a blocker's optimal end is later than an already-recorded update).
+**Key property**: This is a single downstream pass. There is no stationary-blocker guard and no cross-chain fixed-point reprocessing step in the current code.
 
-**Between passes**: Collects `shiftedUpstreamIds` and saves `prePositions` for all tasks (line 708-714).
+### 3.3 Start-Left
 
-**Pass 2 -- Downstream gap-preserving shift** via `gapPreservingDownstream()` (lines 203-330):
-1. Computes uniform BD delta (negative) from source's old end to new end.
-2. BFS downstream from source + shifted upstream tasks via `blockingIds` edges.
-3. Topological sort (Kahn's) over downstream set.
-4. For each downstream task in topo order:
-   - **Frozen skip**: frozen tasks are never moved (line 275).
-   - **Stationary blocker guard (BL-H4g)** (lines 278-292): If the task has a blocker that was NOT moved by the cascade AND the task starts after `nextBusinessDay(blocker.end)` (i.e., there's a gap), the task is held in place. This preserves existing gaps from unmoved blockers.
-   - Shifts start by `deltaBD`: `shiftedStart = addBusinessDays(originalStart, deltaBD)`.
-   - **Blocker clamp**: Computes `earliestAllowed = max(nextBusinessDay(blockerEnd))` across all blockers (using updated positions). If `earliestAllowed > shiftedStart`, clamps to `earliestAllowed`.
-   - **Left-only guard** (line 313): If `newStartD >= originalStart`, skip (never pushes right in this pass).
-   - Preserves original duration.
-   - **Mutates `taskById`** in-place (lines 319-320) so subsequent topo-order processing sees updated positions.
+**Trigger**: `startDelta < 0 && endDelta === 0` (start moved earlier, end unchanged).
 
-**Pass 3 -- Cross-chain frustration resolution** via `resolveCrossChainFrustrations()` (lines 387-525):
-1. Fixed-point loop, max 5 rounds (configurable via `maxRounds`).
-2. For each downstream task: checks if it was "frustrated" -- its current position is later than its desired position (`desiredStart = addBusinessDays(origStart, deltaBD)`).
-3. **BL-H4g stationary blocker guard** applies here too (lines 429-440).
-4. Skips if a frozen blocker prevents reaching the desired position (lines 448-455).
-5. Finds the limiting non-frozen blocker (latest constraint past desired).
-6. Shifts that blocker left: `neededEnd = prevBusinessDay(desiredStart)`.
-7. Runs `pullLeftUpstream()` on the shifted blocker to resolve upstream conflicts created by the shift.
-8. Re-validates: if the blocker was clamped by its own upstream, adjusts it (lines 492-505).
-9. After each round: restores ALL downstream tasks to `prePositions` and re-runs `gapPreservingDownstream()` from scratch.
-10. Exits when no blockers were shifted in a round (stable) or `maxRounds` reached.
+**Behavior**:
 
-### 3.3 Pull-Right
+**Pass 1 -- Upstream pull** via `pullLeftUpstream()`:
+1. Bellman-Ford relaxation upstream via `blockedByIds`.
+2. Pulls blockers earlier when they finish too late for the moved task.
+3. Takes the most aggressive pull when a blocker is reachable by multiple paths.
+4. Re-queues blockers for further upstream propagation.
+5. Emits `iterations`, `capReached`, `unresolvedResidue`, and `monotonicSafe`.
+
+**Pass 2 -- Downstream tightening** via `tightenDownstreamFromSeed()`:
+1. Seeds = `{ sourceTaskId } ∪ { upstream-moved task IDs }`.
+2. Walks downstream from those seeds via `blockingIds`.
+3. Topologically processes reachable downstream tasks.
+4. For each reachable non-frozen task, tightens it to `nextBusinessDay(max(non-frozen blocker end))` with duration preserved.
+
+**Key property**: `start-left` is now explicitly a two-pass mode: upstream conflict resolution, then downstream retightening.
+
+### 3.4 Pull-Right
 
 **Trigger**: `startDelta > 0 && endDelta === 0` (start moved later, end unchanged).
 
-**Behavior** (cascade.js lines 721-727):
+**Behavior**:
 
-**Pass 1 -- Upstream shift** via `pullRightUpstream()` (lines 339-375):
+**Pass 1 -- Upstream shift** via `pullRightUpstream()`:
 1. BFS upstream from source via `blockedByIds` edges.
 2. ALL upstream blockers are shifted right by `startDelta` BD unconditionally.
-3. Uses ORIGINAL dates (not updatesMap dates) to prevent double-shifting when a blocker is reachable via multiple paths (bug 2A.2 fix, line 357-360).
+3. Uses ORIGINAL dates (not updatesMap dates) to prevent double-shifting when a blocker is reachable via multiple paths.
 4. Frozen tasks are skipped.
-5. Once a blocker is recorded in updatesMap, it is NOT overwritten (first-write wins, line 362).
+5. Once a blocker is recorded in updatesMap, it is NOT overwritten (first-write wins).
 
-**Pass 2 -- Downstream conflict pass** (lines 724-727):
+**Pass 2 -- Downstream conflict pass**:
 1. Seeds = `{ sourceTaskId } + all upstream tasks in updatesMap`.
 2. Runs `conflictOnlyDownstream(seeds, updatesMap, taskById)` (same function as push-right).
 
-**Key property**: ALL upstream blockers shift by the exact same delta, preserving all gaps. No adjacency check. No gap absorption. Meg-confirmed 2026-03-31.
+**Key property**: `pull-right` is also a two-pass mode: shift reachable upstream blockers right, then retighten reachable downstream dependents that now conflict.
 
-### 3.4 Drag-Right
+### 3.5 Drag-Left
+
+**Trigger**: `startDelta < 0 && endDelta < 0`.
+
+**Behavior**:
+1. Runs `shiftConnectedComponent(sourceTaskId, startDelta, updatesMap, taskById, [sourceTaskId])`.
+2. Collects the connected component around the source by walking both `blockedByIds` and `blockingIds`.
+3. Shifts every reachable non-frozen task except the source by the same delta.
+
+**Key property**: This is a whole-connected-component translation, not a composed start-left plus pull-left sequence.
+
+### 3.6 Drag-Right
 
 **Trigger**: `startDelta > 0 && endDelta > 0` (both start and end moved later).
 
-**Behavior** (cascade.js lines 721-727): Identical to pull-right. Same two passes.
+**Behavior**:
+1. Runs the same `shiftConnectedComponent()` path as drag-left, using a positive delta.
+2. Shifts every reachable non-frozen task except the source by the same delta.
 
-The distinction from pull-right is semantic (both deltas are positive vs. only start), but the engine handles them identically.
+The distinction from drag-left is the direction of the shared translation.
 
 ---
 
@@ -212,32 +221,20 @@ The distinction from pull-right is semantic (both deltas are positive vs. only s
 **Definition**: `FROZEN_STATUSES = new Set(['Done', 'N/A'])` (cascade.js line 20, parent-subtask.js line 10, guards.js line 99).
 
 **Rules**:
-- Frozen tasks are never moved by any cascade pass (checked in `conflictOnlyDownstream`, `pullLeftUpstream`, `gapPreservingDownstream`, and `pullRightUpstream`).
+- Frozen tasks are never moved by any cascade pass (checked in `conflictOnlyDownstream`, `pullLeftUpstream`, `gapPreservingDownstream`, `tightenDownstreamFromSeed`, `pullRightUpstream`, and `shiftConnectedComponent`).
 - Frozen blockers are excluded from blocker calculations in the mode-specific cascade passes.
-- Frozen blockers still participate in frustration detection: they can prevent a task from reaching its desired position (cascade.js lines 448-455), but the engine won't try to move them.
 - Route-level: frozen source tasks trigger `no_action` (date-cascade.js line 155-165).
 
 ### 4.2 Parent Edge Stripping (BL-H5g)
 
-`runCascade()` (cascade.js lines 651-670):
+`runCascade()`:
 1. Identifies all parent IDs (tasks that have at least one child with `parentId` pointing to them).
 2. For each parent: sets `blockedByIds = []` and `blockingIds = []`.
 3. For all other tasks: filters out any parent IDs from their `blockedByIds` and `blockingIds`.
 
 **Effect**: Parent tasks are invisible to the dependency graph during cascade. Dependencies flow only between leaf/subtask-level tasks.
 
-### 4.3 Stationary Blocker Guard (BL-H4g)
-
-Applied in `gapPreservingDownstream()` (cascade.js lines 278-292) and `resolveCrossChainFrustrations()` (lines 429-440).
-
-A task is "held by a stationary blocker with a gap" when:
-- The blocker was NOT moved by the cascade (not in `updatesMap` and not a seed).
-- The blocker is NOT frozen.
-- The task starts AFTER `nextBusinessDay(blocker.end)` (there's a gap between blocker end and task start).
-
-**Effect**: The task is skipped entirely -- it doesn't shift left even though the uniform delta says it should. This preserves intentional gaps from unmoved blockers.
-
-### 4.4 Blocker Constraint Formula
+### 4.3 Blocker Constraint Formula
 
 Used consistently across all passes:
 
@@ -248,43 +245,30 @@ task.start must be >= earliestAllowed
 
 `nextBusinessDay()` always advances at least 1 calendar day to the next Mon-Fri (business-days.js lines 33-36).
 
-### 4.5 Duration Preservation
+### 4.4 Duration Preservation
 
 All cascade movements preserve original task duration:
-- `newEnd = addBusinessDays(newStart, duration - 1)` (cascade.js line 108, 315, etc.)
+- `newEnd = addBusinessDays(newStart, duration - 1)`
 - Duration is computed as `countBDInclusive(start, end)` when not stored (minimum 1).
 
 ---
 
 ## 5. Parent/Subtask Rules
 
-Implemented in `src/engine/parent-subtask.js`, function `runParentSubtask()` (lines 31-412).
+Implemented in `src/engine/parent-subtask.js`, function `runParentSubtask()`.
 
 ### 5.1 Mode Detection
 
-Detected in `classify()` (classify.js lines 58-62):
-- `case-a`: Source task has subtasks (determined by checking if any task in allTasks has `parentId === sourceTaskId`).
-- `case-b`: Source task has a parent (determined by `hasParent` flag from webhook).
-- `null`: Neither.
+Detected in `classify()`:
+- `case-b`: Source task has a parent and does not itself have subtasks.
+- `null`: Otherwise.
 
-### 5.2 Case A -- Parent Edited
+### 5.2 Direct Parent Edit Block
 
-**Guard**: Top-level parents with subtasks are blocked from `push-right` and `pull-right` modes (classify.js lines 65-82). Returns `skip: true` with reason `Direct parent edit blocked`.
-
-**When allowed** (parent-subtask.js lines 76-255):
-1. Finds all subtasks where `parentId === sourceTaskId`.
-2. Computes "natural" start/end as min(subtask starts) / max(subtask ends).
-3. Computes delta from natural dates to new webhook dates:
-   - Both changed: `delta = signedBDDelta(naturalEnd, newEnd)`
-   - End only changed: same
-   - Start only changed: `delta = signedBDDelta(naturalStart, newStart)`
-4. If `delta !== 0`: shifts ALL non-frozen subtasks by delta.
-5. **Dependency resolution within subtasks**: After shifting, runs DFS + topo sort + conflict-only push-right on the shifted subtask set and their downstream dependents (lines 158-232). Same logic as `conflictOnlyDownstream` but inline.
-6. **Roll-up**: Recomputes parent dates as `min(subtask starts)` / `max(subtask ends)` and records update (lines 235-254).
+Any task that has subtasks is blocked from direct date editing in `classify()`. The route treats that as `skip: true`, applies Error 1 side effects, and reverts the source task to its reference dates.
 
 ### 5.3 Case B -- Subtask Edited
 
-parent-subtask.js lines 260-329:
 1. Patches source task with new dates in `taskById`.
 2. Finds all siblings (tasks with same `parentId`).
 3. Computes parent roll-up: `min(sibling starts)` / `max(sibling ends)`.
@@ -292,11 +276,10 @@ parent-subtask.js lines 260-329:
 
 ### 5.4 Cascade Roll-Up
 
-parent-subtask.js lines 334-382:
-1. After cascade runs (separate from Case A/B), checks all tasks moved by the cascade (`movedTaskIds`).
-2. For each moved task that has a `parentId` (excluding the source's own parent if Case B): collects the parent.
+1. After cascade runs, checks all moved tasks and collects their parent IDs.
+2. Also includes `parentTaskId` when `case-b` is active.
 3. For each affected parent: recomputes dates from all children.
-4. If changed, records roll-up update.
+4. If changed, records a roll-up update.
 
 **Pre-applied dates** (lines 62-68): Before any roll-up computation, cascade-moved dates from `movedTaskMap` are applied to `taskById`. This prevents Case B from using stale sibling positions.
 
@@ -307,7 +290,7 @@ parent-subtask.js lines 334-382:
 ### 7.1 Fan-In (Multiple Blockers)
 
 When a task has multiple `blockedByIds`:
-- `conflictOnlyDownstream`: Takes `max(nextBusinessDay(blocker.effectiveEnd))` across all blockers (cascade.js lines 92-102).
+- `conflictOnlyDownstream`: Takes `max(nextBusinessDay(blocker.effectiveEnd))` across all blockers.
 - `gapPreservingDownstream`: Same max-constraint logic (lines 297-309).
 
 The task's start is governed by its latest-finishing non-frozen blocker.
@@ -323,35 +306,31 @@ When a task has multiple `blockingIds`:
 
 When a task is reachable via multiple paths through the dependency graph:
 
-**In `pullRightUpstream()`**: Uses ORIGINAL dates (not updatesMap) to prevent double-shifting. First-write-wins prevents overwriting (cascade.js lines 357-362, 371-374). This was an explicit bug fix (comment: "bug 2A.2").
+**In `pullRightUpstream()`**: Uses ORIGINAL dates (not updatesMap) to prevent double-shifting. First-write-wins prevents overwriting. This was an explicit bug fix (comment: "bug 2A.2").
 
 **In `conflictOnlyDownstream()`**: `effectiveEnds` map naturally handles diamonds because topo-order processing ensures all predecessors are resolved before dependents.
 
-**In `pullLeftUpstream()`**: Bellman-Ford relaxation with re-queuing. Takes the most aggressive (earliest) pull (line 170). If a later path produces a less aggressive result, `monotonicSafe` is set to false (line 181).
+**In `pullLeftUpstream()`**: Bellman-Ford relaxation with re-queuing. Takes the most aggressive (earliest) pull. If a later path produces a less aggressive result, `monotonicSafe` is set to false.
 
-### 7.4 Cross-Chain Frustration Resolution
+### 7.4 Reachability Scope
 
-When `gapPreservingDownstream()` shifts a task that is also blocked by tasks in a different chain, the blocker may prevent the task from reaching its desired position. `resolveCrossChainFrustrations()` (cascade.js lines 387-525) resolves this by:
-
-1. Detecting frustrated tasks (current position > desired position).
-2. Finding the limiting cross-chain blocker.
-3. Shifting that blocker left + cascading through its upstream.
-4. Restoring all downstream positions to pre-cascade state.
-5. Re-running `gapPreservingDownstream()` from scratch.
-6. Repeating until stable or 5 rounds.
+Mode-specific passes operate on reachable subgraphs, not a whole-graph fixed-point sweep:
+- `conflictOnlyDownstream()` walks downstream from its seed set.
+- `gapPreservingDownstream()` walks downstream from the source task.
+- `tightenDownstreamFromSeed()` walks downstream from `{source} ∪ {upstream-moved tasks}`.
+- `shiftConnectedComponent()` walks the connected component around the source using both upstream and downstream edges.
 
 ### 7.5 Safety Caps
 
 | Cap | Location | Value | Effect |
 |---|---|---|---|
-| Bellman-Ford iterations | `pullLeftUpstream` line 133 | 2000 | Returns `capReached: true`, `unresolvedResidue` |
-| Cross-chain rounds | `resolveCrossChainFrustrations` line 389 | 5 | Stops iterating; remaining frustrations unresolved |
+| Bellman-Ford iterations | `pullLeftUpstream` | 2000 | Returns `capReached: true`, `unresolvedResidue` |
 
 When `capReached` is true, the terminal status is `failed` (date-cascade.js line 347).
 
 ### 7.6 Source Task Patching
 
-`runCascade()` (cascade.js lines 677-679): The source task's dates in `taskById` are patched with webhook dates BEFORE mode dispatch. This ensures all downstream calculations see the user's intended dates, not stale DB dates.
+`runCascade()`: The source task's dates in `taskById` are patched with webhook dates BEFORE mode dispatch. This ensures all downstream calculations see the user's intended dates, not stale DB dates.
 
 ### 7.7 Undo Capability
 
@@ -403,8 +382,6 @@ date-cascade.js lines 380-401: Errors are caught, reported to the study page (`r
 | **Blocked by** | Upstream dependency edge. Task cannot start before `nextBD(blocker.end)`. |
 | **Blocking** | Downstream dependency edge. Inverse of Blocked by. |
 | **Seed** | Task(s) whose changes initiate a cascade pass. |
-| **Stationary blocker** | A blocker not moved by the current cascade (not in updatesMap, not a seed). |
-| **Frustrated task** | A downstream task clamped by a cross-chain blocker, unable to reach its desired position. |
 | **Roll-up** | Parent dates derived from `min(child starts)` / `max(child ends)`. |
 | **Reference dates** | Stored `Reference Start Date` / `Reference End Date` -- the "before" snapshot for delta computation. |
 | **Import Mode** | Study-level flag that suppresses cascading during bulk date imports. |

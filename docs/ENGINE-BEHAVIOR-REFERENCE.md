@@ -26,26 +26,28 @@ Definitions:
 
 | Edit Type | Trigger Condition | Cascade Mode | Scope of movement | Conflict Rule | Gap Policy | Expected Result Contract |
 |---|---|---|---|---|---|---|
-| Start-only left | `startDelta < 0 && endDelta == 0` | `pull-left` | Upstream then downstream | Upstream moves if dependency conflict; downstream is re-evaluated against blockers | Upstream pull tightens schedule; downstream preserves relative shift then clamps to blockers | Source moves earlier, blockers are pulled earlier as needed, and resulting chain remains dependency-valid |
+| Start-only left | `startDelta < 0 && endDelta == 0` | `start-left` | Upstream then downstream | Upstream moves if dependency conflict; downstream is retightened against current blocker ends | Upstream pull tightens schedule; downstream re-tightens to blocker adjacency | Source moves earlier, blockers are pulled earlier as needed, and reachable downstream dependents are re-tightened |
 | Start-only right | `startDelta > 0 && endDelta == 0` | `pull-right` | Upstream first, then downstream conflict pass | ALL upstream blockers shift right by the same delta unconditionally; downstream moves only if conflict | ALL upstream gaps are preserved (no gap absorption); uniform shift for every upstream blocker | All upstream blockers shift right by delta preserving gaps; downstream only adjusts if source/upstream changes introduce conflicts |
-| End-only left | `startDelta == 0 && endDelta < 0` | `pull-left` | Upstream then downstream | Same as pull-left | ALL downstream tasks shift by the full delta (uniform gap-preserving cascade); no conflict-only filtering | End contraction uniformly pulls all downstream tasks earlier, preserving inter-task gaps and dependency validity |
+| End-only left | `startDelta == 0 && endDelta < 0` | `pull-left` | Downstream only | Reachable downstream tasks shift by the full delta, then clamp to blocker constraints | Uniform left shift within the reachable downstream subgraph; tasks that cannot move left are left in place | End contraction pulls the downstream reachable set earlier while preserving duration and respecting blocker clamps |
 | End-only right | `startDelta == 0 && endDelta > 0` | `push-right` | Downstream only | Downstream moves only if `task.start < nextBusinessDay(blocker.end)` | Conflict-only push (no blanket uniform shift) | Only conflicting downstream tasks move right enough to clear conflicts |
-| Drag left | `startDelta < 0 && endDelta < 0` | `pull-left` | Upstream then downstream | Upstream moves if dependency conflict (start-left behavior); ALL downstream tasks shift by the full delta unconditionally (end-left behavior) | Upstream: conflict-only; Downstream: uniform gap-preserving cascade (matches end-only left) | Drag earlier pulls upstream blockers as needed for conflicts and uniformly shifts all downstream tasks preserving gaps |
-| Drag right | `startDelta > 0 && endDelta > 0` | `drag-right` | Upstream then downstream conflict pass | ALL upstream blockers shift right by the same delta unconditionally (start-right behavior); downstream moves only if conflict (end-right behavior) | Upstream: uniform gap-preserving shift (matches start-only right); Downstream: conflict-only push | Drag later uniformly shifts all upstream blockers right preserving gaps and resolves any downstream conflicts |
+| Drag left | `startDelta < 0 && endDelta < 0` | `drag-left` | Connected component | No per-edge conflict pass; every reachable non-frozen task in the connected component translates by the same delta | Uniform translation across the connected component | Drag earlier shifts the connected component around the source left by a shared delta |
+| Drag right | `startDelta > 0 && endDelta > 0` | `drag-right` | Connected component | No per-edge conflict pass; every reachable non-frozen task in the connected component translates by the same delta | Uniform translation across the connected component | Drag later shifts the connected component around the source right by a shared delta |
 | Complete Freeze | Task status is frozen (`Done`/`N/A`) | N/A | Route + engine gates | Frozen tasks never move and are excluded from blocker constraints | N/A | Frozen tasks remain fixed while cascades continue around them where valid |
 
 Parent guard:
-- Top-level parents with subtasks are blocked for direct rightward parent edits (`push-right`/`pull-right`) and produce a warning to edit subtasks directly.
+- Any task with subtasks is blocked for direct date edits and produces a warning to edit subtasks directly.
 
 ### 2) Cross-Chain Propagation Contract
 1. Apply source edit to the in-memory graph using webhook dates as authoritative.
 2. Run mode-specific propagation:
    - `push-right`: downstream conflict pass.
-   - `pull-left`: iterative upstream relaxation, then uniform gap-preserving downstream pass.
-   - `pull-right`/`drag-right`: uniform gap-preserving upstream pass, then downstream conflict pass.
-3. Recompute effective starts/ends against blockers and business-day constraints.
-4. **Cross-chain conflict propagation** (graph-wide cascade): When a uniform gap-preserving shift moves a task that participates in dependency edges in a _different_ chain, and that movement creates a conflict with an unmoved task in that other chain, the engine must continue cascading through the other chain using the same mode-specific rules. This is not limited to a single dependency chain -- the cascade is graph-wide. The engine must traverse all cross-chain edges introduced by each movement pass until no new conflicts remain or the safety cap is reached.
-5. Enforce safety caps for iterative paths (`pull-left` upstream max iterations, cross-chain cascade max iterations) and track monotonic behavior.
+   - `start-left`: iterative upstream relaxation, then downstream retightening from `{source} ∪ {upstream-moved tasks}`.
+   - `pull-left`: uniform gap-preserving downstream pass from the source.
+   - `pull-right`: uniform upstream shift, then downstream conflict pass from `{source} ∪ {upstream-moved tasks}`.
+   - `drag-left` / `drag-right`: connected-component translation around the source.
+3. Recompute effective starts/ends against blockers and business-day constraints within the reachable subgraph for the chosen mode.
+4. There is no whole-graph validation sweep after mode dispatch. Unrelated pre-existing violations remain untouched.
+5. Enforce safety caps for iterative upstream `start-left` paths and track monotonic behavior.
 6. Emit diagnostics (`capReached`, `unresolvedResidue`) and classify terminal status:
    - `success` when objective completed without unresolved safety residue.
    - `failed` when cap is hit with unresolved residue or runtime error.
@@ -69,10 +71,12 @@ Map each behavior to concrete modules/functions:
   - `runCascade()`
   - `conflictOnlyDownstream()`
   - `pullLeftUpstream()`
+  - `tightenDownstreamFromSeed()`
   - `gapPreservingDownstream()`
   - `pullRightUpstream()`
+  - `shiftConnectedComponent()`
 - `src/engine/parent-subtask.js`
-  - `runParentSubtask()` (Case A parent shift, Case B roll-up, cascade roll-up)
+  - `runParentSubtask()` (Case B roll-up and cascade roll-up)
 - `src/routes/date-cascade.js`
   - `processDateCascade()` (orchestration and terminal status semantics)
   - `buildActivityDetails()` (diagnostics mapping)
@@ -161,8 +165,8 @@ Non-negotiable safety invariants:
   - System-written date changes must be gated through LMBS and unlock flow; route must avoid infinite webhook loops.
 - Date math is business-day-only:
   - Delta computation and directional shifts use business-day utilities only.
-- Cross-chain cascade completeness:
-  - When a cascade moves a task that has dependencies in other chains, and that movement creates conflicts in those chains, the engine must continue cascading through all affected chains until no unresolved conflicts remain or the safety cap is reached. Cascades are graph-wide, not single-chain.
+- Reachability-bounded propagation:
+  - Each cascade mode operates on its explicit reachable seed set or connected component. The engine does not run a whole-graph post-pass to repair unrelated violations.
 - Determinism for identical input:
   - Engine outputs (`updates`, `movedTaskMap`, `diagnostics`) are deterministic for identical task graph and payload input.
 
@@ -170,28 +174,29 @@ Non-negotiable safety invariants:
 Link each behavior row and invariant to tests under `engine/test`:
 
 Behavior rows:
-- Start-only left / End-only left / Drag left:
-  - `engine/test/engine/cascade.test.js` (`pull-left` scenarios)
-- Start-only right / Drag right:
-  - `engine/test/engine/cascade.test.js` (`pull-right` and `drag-right` scenarios)
+- Start-only left / Start-only right / End-only right / Complete Freeze:
+  - `test/engine/cascade.test.js`
+- End-only left / Drag left / Drag right:
+  - `test/engine/cascade-full-chain.test.js`
 - End-only right:
-  - `engine/test/engine/cascade.test.js` (`push-right` scenarios)
+  - `test/engine/cascade.test.js`
 - Complete Freeze:
-  - `engine/test/engine/cascade.test.js` (frozen-task scenarios)
-  - `engine/test/routes/date-cascade.test.js` (route-level frozen gate)
+  - `test/engine/cascade.test.js`
+  - `test/routes/date-cascade.test.js`
 
 Cross-chain and safety:
-- `engine/test/engine/cascade-safety.test.js` (cap, residue, monotonic safety)
+- `test/engine/cascade-full-chain.test.js`
+- `test/verify/blocker-starts.test.js`
 
 Parent/subtask:
-- `engine/test/engine/parent-subtask.test.js` (Case A, Case B, roll-up)
+- `test/engine/parent-subtask.test.js`
 
 Business-day utilities:
-- `engine/test/utils/business-days.test.js`
+- `test/utils/business-days.test.js`
 
 Classification and orchestration:
-- `engine/test/engine/classify.test.js`
-- `engine/test/routes/date-cascade.test.js`
+- `test/engine/classify.test.js`
+- `test/routes/date-cascade.test.js`
 
 Every behavior row in Section 1 must remain mapped to at least one active test file.
 
@@ -249,6 +254,16 @@ For every behavior change:
 
 ## Changelog
 
+### 2026-04-20 — Doc resync with current cascade implementation
+
+Sections 1, 2, 3, 5, and 6 were updated to match the current engine:
+- `start-left` is its own mode again
+- `pull-left` is documented as a single downstream pass
+- `pull-right` is documented as a two-pass upstream-shift plus downstream-conflict mode
+- drag modes are connected-component translations, not composed left/right hybrids
+- the contract now describes reachability-bounded propagation instead of a graph-wide fixed-point sweep
+- parent/subtask docs no longer describe the deleted `case-a` parent-edit path
+
 ### 2026-04-16 — PR C: repeat-delivery rename-aware date-copy lookup
 
 **Section 2b correction (this doc):** the "Repeat-delivery date copying" row previously claimed matching was by Template Source ID. That was aspirational and never true in code — PR #18 deliberately moved *from* TSID *to* name-based matching because the blueprint has 9 separate `Data Delivery #N` subtrees with unique TSIDs, making TSID matching degenerate (always hits the blueprint source, never a production copy). Row now documents name-matching with delivery-number normalization.
@@ -275,6 +290,6 @@ New operational sections 7, 8, and 9 added to this document. Changes:
 
 **Pull-right upstream behavior** (Section 2, step 2 updated): Upstream pass for `pull-right`/`drag-right` is now explicitly a uniform gap-preserving shift. No gap absorption.
 
-**Drag left / Drag right** (rows updated): Decomposed into their constituent behaviors. Drag left = start-left (upstream conflict-only) + end-left (all downstream always, gap-preserving). Drag right = start-right (all upstream always, gap-preserving) + end-right (downstream conflict-only).
+**Drag left / Drag right** (historical note): This entry reflected an older decomposition model. The current contract above supersedes it: both drag modes are documented as connected-component translations.
 
-**Cross-chain conflict propagation** (new rule, Section 2 step 4 + new invariant): When a gap-preserving shift moves a task that has dependencies in a different chain and creates a conflict with an unmoved task in that other chain, the engine must continue cascading through the other chain. Cascades are graph-wide, not single-chain. Added corresponding invariant in Section 5.
+**Cross-chain conflict propagation** (historical note): This entry reflected an older graph-wide fixed-point contract. The current contract above supersedes it: propagation is reachability-bounded and there is no whole-graph validation sweep.
