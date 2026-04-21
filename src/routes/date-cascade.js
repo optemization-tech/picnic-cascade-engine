@@ -4,7 +4,15 @@ import { classify } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { buildReportingText } from '../utils/reporting.js';
-import { formatDate } from '../utils/business-days.js';
+import {
+  addBusinessDays,
+  countBDInclusive,
+  formatDate,
+  isBusinessDay,
+  nextBusinessDay,
+  parseDate,
+  signedBDDelta,
+} from '../utils/business-days.js';
 import { cascadeClient as notionClient, commentClient } from '../notion/clients.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
@@ -22,6 +30,29 @@ const DIRECT_PARENT_REVERT_WARNING = 'Parent date edit reverted — edit a subta
 
 function summarizeFailure(error) {
   return `Date cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
+}
+
+function normalizeWeekendSourceDates(parsed) {
+  if (!parsed?.hasDates || !parsed.newStart || !parsed.newEnd) return parsed;
+
+  const start = parseDate(parsed.newStart);
+  const end = parseDate(parsed.newEnd);
+  if (!start || !end || isBusinessDay(start)) return parsed;
+
+  const snappedStart = nextBusinessDay(start);
+  const duration = countBDInclusive(start, end);
+  const snappedEnd = addBusinessDays(snappedStart, duration - 1);
+  const newStart = formatDate(snappedStart);
+  const newEnd = formatDate(snappedEnd);
+
+  return {
+    ...parsed,
+    newStart,
+    newEnd,
+    startDelta: parsed.refStart ? signedBDDelta(parsed.refStart, newStart) : parsed.startDelta,
+    endDelta: parsed.refEnd ? signedBDDelta(parsed.refEnd, newEnd) : parsed.endDelta,
+    weekendSnapped: true,
+  };
 }
 
 function buildActivityDetails({ parsed, classified, patched, sourceFinal, cascadeResult, error, noActionReason, tracer }) {
@@ -150,7 +181,8 @@ function buildUpdateProperties(update, sourceTaskName, cascadeMode) {
 }
 
 async function processDateCascade(payload) {
-  const parsed = parseWebhookPayload(payload);
+  const rawParsed = parseWebhookPayload(payload);
+  const parsed = normalizeWeekendSourceDates(rawParsed);
   if (parsed.skip) return;
 
   const tracer = new CascadeTracer(parsed.executionId);

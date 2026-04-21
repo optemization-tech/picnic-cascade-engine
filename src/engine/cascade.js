@@ -21,6 +21,50 @@ function isFrozen(task) {
   return FROZEN_STATUSES.has(task.status);
 }
 
+function topologicalOrder(reachable, taskById) {
+  const reachableIds = [...reachable];
+  const inDegree = {};
+  for (const id of reachableIds) inDegree[id] = 0;
+  for (const id of reachableIds) {
+    const task = taskById[id];
+    if (!task) continue;
+    for (const blockerId of (task.blockedByIds || [])) {
+      if (reachable.has(blockerId)) inDegree[id]++;
+    }
+  }
+
+  const topoQueue = [];
+  for (const id of reachableIds) {
+    if (inDegree[id] === 0) topoQueue.push(id);
+  }
+
+  const topoOrder = [];
+  while (topoQueue.length > 0) {
+    const cur = topoQueue.shift();
+    topoOrder.push(cur);
+    for (const dependentId of (taskById[cur]?.blockingIds || [])) {
+      if (!reachable.has(dependentId)) continue;
+      inDegree[dependentId]--;
+      if (inDegree[dependentId] === 0) topoQueue.push(dependentId);
+    }
+  }
+
+  const topoSeen = new Set(topoOrder);
+  const cycleTaskIds = reachableIds.filter((id) => !topoSeen.has(id));
+  return {
+    topoOrder,
+    cycleDetected: cycleTaskIds.length > 0,
+    cycleTaskIds,
+  };
+}
+
+function emptyCycleDiagnostics() {
+  return {
+    cycleDetected: false,
+    cycleTaskIds: [],
+  };
+}
+
 function collectConnectedTaskIds(seedIds, taskById) {
   const queue = Array.isArray(seedIds) ? [...seedIds] : [seedIds];
   const connected = new Set();
@@ -91,33 +135,11 @@ function conflictOnlyDownstream(seedTaskIds, updatesMap, taskById) {
     }
   }
 
-  if (reachable.size <= seedTaskIds.size) return; // no downstream tasks
+  if (reachable.size <= seedTaskIds.size) return emptyCycleDiagnostics(); // no downstream tasks
 
   // Step 2: Topological sort (Kahn's algorithm)
-  const inDegree = {};
-  for (const id of reachable) { inDegree[id] = 0; }
-  for (const id of reachable) {
-    const task = taskById[id];
-    if (!task) continue;
-    for (const bid of task.blockedByIds) {
-      if (reachable.has(bid)) inDegree[id]++;
-    }
-  }
-  const topoQueue = [];
-  for (const id of reachable) {
-    if (inDegree[id] === 0) topoQueue.push(id);
-  }
-  const topoOrder = [];
-  while (topoQueue.length > 0) {
-    const cur = topoQueue.shift();
-    topoOrder.push(cur);
-    for (const bid of (taskById[cur]?.blockingIds || [])) {
-      if (reachable.has(bid)) {
-        inDegree[bid]--;
-        if (inDegree[bid] === 0) topoQueue.push(bid);
-      }
-    }
-  }
+  const topo = topologicalOrder(reachable, taskById);
+  const { topoOrder } = topo;
 
   // Step 3: Build effective ends map from seeds + prior updates
   const effectiveEnds = {};
@@ -165,6 +187,8 @@ function conflictOnlyDownstream(seedTaskIds, updatesMap, taskById) {
       duration: task.duration,
     };
   }
+
+  return topo;
 }
 
 // -----------------------------------------------------------
@@ -251,13 +275,13 @@ function pullLeftUpstream(sourceId, newStart, updatesMap, taskById) {
 // -----------------------------------------------------------
 function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, taskById) {
   const sourceTask = taskById[sourceId];
-  if (!sourceTask) return;
+  if (!sourceTask) return emptyCycleDiagnostics();
 
   const oldEndD = parseDate(sourceOldEnd);
   const newEndFromUpdates = updatesMap[sourceId]
     ? parseDate(updatesMap[sourceId].newEnd) : null;
   const sourceNewEndD = newEndFromUpdates || (sourceTask.end ? sourceTask.end : oldEndD);
-  if (!oldEndD || !sourceNewEndD || sourceNewEndD >= oldEndD) return;
+  if (!oldEndD || !sourceNewEndD || sourceNewEndD >= oldEndD) return emptyCycleDiagnostics();
 
   // Compute uniform BD delta (negative)
   let deltaBD = 0;
@@ -268,7 +292,7 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
       if (isBusinessDay(cursor)) deltaBD--;
     }
   }
-  if (deltaBD >= 0) return;
+  if (deltaBD >= 0) return emptyCycleDiagnostics();
 
   // BFS downstream from source
   const downstream = new Set();
@@ -284,37 +308,11 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
       }
     }
   }
-  if (downstream.size === 0) return;
+  if (downstream.size === 0) return emptyCycleDiagnostics();
 
   // Topological sort (Kahn's)
-  const inDegree = {};
-  for (const tid of downstream) { inDegree[tid] = 0; }
-  for (const tid of downstream) {
-    const t = taskById[tid];
-    if (!t) continue;
-    for (const blockerId of (t.blockedByIds || [])) {
-      if (downstream.has(blockerId)) {
-        inDegree[tid] = (inDegree[tid] || 0) + 1;
-      }
-    }
-  }
-  const sorted = [];
-  const topoQ = [];
-  for (const tid of downstream) {
-    if ((inDegree[tid] || 0) === 0) topoQ.push(tid);
-  }
-  while (topoQ.length > 0) {
-    const tid = topoQ.shift();
-    sorted.push(tid);
-    const t = taskById[tid];
-    if (!t) continue;
-    for (const depId of (t.blockingIds || [])) {
-      if (downstream.has(depId)) {
-        inDegree[depId]--;
-        if (inDegree[depId] === 0) topoQ.push(depId);
-      }
-    }
-  }
+  const topo = topologicalOrder(downstream, taskById);
+  const { topoOrder: sorted } = topo;
 
   // Shift each downstream task by deltaBD, clamped to blocker constraints
   for (const tid of sorted) {
@@ -358,6 +356,8 @@ function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, tas
       duration: origDuration,
     };
   }
+
+  return topo;
 }
 
 // -----------------------------------------------------------
@@ -389,33 +389,11 @@ function tightenDownstreamFromSeed(seedTaskIds, updatesMap, taskById) {
     }
   }
 
-  if (reachable.size === 0) return;
+  if (reachable.size === 0) return emptyCycleDiagnostics();
 
   // Step 2: Topological sort (Kahn's algorithm) over the reachable set
-  const inDegree = {};
-  for (const id of reachable) { inDegree[id] = 0; }
-  for (const id of reachable) {
-    const task = taskById[id];
-    if (!task) continue;
-    for (const bid of (task.blockedByIds || [])) {
-      if (reachable.has(bid)) inDegree[id]++;
-    }
-  }
-  const topoQueue = [];
-  for (const id of reachable) {
-    if (inDegree[id] === 0) topoQueue.push(id);
-  }
-  const topoOrder = [];
-  while (topoQueue.length > 0) {
-    const cur = topoQueue.shift();
-    topoOrder.push(cur);
-    for (const bid of (taskById[cur]?.blockingIds || [])) {
-      if (reachable.has(bid)) {
-        inDegree[bid]--;
-        if (inDegree[bid] === 0) topoQueue.push(bid);
-      }
-    }
-  }
+  const topo = topologicalOrder(reachable, taskById);
+  const { topoOrder } = topo;
 
   // Step 3: Process in topo order — tighten against effective blocker ends.
   // Seeds themselves are skipped (their updates were authored by upstream pass).
@@ -459,6 +437,8 @@ function tightenDownstreamFromSeed(seedTaskIds, updatesMap, taskById) {
       duration,
     };
   }
+
+  return topo;
 }
 
 // -----------------------------------------------------------
@@ -575,12 +555,25 @@ export function runCascade({
     capReached: false,
     unresolvedResidue: [],
     monotonicSafe: true,
+    cycleDetected: false,
+    cycleTaskIds: [],
+    cycleMissedCount: 0,
+  };
+
+  const mergeCycleDiagnostics = (topoDiagnostics) => {
+    if (!topoDiagnostics?.cycleDetected) return;
+    diagnostics.cycleDetected = true;
+    diagnostics.cycleTaskIds = [...new Set([
+      ...(diagnostics.cycleTaskIds || []),
+      ...(topoDiagnostics.cycleTaskIds || []),
+    ])];
+    diagnostics.cycleMissedCount = diagnostics.cycleTaskIds.length;
   };
 
   switch (cascadeMode) {
     case 'push-right': {
       const seeds = new Set([sourceTaskId]);
-      conflictOnlyDownstream(seeds, updatesMap, taskById);
+      mergeCycleDiagnostics(conflictOnlyDownstream(seeds, updatesMap, taskById));
       break;
     }
 
@@ -595,12 +588,12 @@ export function runCascade({
       // or any upstream-moved task. Without this pass, a downstream sibling
       // sharing a blocker with the source was never touched (Meg Apr 16 bug β).
       const seedIds = new Set([sourceTaskId, ...Object.keys(updatesMap)]);
-      tightenDownstreamFromSeed(seedIds, updatesMap, taskById);
+      mergeCycleDiagnostics(tightenDownstreamFromSeed(seedIds, updatesMap, taskById));
       break;
     }
 
     case 'pull-left': {
-      gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById);
+      mergeCycleDiagnostics(gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById));
       break;
     }
 
@@ -608,7 +601,7 @@ export function runCascade({
       pullRightUpstream(sourceTaskId, refStart, startDelta, updatesMap, taskById);
       // Upstream blockers can fan out into sibling downstream branches.
       // Retighten those branches so pull-right does not leave fresh overlaps.
-      conflictOnlyDownstream(new Set([sourceTaskId, ...Object.keys(updatesMap)]), updatesMap, taskById);
+      mergeCycleDiagnostics(conflictOnlyDownstream(new Set([sourceTaskId, ...Object.keys(updatesMap)]), updatesMap, taskById));
       break;
     }
 

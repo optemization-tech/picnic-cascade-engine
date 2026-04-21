@@ -160,4 +160,44 @@ describe('runCascade exact behavior', () => {
 
     expect(result.movedTaskIds).toEqual([]);
   });
+
+  it('reports reachable dependency cycles in downstream topo passes', () => {
+    const result = runCascade({
+      sourceTaskId: 'a',
+      sourceTaskName: 'Task A',
+      newStart: '2026-03-30',
+      newEnd: '2026-04-01',
+      refStart: '2026-03-30',
+      refEnd: '2026-03-31',
+      startDelta: 0,
+      endDelta: 1,
+      cascadeMode: 'push-right',
+      tasks: [
+        {
+          id: 'a',
+          name: 'Task A',
+          start: new Date('2026-03-30T00:00:00Z'),
+          end: new Date('2026-03-31T00:00:00Z'),
+          duration: 2,
+          status: 'Not Started',
+          blockedByIds: ['b'],
+          blockingIds: ['b'],
+        },
+        {
+          id: 'b',
+          name: 'Task B',
+          start: new Date('2026-04-01T00:00:00Z'),
+          end: new Date('2026-04-02T00:00:00Z'),
+          duration: 2,
+          status: 'Not Started',
+          blockedByIds: ['a'],
+          blockingIds: ['a'],
+        },
+      ],
+    });
+
+    expect(result.diagnostics.cycleDetected).toBe(true);
+    expect(result.diagnostics.cycleMissedCount).toBe(2);
+    expect(result.diagnostics.cycleTaskIds).toEqual(expect.arrayContaining(['a', 'b']));
+  });
 });
