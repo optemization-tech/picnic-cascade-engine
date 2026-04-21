@@ -8,6 +8,7 @@ import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
 import { copyBlocks, prefetchTemplateBlocks } from '../provisioning/copy-blocks.js';
 import { flightTracker } from '../services/flight-tracker.js';
+import { withStudyLock } from '../services/study-lock.js';
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -309,5 +310,15 @@ async function processInception(body) {
 
 export async function handleInception(req, res) {
   res.status(200).json({ ok: true });
-  flightTracker.track(processInception(req.body).catch(err => console.error('[inception] unhandled:', err)), 'inception');
+  const studyPageId = req.body?.data?.id || req.body?.studyPageId;
+  if (!studyPageId) {
+    console.warn('[inception] missing studyPageId on webhook; running unlocked');
+  }
+  const run = studyPageId
+    ? withStudyLock(studyPageId, () => processInception(req.body))
+    : processInception(req.body);
+  flightTracker.track(
+    run.catch(err => console.error('[inception] unhandled:', err)),
+    'inception',
+  );
 }

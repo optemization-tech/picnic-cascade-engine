@@ -242,7 +242,7 @@ On process start, the engine clears any `Import Mode = true` studies left over f
 
 ### 10) Concurrency Model
 
-See [CONCURRENCY-MODEL.md](CONCURRENCY-MODEL.md) for the full concurrency documentation: per-study FIFO queuing (CascadeQueue), debounce, Import Mode lifecycle, LMBS echo prevention, withStudyLock (add-task-set serialization), graceful shutdown, and the multi-replica migration warning.
+See [CONCURRENCY-MODEL.md](CONCURRENCY-MODEL.md) for the full concurrency documentation: per-study FIFO queuing (CascadeQueue), debounce, Import Mode lifecycle, LMBS echo prevention, per-study serialization via `withStudyLock` (covers both add-task-set and inception — since PR E0), graceful shutdown, and the multi-replica migration warning.
 
 ## Change Protocol
 For every behavior change:
