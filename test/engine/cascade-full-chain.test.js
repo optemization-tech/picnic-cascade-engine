@@ -1,12 +1,55 @@
 import { describe, expect, it } from 'vitest';
 
-import { nextBusinessDay, formatDate } from '../../src/utils/business-days.js';
+import { nextBusinessDay, formatDate, signedBDDelta } from '../../src/utils/business-days.js';
 import { runCascade } from '../../src/engine/cascade.js';
 import {
+  applyCascadeResult,
   findFixtureGapViolations,
   getTaskByName,
+  makeCascadeParams,
+  makeFullStudyTaskGraphFixture,
   runFixtureScenario,
 } from '../fixtures/full-study-task-graph.js';
+
+function runFrozenFixtureScenario(sourceTaskName, cascadeMode, deltas, frozenTaskNames) {
+  const tasks = makeFullStudyTaskGraphFixture();
+  const frozenTaskIds = new Set();
+
+  for (const taskName of frozenTaskNames) {
+    const task = getTaskByName(tasks, taskName);
+    task.status = 'Done';
+    frozenTaskIds.add(task.id);
+  }
+
+  const params = makeCascadeParams(tasks, sourceTaskName, cascadeMode, deltas);
+  const result = runCascade({
+    ...params,
+    startDelta: signedBDDelta(params.refStart, params.newStart),
+    endDelta: signedBDDelta(params.refEnd, params.newEnd),
+    tasks,
+  });
+  const finalTasks = applyCascadeResult(tasks, params, result);
+
+  return {
+    tasks,
+    params,
+    result,
+    finalTasks,
+    frozenTaskIds,
+  };
+}
+
+function expectViolationsOnlyAroundFrozenTasks(finalTasks, frozenTaskIds) {
+  const violations = findFixtureGapViolations(finalTasks);
+  expect(violations.length).toBeGreaterThan(0);
+
+  for (const violation of violations) {
+    expect(violation.type).toBe('start_mismatch');
+    expect(
+      frozenTaskIds.has(violation.taskId) || frozenTaskIds.has(violation.bindingBlockerId),
+    ).toBe(true);
+  }
+}
 
 describe('runCascade full study invariants', () => {
   it('starts from an invariant-clean 200-task fixture', () => {
@@ -105,5 +148,39 @@ describe('runCascade full study invariants', () => {
     );
 
     expect(findFixtureGapViolations(finalTasks)).toEqual([]);
+  });
+
+  it('allows only frozen-edge violations when a frozen upstream blocker cannot move', () => {
+    const frozenTaskName = 'Client Review Round 1: Protocol';
+    const { tasks, finalTasks, result, frozenTaskIds } = runFrozenFixtureScenario(
+      'Draft ICF',
+      'start-left',
+      { startDelta: -3 },
+      [frozenTaskName],
+    );
+
+    const originalFrozen = getTaskByName(tasks, frozenTaskName);
+    const finalFrozen = getTaskByName(finalTasks, frozenTaskName);
+    expect(result.updates.some((update) => frozenTaskIds.has(update.taskId))).toBe(false);
+    expect(formatDate(finalFrozen.start)).toBe(formatDate(originalFrozen.start));
+    expect(formatDate(finalFrozen.end)).toBe(formatDate(originalFrozen.end));
+    expectViolationsOnlyAroundFrozenTasks(finalTasks, frozenTaskIds);
+  });
+
+  it('allows only frozen-edge violations when a frozen downstream dependent cannot move', () => {
+    const frozenTaskName = 'Prepare for IRB Submission';
+    const { tasks, finalTasks, result, frozenTaskIds } = runFrozenFixtureScenario(
+      'Round 3/Customer Committee Review & Signatures',
+      'push-right',
+      { endDelta: 10 },
+      [frozenTaskName],
+    );
+
+    const originalFrozen = getTaskByName(tasks, frozenTaskName);
+    const finalFrozen = getTaskByName(finalTasks, frozenTaskName);
+    expect(result.updates.some((update) => frozenTaskIds.has(update.taskId))).toBe(false);
+    expect(formatDate(finalFrozen.start)).toBe(formatDate(originalFrozen.start));
+    expect(formatDate(finalFrozen.end)).toBe(formatDate(originalFrozen.end));
+    expectViolationsOnlyAroundFrozenTasks(finalTasks, frozenTaskIds);
   });
 });
