@@ -233,6 +233,33 @@ describe('date-cascade route safety', () => {
     expect(queuedCalls).toHaveLength(0);
   });
 
+  it('skips "Cascade queued" when studyId is missing (prevents stuck banner)', async () => {
+    // Without a studyId, processDateCascade returns at the missing_study
+    // guard with no follow-up reportStatus -- leaving "queued" stuck on
+    // the task's Automation Reporting field. Handler must suppress queued
+    // in this case.
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: null,
+      hasDates: true,
+      startDelta: 2,
+      endDelta: 2,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await Promise.resolve();
+
+    const queuedCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+      (args) => typeof args[2] === 'string' && args[2].includes('Cascade queued'),
+    );
+    expect(queuedCalls).toHaveLength(0);
+  });
+
   it('skips "Cascade queued" when Import Mode is enabled', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
@@ -417,6 +444,14 @@ describe('date-cascade route safety', () => {
       status: 'no_action',
       details: expect.objectContaining({ noActionReason: 'empty_study_tasks' }),
     }));
+    // Empty-study guard clears the "Cascade queued" banner on the task
+    // with a warning so the PM sees the no-action outcome instead of a
+    // stuck pre-state message.
+    const warningCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+      (args) => args[0] === 'orphan' && args[1] === 'warning'
+        && typeof args[2] === 'string' && args[2].includes('no tasks found'),
+    );
+    expect(warningCalls).toHaveLength(1);
   });
 
   it('fires Error 1 revert on a FROZEN top-level parent date edit and suppresses "Cascade started"', async () => {

@@ -34,6 +34,10 @@ function summarizeFailure(error) {
 
 function normalizeWeekendSourceDates(parsed) {
   if (!parsed?.hasDates || !parsed.newStart || !parsed.newEnd) return parsed;
+  // Defensive idempotency guard: if a prior call already snapped this
+  // parsed object, return it unchanged so a double-invocation path (handler
+  // + processDateCascade both normalize) never double-snaps.
+  if (parsed.weekendSnapped) return parsed;
 
   const start = parseDate(parsed.newStart);
   const end = parseDate(parsed.newEnd);
@@ -249,6 +253,19 @@ async function processDateCascade(payload) {
         taskId: parsed.taskId,
         studyId: parsed.studyId,
       }));
+      // Clear the "Cascade queued" banner on the task so the PM doesn't
+      // see a stuck pre-state. Fire-and-forget + swallow so reportStatus
+      // failures never mask the real no_action log.
+      notionClient
+        .reportStatus(
+          parsed.taskId,
+          'warning',
+          `No action: no tasks found for this study (stale data or racing deletion?)`,
+          { tracer },
+        )
+        .catch((err) => {
+          console.warn('[date-cascade] empty-study reportStatus dropped:', err?.message || err);
+        });
       await logTerminalEvent({
         parsed,
         status: 'no_action',
@@ -549,6 +566,10 @@ export async function handleDateCascade(req, res) {
     const shouldPostQueued = parsed
       && !parsed.skip
       && parsed.taskId
+      && parsed.studyId // without studyId, processDateCascade returns
+                        // on the missing_study guard with no follow-up
+                        // reportStatus -- would leave "Cascade queued"
+                        // stuck on the task's Automation Reporting.
       && hasNonZeroDelta
       && !isImportMode(parsed)
       && !parsed.editedByBot

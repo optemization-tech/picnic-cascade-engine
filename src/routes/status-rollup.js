@@ -171,8 +171,11 @@ export async function handleStatusRollup(req, res) {
           `Status roll-up failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
         );
       }
-    } catch {
-      // Swallow nested reporting failures.
+    } catch (reportErr) {
+      // Swallow nested reporting failures (e.g., task deleted -> 404)
+      // but log them so the secondary failure is observable at scale.
+      // The primary error was already console.error'd above.
+      console.warn('[status-rollup] error reportStatus failed:', reportErr?.message || reportErr);
     }
   }), 'status-rollup');
 }
