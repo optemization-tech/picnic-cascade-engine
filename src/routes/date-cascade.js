@@ -511,27 +511,39 @@ export async function handleDateCascade(req, res) {
   // the engine has nothing to do.
   try {
     const rawParsed = parseWebhookPayload(req.body);
-    const hasNonZeroDelta = rawParsed
-      && typeof rawParsed.startDelta === 'number'
-      && typeof rawParsed.endDelta === 'number'
-      && (rawParsed.startDelta !== 0 || rawParsed.endDelta !== 0);
-    const shouldPostQueued = rawParsed
-      && !rawParsed.skip
-      && rawParsed.taskId
+    // Match processDateCascade's weekend-snap behavior so a Fri->Sat edit
+    // (raw delta 0, snapped delta 1) doesn't silently suppress the queued
+    // message while the cascade actually runs.
+    const parsed = normalizeWeekendSourceDates(rawParsed);
+    const hasNonZeroDelta = parsed
+      && typeof parsed.startDelta === 'number'
+      && typeof parsed.endDelta === 'number'
+      && (parsed.startDelta !== 0 || parsed.endDelta !== 0);
+    // Also mirror the frozen-status skip so frozen leaves don't see a
+    // permanent "queued" banner with no follow-up (processDateCascade's
+    // post-classify isFrozen check returns no_action without writing any
+    // lifecycle message back to the task).
+    const shouldPostQueued = parsed
+      && !parsed.skip
+      && parsed.taskId
       && hasNonZeroDelta
-      && !isImportMode(rawParsed)
-      && !rawParsed.editedByBot;
+      && !isImportMode(parsed)
+      && !parsed.editedByBot
+      && !isFrozen(parsed);
     if (shouldPostQueued) {
       notionClient
         .reportStatus(
-          rawParsed.taskId,
+          parsed.taskId,
           'info',
-          `Cascade queued for ${rawParsed.taskName || 'task'} — starting in ~5s...`,
+          `Cascade queued for ${parsed.taskName || 'task'} — starting in ~5s...`,
         )
-        .catch(() => {});
+        .catch((err) => {
+          console.warn('[date-cascade] queued reportStatus dropped:', err?.message || err);
+        });
     }
-  } catch {
-    // Swallow parse/report errors; webhook must always succeed.
+  } catch (err) {
+    // Swallow parse errors; webhook must always succeed. Log for visibility.
+    console.warn('[date-cascade] queued preflight parse error:', err?.message || err);
   }
 
   cascadeQueue.enqueue(req.body, parseWebhookPayload, processDateCascade);

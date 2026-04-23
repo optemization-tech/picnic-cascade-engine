@@ -57,7 +57,15 @@ async function processStatusRollup(payload) {
     // Stale-relation guard: if Subtask(s) relation claims children exist
     // but the query returns none (deleted pages), skip -- otherwise we
     // would silently snap a Done parent to Not Started based on stale data.
-    if (childrenPages.length === 0) return;
+    if (childrenPages.length === 0) {
+      console.log(JSON.stringify({
+        event: 'status_rollup_stale_relation_skip',
+        taskId: changedTask.id,
+        taskName: changedTask.name,
+        studyId: changedTask.studyId,
+      }));
+      return;
+    }
 
     const children = childrenPages.map(normalizeTask);
     const desiredStatus = mapRollupStatusToNotion(computeStatusRollup(children));
