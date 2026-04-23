@@ -155,6 +155,40 @@ Terminal activity log entries are emitted by the route/orchestration layer and w
 }
 ```
 
+#### 4.1b Status Roll-Up event shape
+
+Status Roll-Up events have a distinct shape from Date Cascade events. Two subtypes exist, distinguished by `details.direction`:
+
+```json
+{
+  "workflow": "Status Roll-Up",
+  "status": "success | no_action | failed",
+  "triggerType": "Automation",
+  "cascadeMode": "status-rollup",
+  "executionId": "string | null",
+  "timestamp": "ISO-8601 string",
+  "triggeredByUserId": "string | null",
+  "editedByBot": "boolean",
+  "sourceTaskId": "string",
+  "sourceTaskName": "string",
+  "studyId": "string",
+  "summary": "Parent <name> status <corrected: <old> -> <new>|-> <new>> (<direct edit blocked>|<triggered by <child>>)",
+  "details": {
+    "parentId": "string",
+    "parentName": "string",
+    "oldStatus": "string",
+    "newStatus": "string",
+    "subtaskCount": "number",
+    "direction": "parent-direct | subtask-triggered",
+    "timing": { "totalMs": "number" }
+  }
+}
+```
+
+Direction semantics:
+- `"parent-direct"`: PM edited the parent's Status directly; engine recomputed from children and snapped back. `sourceTaskId` is the parent itself.
+- `"subtask-triggered"`: A leaf subtask's Status changed; engine rolled up to the parent. `sourceTaskId` is the child that triggered the rollup. `details.parentId` names the parent that was patched.
+
 #### 4.2 Notion mapping contract
 - Summary goes in Notion `Summary` property.
 - Workflow metadata goes in properties (`Workflow`, `Status`, `Cascade Mode`, `Trigger Type`, `Execution ID`, `Duration (ms)`, `Original Dates` (range), `Modified Dates` (range), task/study relations).

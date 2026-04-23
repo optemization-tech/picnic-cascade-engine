@@ -126,8 +126,11 @@ describe('status-rollup route', () => {
     await flushAsync();
 
     expect(res.status).toHaveBeenCalledWith(200);
+    // After the consistency fix: error reportStatus is task-scoped (matches
+    // date-cascade lifecycle pattern). Falls back to studyId only if
+    // taskId is missing from the parsed payload.
     expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
-      'study-1',
+      'task-1',
       'error',
       expect.stringContaining('Status roll-up failed for Task One'),
     );
@@ -298,6 +301,69 @@ describe('status-rollup parent-direct snap-back', () => {
     expect(mocks.mockClient.queryDatabase).toHaveBeenCalled();
     expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+  });
+
+  it('snap-back runs on middle parent (has both parentId AND subtasks); grandparent rollup is not triggered', async () => {
+    // A middle parent has its own parentId AND its own subtasks. Per the
+    // plan, the parent-direct snap-back path runs on middle parents too --
+    // the documented limitation is that the grandparent is NOT rolled up
+    // as a follow-up (out of scope).
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      editedByBot: false,
+      taskId: 'middle-parent',
+      taskName: 'Middle Parent',
+      studyId: 'study-1',
+    });
+    mocks.mockClient.getPage
+      .mockResolvedValueOnce({
+        id: 'middle-parent',
+        properties: {
+          Study: { relation: [{ id: 'study-1' }] },
+          'Parent Task': { relation: [{ id: 'grandparent' }] },
+          'Subtask(s)': { relation: [{ id: 'child-1' }] },
+          'Status': { status: { name: 'Done' } },
+          'Task Name': { title: [{ plain_text: 'Middle Parent' }] },
+        },
+      })
+      .mockResolvedValueOnce({
+        id: 'study-1',
+        properties: { 'Import Mode': { checkbox: false } },
+      });
+    mocks.normalizeTask.mockImplementation((page) => {
+      if (!page) return {};
+      if (page.id === 'middle-parent') {
+        return {
+          id: 'middle-parent',
+          name: 'Middle Parent',
+          studyId: 'study-1',
+          parentId: 'grandparent', // has a parent
+        };
+      }
+      return { id: page.id };
+    });
+    mocks.mockClient.queryDatabase.mockResolvedValueOnce([{ id: 'child-1', properties: {} }]);
+    mocks.computeStatusRollup.mockReturnValue('In Progress');
+    mocks.mockClient.patchPage.mockResolvedValue({});
+
+    const req = { body: { data: { id: 'middle-parent' } } };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+
+    await handleStatusRollup(req, res);
+    await flushAsync();
+
+    // The middle parent gets patched from Done -> In Progress
+    expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('middle-parent', {
+      'Status': { status: { name: 'In Progress' } },
+    });
+    // The grandparent is NOT patched (scope boundary -- documented limitation)
+    expect(mocks.mockClient.patchPage).not.toHaveBeenCalledWith('grandparent', expect.anything());
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceTaskId: 'middle-parent',
+        details: expect.objectContaining({ direction: 'parent-direct' }),
+      }),
+    );
   });
 
   it('skips parent-direct branch when Import Mode is enabled on the study', async () => {

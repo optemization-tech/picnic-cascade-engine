@@ -160,9 +160,13 @@ export async function handleStatusRollup(req, res) {
     console.error('[status-rollup] processing failed:', error);
     try {
       const parsed = parseWebhookPayload(req.body);
-      if (parsed.studyId) {
+      // Task-scoped error reporting matches the date-cascade lifecycle
+      // pattern (Unit 3) so PMs see per-task failure states. Falls back
+      // to studyId only if taskId is unavailable.
+      const targetId = parsed?.taskId || parsed?.studyId;
+      if (targetId) {
         await notionClient.reportStatus(
-          parsed.studyId,
+          targetId,
           'error',
           `Status roll-up failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
         );

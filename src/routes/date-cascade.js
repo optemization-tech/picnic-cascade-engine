@@ -236,6 +236,29 @@ async function processDateCascade(payload) {
     tracer.endPhase('query');
     tracer.set('study_task_count', allTasks.length);
 
+    // Safety guard: if queryStudyTasks returns empty (stale studyId,
+    // racing deletion, or malformed webhook), classify would compute
+    // hasSubtasksFromGraph=false and Error 1 would not fire for what is
+    // actually a top-level parent edit. Short-circuit with a no_action
+    // log instead of silently accepting the edit.
+    if (allTasks.length === 0) {
+      console.log(JSON.stringify({
+        event: 'empty_study_tasks_skip',
+        cascadeId: tracer.cascadeId,
+        taskName: parsed.taskName,
+        taskId: parsed.taskId,
+        studyId: parsed.studyId,
+      }));
+      await logTerminalEvent({
+        parsed,
+        status: 'no_action',
+        summary: `No action: no tasks found for study (stale studyId or racing deletion?)`,
+        noActionReason: 'empty_study_tasks',
+        tracer,
+      });
+      return;
+    }
+
     // Snapshot pre-cascade dates for undo capability.
     // allTasks has current dates for all downstream tasks (only source has changed).
     // normalizeTask returns Date objects for start/end; we flatten to 'YYYY-MM-DD' strings here

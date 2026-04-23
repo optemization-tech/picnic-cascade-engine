@@ -298,7 +298,8 @@ describe('date-cascade route safety', () => {
     });
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(true);
-    mocks.queryStudyTasks.mockResolvedValue([]);
+    // Non-empty so the empty-study safety guard doesn't fire first.
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'source' }]);
     mocks.classify.mockReturnValue({
       skip: false,
       cascadeMode: 'push-right',
@@ -338,6 +339,86 @@ describe('date-cascade route safety', () => {
     }));
   });
 
+  it('frozen middle-parent (case-a) logs no_action without cascading', async () => {
+    // A middle parent has both a parentId of its own AND its own subtasks.
+    // classify returns skip:false with parentMode:'case-a' (Error 1 only
+    // fires when !hasParent). If the middle parent is frozen, the post-
+    // classify isFrozen branch should log no_action and NOT run cascade.
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'middle-parent',
+      taskName: 'Middle Parent',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 0,
+      endDelta: 2,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(true);
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'middle-parent' }]);
+    mocks.classify.mockReturnValue({
+      skip: false,
+      cascadeMode: 'push-right',
+      sourceTaskId: 'middle-parent',
+      sourceTaskName: 'Middle Parent',
+      newStart: '2026-05-01',
+      newEnd: '2026-05-05',
+      refStart: '2026-05-01',
+      refEnd: '2026-05-03',
+      startDelta: 0,
+      endDelta: 2,
+      parentTaskId: 'grandparent',
+      parentMode: 'case-a',
+    });
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.queryStudyTasks).toHaveBeenCalled();
+    expect(mocks.classify).toHaveBeenCalled();
+    expect(mocks.runCascade).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      details: expect.objectContaining({ noActionReason: 'frozen_status' }),
+    }));
+  });
+
+  it('logs no_action when queryStudyTasks returns empty (stale studyId safety guard)', async () => {
+    // If queryStudyTasks returns empty (stale studyId, racing deletion),
+    // classify would compute hasSubtasksFromGraph=false and Error 1 would
+    // never fire for a top-level parent edit. Safety guard short-circuits
+    // with a no_action log instead of silently accepting the edit.
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'orphan',
+      taskName: 'Orphan Task',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: -1,
+      endDelta: 0,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockResolvedValue([]); // empty study
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.queryStudyTasks).toHaveBeenCalled();
+    expect(mocks.classify).not.toHaveBeenCalled(); // short-circuited before classify
+    expect(mocks.runCascade).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      details: expect.objectContaining({ noActionReason: 'empty_study_tasks' }),
+    }));
+  });
+
   it('fires Error 1 revert on a FROZEN top-level parent date edit and suppresses "Cascade started"', async () => {
     // The core Unit 2 scenario: Meg's Sites Planning (frozen) edit. Without
     // the guard reorder, isFrozen fires first and the edit is silently
@@ -357,7 +438,9 @@ describe('date-cascade route safety', () => {
     });
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(true); // parent is Done -- frozen
-    mocks.queryStudyTasks.mockResolvedValue([]);
+    // Non-empty tasks so the empty-study-tasks safety guard doesn't fire
+    // before classify gets a chance to return Error 1.
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'parent-1' }, { id: 'child-1' }]);
     mocks.classify.mockReturnValue({
       skip: true,
       reason: 'Direct parent edit blocked - edit subtasks directly',
@@ -417,7 +500,8 @@ describe('date-cascade route safety', () => {
     });
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(false);
-    mocks.queryStudyTasks.mockResolvedValue([]);
+    // Non-empty so the empty-study safety guard doesn't fire first.
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'source' }, { id: 'child-1' }]);
     mocks.classify.mockReturnValue({
       skip: true,
       reason: 'Direct parent edit blocked - edit subtasks directly',
