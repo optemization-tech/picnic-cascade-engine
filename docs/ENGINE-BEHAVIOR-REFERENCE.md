@@ -36,6 +36,12 @@ Definitions:
 
 Parent guard:
 - Any task with subtasks is blocked for direct date edits and produces a warning to edit subtasks directly.
+- The Error 1 revert-and-warn flow runs **regardless of the parent's frozen status**. A `Done`/`N/A` parent whose dates are edited still has its dates reverted to Reference dates and the red "edit a subtask directly" warning posted. Implementation: the `isFrozen` guard runs AFTER `classify` so Error 1 fires first for top-level parent edits; non-Error-1 paths (leaves, middle-parent case-a) still short-circuit on frozen.
+
+Status Roll-Up (parent-direct snap-back):
+- When a PM directly edits a parent task's Status, the engine computes the parent's rollup from its own subtasks and patches back if the manual value disagrees. Behaves both directions: all-subtasks-Done drives parent to Done; any mismatch in either direction snaps parent to computed. Silent correction -- no Notion comment; audit trail lives in the Activity Log with summary prefix "Parent ... status corrected: ... (direct edit blocked)" and `details.direction = 'parent-direct'`. The existing leaf-subtask → parent rollup path is unchanged and logs with `details.direction = 'subtask-triggered'`.
+- Echo-loop guard: parent-direct branch skips when `parsed.editedByBot === true` so the engine's own patch doesn't re-enter and amplify Notion reads.
+- Stale-relation guard: if `Subtask(s)` relation claims children exist but the children query returns none (deleted pages), the branch returns without patching -- avoids silently snapping a Done parent to Not Started based on stale data.
 
 ### 2) Cross-Chain Propagation Contract
 1. Apply source edit to the in-memory graph using webhook dates as authoritative.
@@ -58,7 +64,11 @@ Parent guard:
 
 **Import Mode lifecycle:** The Notion button automation sets Import Mode = true before sending the webhook. The engine ensures it stays on during execution and always disables it in a finally block — even on abort or error.
 
-**Repeat-delivery date copying:** When repeat-delivery creates a new delivery (e.g., #11), it copies dates from the latest existing delivery (#10) task-by-task, matched by task name (with the delivery number normalized to the target `#N`). This inherits any manual date adjustments. Name-matching is deliberate — the blueprint has multiple `Data Delivery #N` subtrees with unique Template Source IDs, so TSID matching would be degenerate (always hits the blueprint source, never a production copy). See PR #18 rationale. Falls back to Contract Sign Date + offset if no prior delivery exists.
+**Repeat-delivery date copying:** When repeat-delivery creates a new delivery (e.g., #11), it copies dates from the latest existing delivery (#10) task-by-task, matched by task name (with the delivery number normalized to the target `#N`). This inherits any manual date adjustments. Name-matching is deliberate — the blueprint has multiple `Data Delivery #N` subtrees with unique Template Source IDs, so TSID matching would be degenerate (always hits the blueprint source, never a production copy). See PR #18 rationale. Falls back to Contract Sign Date + Blueprint offset when no prior delivery exists.
+
+**Blueprint-vs-in-study authority (Meg-confirmed 2026-04-22):** The Blueprint is the source of truth for STRUCTURE -- task names, dependencies, parent relationships, properties. Dates come from the PREVIOUS corresponding in-study task set when one exists, or from Blueprint offsets relative to Contract Sign Date when no previous exists. Implication: Blueprint offset edits do NOT retroactively propagate to studies that already have a prior task set; the next button press inherits from the (unchanged) previous in-study delivery's dates. Blueprint structural edits (renames, new tasks, dependency changes) DO propagate on every button press because Blueprint is fetched fresh each run (no process-level cache). To make Blueprint offset edits take effect in an existing study, the PM must manually correct the most-recent existing task set first, since that is what the next press will inherit from.
+
+**Add-task-set fallback when seed group missing:** If the study has no existing corresponding task set (e.g., PM deleted the seed TLF group), the engine gracefully falls back to Blueprint-offset date computation relative to Contract Sign Date. `resolveTaskSetNumbers` / `resolveNextDeliveryNumber` both return `1` in this case; no override is populated; `create-tasks.js` computes dates from Blueprint SDate/EDate offsets. Verified for all button types (TLF variants, additional-site, repeat-delivery).
 
 **Copy-blocks scope:** Add-task-set only passes newly created task IDs to copy-blocks, not the full idMapping (which includes existing tasks seeded for dependency resolution).
 
@@ -145,6 +155,40 @@ Terminal activity log entries are emitted by the route/orchestration layer and w
 }
 ```
 
+#### 4.1b Status Roll-Up event shape
+
+Status Roll-Up events have a distinct shape from Date Cascade events. Two subtypes exist, distinguished by `details.direction`:
+
+```json
+{
+  "workflow": "Status Roll-Up",
+  "status": "success | no_action | failed",
+  "triggerType": "Automation",
+  "cascadeMode": "status-rollup",
+  "executionId": "string | null",
+  "timestamp": "ISO-8601 string",
+  "triggeredByUserId": "string | null",
+  "editedByBot": "boolean",
+  "sourceTaskId": "string",
+  "sourceTaskName": "string",
+  "studyId": "string",
+  "summary": "Parent <name> status <corrected: <old> -> <new>|-> <new>> (<direct edit blocked>|<triggered by <child>>)",
+  "details": {
+    "parentId": "string",
+    "parentName": "string",
+    "oldStatus": "string",
+    "newStatus": "string",
+    "subtaskCount": "number",
+    "direction": "parent-direct | subtask-triggered",
+    "timing": { "totalMs": "number" }
+  }
+}
+```
+
+Direction semantics:
+- `"parent-direct"`: PM edited the parent's Status directly; engine recomputed from children and snapped back. `sourceTaskId` is the parent itself.
+- `"subtask-triggered"`: A leaf subtask's Status changed; engine rolled up to the parent. `sourceTaskId` is the child that triggered the rollup. `details.parentId` names the parent that was patched.
+
 #### 4.2 Notion mapping contract
 - Summary goes in Notion `Summary` property.
 - Workflow metadata goes in properties (`Workflow`, `Status`, `Cascade Mode`, `Trigger Type`, `Execution ID`, `Duration (ms)`, `Original Dates` (range), `Modified Dates` (range), task/study relations).
@@ -156,6 +200,27 @@ Terminal activity log entries are emitted by the route/orchestration layer and w
 - `failed`: Execution error, or unresolved residue that violates cross-chain safety policy after cap.
 
 Do not classify a run as success only because the process completed. Status reflects cascade outcome quality, not transport/execution completion.
+
+#### 4.4 Cascade lifecycle states (task-scoped Automation Reporting)
+
+Cascade lifecycle messages are written to the EDITED TASK's `Automation Reporting` field, not the study's. The study field is shared across all cascades in a study; writing lifecycle states there would overwrite other tasks' states in multi-task workflows.
+
+Normal cascade:
+1. `info` "Cascade queued for <task> — starting in ~5s..." — posted synchronously in the webhook handler before the 5s debounce fires. Gives PMs immediate click feedback.
+2. `info` "Cascade started for <task>..." — posted after classify confirms the cascade will run (not Error 1, not frozen short-circuit).
+3. `success` "Cascade complete for <task>: <mode> (N task updates)" — posted after patches land.
+
+Alternate terminal states:
+- Error 1 (direct parent edit): queued → red "Parent date edit reverted — edit a subtask directly to shift dates and trigger cascading" (on the task) + red study-level `DIRECT_PARENT_WARNING` banner. The intermediate "Cascade started" is SUPPRESSED for this path.
+- Frozen leaf / middle-parent case-a frozen: queued → silence (no further lifecycle messages; Activity Log records `no_action` with reason `frozen_status`).
+- Zero-delta / Import Mode / bot-echo / invalid payload: NO "Cascade queued" is posted. The handler filters these before the queued write.
+- Runtime error during processing: queued → red "Cascade failed for <task>: <message>" on the task.
+
+Study-level `Automation Reporting` writes reserved for:
+- Error 1 study-level red banner (`DIRECT_PARENT_WARNING`).
+- Import Mode operations (add-task-set start/end, inception, deletion).
+- Add-task-set success/error summaries.
+- Copy-blocks progress.
 
 ### 5) Invariants
 Non-negotiable safety invariants:
@@ -253,6 +318,18 @@ For every behavior change:
 5. Record decision in pulse log
 
 ## Changelog
+
+### 2026-04-22 — Meg Apr 21 feedback batch
+
+Plan: `docs/plans/2026-04-22-001-fix-meg-apr21-feedback-plan.md`.
+
+Behavior changes:
+- **Status Roll-Up (new parent-direct branch):** when a PM directly edits a parent task's Status, the engine recomputes the parent's rollup from its own subtasks and patches back if they disagree (both directions). Silent correction; Activity Log distinguishes parent-direct (`"status corrected: X -> Y (direct edit blocked)"`, `details.direction = 'parent-direct'`) from the existing subtask-triggered rollup (`"status -> Y (triggered by <child>)"`, `details.direction = 'subtask-triggered'`). Includes `editedByBot` echo-loop skip and a stale-relation guard for empty children queries.
+- **Date Cascade (guard reorder):** `isFrozen` moved AFTER `classify` so Error 1 (direct parent edit revert) fires for frozen top-level parents too. Net cost: frozen-leaf edits now trigger a `queryStudyTasks` fetch (previously a zero-I/O log); accepted trade-off. "Cascade started" reportStatus is SUPPRESSED for Error 1 paths so the PM sees queued → revert-warn without a misleading intermediate state.
+- **Cascade lifecycle reporting switched to task-scoped.** New "Cascade queued" pre-state + all lifecycle reportStatus writes (queued, started, complete, failed, no-updates, no-cascade-mode warning) target the edited task's `Automation Reporting` field rather than the study's. Multi-task cascades in the same study no longer overwrite each other's states. Study-level reporting still used for Error 1 banner, Import Mode operations, and add-task-set/inception/deletion/copy-blocks summaries.
+- **Add Task Set fallback:** verified (no code change) that when a study has no existing corresponding task set, every button type (TLF variants, additional-site, repeat-delivery) falls back to Blueprint-offset date computation from Contract Sign Date. Documented in Section 2b including the Blueprint-vs-in-study authority model (structure from Blueprint, dates from previous in-study task set, Blueprint offset edits do not retroactively propagate).
+
+Bug 3 (Repeat Delivery "button running off something old"): confirmed as intentional design, no code change. The `latestDates` override reads from the previous in-study delivery's date values (inheriting manual adjustments), so Blueprint offset edits only propagate to studies with no prior delivery. Documented in Section 2b.
 
 ### 2026-04-20 — Doc resync with current cascade implementation
 

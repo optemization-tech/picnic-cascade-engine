@@ -199,16 +199,11 @@ async function processDateCascade(payload) {
     console.log(JSON.stringify({ event: 'import_mode_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
     return;
   }
-  if (isFrozen(parsed)) {
-    await logTerminalEvent({
-      parsed,
-      status: 'no_action',
-      summary: `No action: ${parsed.taskName || 'task'} is in a frozen status`,
-      noActionReason: 'frozen_status',
-      tracer,
-    });
-    return;
-  }
+  // NOTE: isFrozen check moved AFTER classify below. Error 1 (direct parent
+  // edit) must fire for frozen parents too -- previously the frozen guard
+  // here short-circuited the revert flow, leaving PMs with silently-applied
+  // date edits on Done parents. See plan
+  // docs/plans/2026-04-22-001-fix-meg-apr21-feedback-plan.md Unit 2.
   if (!parsed.hasDates) {
     await logTerminalEvent({
       parsed,
@@ -231,12 +226,38 @@ async function processDateCascade(payload) {
   }
 
   try {
-    await notionClient.reportStatus(parsed.studyId, 'info', `Cascade started for ${parsed.taskName}...`, { tracer });
+    // "Cascade started" reportStatus is deferred until AFTER classify +
+    // frozen check. Error 1 paths should see "queued" -> revert-warn with
+    // no misleading "started" in between. Frozen leaves should log
+    // no_action with no user-visible reportStatus for this run.
 
     tracer.startPhase('query');
     const allTasks = await queryStudyTasks(notionClient, config.notion.studyTasksDbId, parsed.studyId, { tracer });
     tracer.endPhase('query');
     tracer.set('study_task_count', allTasks.length);
+
+    // Safety guard: if queryStudyTasks returns empty (stale studyId,
+    // racing deletion, or malformed webhook), classify would compute
+    // hasSubtasksFromGraph=false and Error 1 would not fire for what is
+    // actually a top-level parent edit. Short-circuit with a no_action
+    // log instead of silently accepting the edit.
+    if (allTasks.length === 0) {
+      console.log(JSON.stringify({
+        event: 'empty_study_tasks_skip',
+        cascadeId: tracer.cascadeId,
+        taskName: parsed.taskName,
+        taskId: parsed.taskId,
+        studyId: parsed.studyId,
+      }));
+      await logTerminalEvent({
+        parsed,
+        status: 'no_action',
+        summary: `No action: no tasks found for study (stale studyId or racing deletion?)`,
+        noActionReason: 'empty_study_tasks',
+        tracer,
+      });
+      return;
+    }
 
     // Snapshot pre-cascade dates for undo capability.
     // allTasks has current dates for all downstream tasks (only source has changed).
@@ -273,7 +294,7 @@ async function processDateCascade(payload) {
           tracer,
         });
       } else {
-        await notionClient.reportStatus(parsed.studyId, 'warning', classified.reason || 'No cascade mode determined', { tracer });
+        await notionClient.reportStatus(parsed.taskId, 'warning', classified.reason || 'No cascade mode determined', { tracer });
       }
       console.log(tracer.toConsoleLog());
       await logTerminalEvent({
@@ -286,6 +307,29 @@ async function processDateCascade(payload) {
       });
       return;
     }
+
+    // Frozen check runs AFTER classify so Error 1 (direct parent edit
+    // revert) fires regardless of the parent's Done/N/A status. For
+    // non-Error-1 paths (leaves, middle-parent case-a), a frozen source
+    // still short-circuits without cascading.
+    if (isFrozen(parsed)) {
+      console.log(tracer.toConsoleLog());
+      await logTerminalEvent({
+        parsed,
+        classified,
+        status: 'no_action',
+        summary: `No action: ${parsed.taskName || 'task'} is in a frozen status`,
+        noActionReason: 'frozen_status',
+        tracer,
+      });
+      return;
+    }
+
+    // Now safe to announce "Cascade started" -- we know the cascade will
+    // actually run (not Error 1, not frozen-leaf). Written to the TASK's
+    // Automation Reporting (Unit 3) so multi-task cascades in the same
+    // study don't overwrite each other's lifecycle states.
+    await notionClient.reportStatus(parsed.taskId, 'info', `Cascade started for ${parsed.taskName}...`, { tracer });
 
     tracer.startPhase('cascade');
     const cascadeResult = runCascade({
@@ -351,7 +395,7 @@ async function processDateCascade(payload) {
       tracer.set('update_count', 0);
       console.log(tracer.toConsoleLog());
       await Promise.all([
-        notionClient.reportStatus(parsed.studyId, 'info', `No updates needed for ${parsed.taskName}`, { tracer }),
+        notionClient.reportStatus(parsed.taskId, 'info', `No updates needed for ${parsed.taskName}`, { tracer }),
         logTerminalEvent({
           parsed,
           classified,
@@ -390,7 +434,7 @@ async function processDateCascade(payload) {
       (async () => {
         try {
           await notionClient.reportStatus(
-            parsed.studyId,
+            parsed.taskId,
             'success',
             `Cascade complete for ${parsed.taskName}: ${classified.cascadeMode} (${patched.updatedCount} task updates)`,
             { tracer },
@@ -447,7 +491,7 @@ async function processDateCascade(payload) {
     try {
       await Promise.all([
         notionClient.reportStatus(
-          parsed.studyId,
+          parsed.taskId,
           'error',
           `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
           { tracer },
@@ -477,5 +521,53 @@ async function processDateCascade(payload) {
 
 export async function handleDateCascade(req, res) {
   res.status(200).json({ ok: true });
+
+  // Post "Cascade queued" immediately so the PM gets click feedback before
+  // the 5s debounce fires. Writes to the TASK's Automation Reporting field
+  // (not the study's) so multi-task cascades in the same study don't
+  // overwrite each other's queued/started/complete states. Fire-and-forget;
+  // parse errors or Notion failures must never block the enqueue below.
+  //
+  // Filter: skip the queued status for payloads that will not produce a
+  // cascade -- zero-delta echoes, Import Mode events, bot-echo webhooks,
+  // malformed payloads. This keeps the task's Reporting field silent when
+  // the engine has nothing to do.
+  try {
+    const rawParsed = parseWebhookPayload(req.body);
+    // Match processDateCascade's weekend-snap behavior so a Fri->Sat edit
+    // (raw delta 0, snapped delta 1) doesn't silently suppress the queued
+    // message while the cascade actually runs.
+    const parsed = normalizeWeekendSourceDates(rawParsed);
+    const hasNonZeroDelta = parsed
+      && typeof parsed.startDelta === 'number'
+      && typeof parsed.endDelta === 'number'
+      && (parsed.startDelta !== 0 || parsed.endDelta !== 0);
+    // Also mirror the frozen-status skip so frozen leaves don't see a
+    // permanent "queued" banner with no follow-up (processDateCascade's
+    // post-classify isFrozen check returns no_action without writing any
+    // lifecycle message back to the task).
+    const shouldPostQueued = parsed
+      && !parsed.skip
+      && parsed.taskId
+      && hasNonZeroDelta
+      && !isImportMode(parsed)
+      && !parsed.editedByBot
+      && !isFrozen(parsed);
+    if (shouldPostQueued) {
+      notionClient
+        .reportStatus(
+          parsed.taskId,
+          'info',
+          `Cascade queued for ${parsed.taskName || 'task'} — starting in ~5s...`,
+        )
+        .catch((err) => {
+          console.warn('[date-cascade] queued reportStatus dropped:', err?.message || err);
+        });
+    }
+  } catch (err) {
+    // Swallow parse errors; webhook must always succeed. Log for visibility.
+    console.warn('[date-cascade] queued preflight parse error:', err?.message || err);
+  }
+
   cascadeQueue.enqueue(req.body, parseWebhookPayload, processDateCascade);
 }
