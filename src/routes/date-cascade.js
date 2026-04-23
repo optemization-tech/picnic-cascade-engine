@@ -199,16 +199,11 @@ async function processDateCascade(payload) {
     console.log(JSON.stringify({ event: 'import_mode_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
     return;
   }
-  if (isFrozen(parsed)) {
-    await logTerminalEvent({
-      parsed,
-      status: 'no_action',
-      summary: `No action: ${parsed.taskName || 'task'} is in a frozen status`,
-      noActionReason: 'frozen_status',
-      tracer,
-    });
-    return;
-  }
+  // NOTE: isFrozen check moved AFTER classify below. Error 1 (direct parent
+  // edit) must fire for frozen parents too -- previously the frozen guard
+  // here short-circuited the revert flow, leaving PMs with silently-applied
+  // date edits on Done parents. See plan
+  // docs/plans/2026-04-22-001-fix-meg-apr21-feedback-plan.md Unit 2.
   if (!parsed.hasDates) {
     await logTerminalEvent({
       parsed,
@@ -231,7 +226,10 @@ async function processDateCascade(payload) {
   }
 
   try {
-    await notionClient.reportStatus(parsed.studyId, 'info', `Cascade started for ${parsed.taskName}...`, { tracer });
+    // "Cascade started" reportStatus is deferred until AFTER classify +
+    // frozen check. Error 1 paths should see "queued" -> revert-warn with
+    // no misleading "started" in between. Frozen leaves should log
+    // no_action with no user-visible reportStatus for this run.
 
     tracer.startPhase('query');
     const allTasks = await queryStudyTasks(notionClient, config.notion.studyTasksDbId, parsed.studyId, { tracer });
@@ -286,6 +284,27 @@ async function processDateCascade(payload) {
       });
       return;
     }
+
+    // Frozen check runs AFTER classify so Error 1 (direct parent edit
+    // revert) fires regardless of the parent's Done/N/A status. For
+    // non-Error-1 paths (leaves, middle-parent case-a), a frozen source
+    // still short-circuits without cascading.
+    if (isFrozen(parsed)) {
+      console.log(tracer.toConsoleLog());
+      await logTerminalEvent({
+        parsed,
+        classified,
+        status: 'no_action',
+        summary: `No action: ${parsed.taskName || 'task'} is in a frozen status`,
+        noActionReason: 'frozen_status',
+        tracer,
+      });
+      return;
+    }
+
+    // Now safe to announce "Cascade started" -- we know the cascade will
+    // actually run (not Error 1, not frozen-leaf).
+    await notionClient.reportStatus(parsed.studyId, 'info', `Cascade started for ${parsed.taskName}...`, { tracer });
 
     tracer.startPhase('cascade');
     const cascadeResult = runCascade({

@@ -208,7 +208,13 @@ describe('date-cascade route safety', () => {
     expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
-  it('exits early with no side effects when task status is frozen', async () => {
+  it('logs no_action for a frozen leaf task and skips the cascade (post-classify frozen check)', async () => {
+    // After Unit 2, the isFrozen check runs AFTER classify so Error 1 can
+    // still fire for frozen top-level parents. A frozen leaf classifies as
+    // skip:false with a cascadeMode (e.g., push-right), then the post-
+    // classify isFrozen branch logs no_action. queryStudyTasks is now
+    // called (accepted trade-off) but "Cascade started" reportStatus is
+    // suppressed for this path.
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
       taskId: 'source',
@@ -220,6 +226,21 @@ describe('date-cascade route safety', () => {
     });
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(true);
+    mocks.queryStudyTasks.mockResolvedValue([]);
+    mocks.classify.mockReturnValue({
+      skip: false,
+      cascadeMode: 'push-right',
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source',
+      newStart: '2026-04-01',
+      newEnd: '2026-04-02',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-01',
+      startDelta: 0,
+      endDelta: 1,
+      parentTaskId: null,
+      parentMode: null,
+    });
 
     const { req, res } = makeReqRes({ payload: true });
     await handleDateCascade(req, res);
@@ -227,12 +248,79 @@ describe('date-cascade route safety', () => {
     await Promise.resolve();
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
+    expect(mocks.queryStudyTasks).toHaveBeenCalled();
+    expect(mocks.classify).toHaveBeenCalled();
     expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
     expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    expect(mocks.runCascade).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
       status: 'no_action',
       details: expect.objectContaining({ noActionReason: 'frozen_status' }),
+    }));
+  });
+
+  it('fires Error 1 revert on a FROZEN top-level parent date edit and suppresses "Cascade started"', async () => {
+    // The core Unit 2 scenario: Meg's Sites Planning (frozen) edit. Without
+    // the guard reorder, isFrozen fires first and the edit is silently
+    // swallowed. With the reorder, classify runs, Error 1 fires,
+    // applyError1SideEffects reverts the parent, and no misleading
+    // "Cascade started" message is posted (sequence: queued -> revert).
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'parent-1',
+      taskName: 'Sites Planning',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: -2,
+      endDelta: 0,
+      refStart: '2026-05-06',
+      refEnd: '2026-07-01',
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(true); // parent is Done -- frozen
+    mocks.queryStudyTasks.mockResolvedValue([]);
+    mocks.classify.mockReturnValue({
+      skip: true,
+      reason: 'Direct parent edit blocked - edit subtasks directly',
+      cascadeMode: null,
+      sourceTaskId: 'parent-1',
+      refStart: '2026-05-06',
+      refEnd: '2026-07-01',
+    });
+    mocks.mockClient.request.mockResolvedValue({});
+    mocks.mockClient.patchPage.mockResolvedValue({});
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    // Error 1 must fire even though isFrozen === true
+    expect(mocks.mockClient.request).toHaveBeenCalledWith(
+      'PATCH',
+      '/pages/study-1',
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(mocks.mockClient.patchPage).toHaveBeenCalledWith(
+      'parent-1',
+      expect.objectContaining({
+        Dates: { date: { start: '2026-05-06', end: '2026-07-01' } },
+      }),
+      expect.any(Object),
+    );
+    // No "Cascade started" info message should have been posted
+    const infoCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+      (args) => args[1] === 'info' && typeof args[2] === 'string' && args[2].includes('Cascade started'),
+    );
+    expect(infoCalls).toHaveLength(0);
+    // Activity Log gets a no_action entry with Error 1 reason
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      details: expect.objectContaining({
+        noActionReason: expect.stringContaining('Direct parent edit blocked'),
+      }),
     }));
   });
 
