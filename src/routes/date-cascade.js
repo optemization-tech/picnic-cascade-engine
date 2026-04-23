@@ -4,6 +4,7 @@ import { classify } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { buildReportingText } from '../utils/reporting.js';
+import { humanizeNotionError } from '../utils/humanize-error.js';
 import {
   addBusinessDays,
   countBDInclusive,
@@ -29,7 +30,7 @@ const DIRECT_PARENT_WARNING = '⚠️ This task has subtasks — edit a subtask 
 const DIRECT_PARENT_REVERT_WARNING = 'Parent date edit reverted — edit a subtask directly to shift dates and trigger cascading.';
 
 function summarizeFailure(error) {
-  return `Date cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
+  return `Date cascade failed: ${humanizeNotionError(error).slice(0, 180)}`;
 }
 
 function normalizeWeekendSourceDates(parsed) {
@@ -510,7 +511,7 @@ async function processDateCascade(payload) {
         notionClient.reportStatus(
           parsed.taskId,
           'error',
-          `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
+          `Cascade failed for ${parsed.taskName || 'task'}: ${humanizeNotionError(error).slice(0, 200)}`,
           { tracer },
         ),
         logTerminalEvent({
