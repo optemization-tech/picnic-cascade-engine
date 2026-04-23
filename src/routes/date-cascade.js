@@ -271,7 +271,7 @@ async function processDateCascade(payload) {
           tracer,
         });
       } else {
-        await notionClient.reportStatus(parsed.studyId, 'warning', classified.reason || 'No cascade mode determined', { tracer });
+        await notionClient.reportStatus(parsed.taskId, 'warning', classified.reason || 'No cascade mode determined', { tracer });
       }
       console.log(tracer.toConsoleLog());
       await logTerminalEvent({
@@ -303,8 +303,10 @@ async function processDateCascade(payload) {
     }
 
     // Now safe to announce "Cascade started" -- we know the cascade will
-    // actually run (not Error 1, not frozen-leaf).
-    await notionClient.reportStatus(parsed.studyId, 'info', `Cascade started for ${parsed.taskName}...`, { tracer });
+    // actually run (not Error 1, not frozen-leaf). Written to the TASK's
+    // Automation Reporting (Unit 3) so multi-task cascades in the same
+    // study don't overwrite each other's lifecycle states.
+    await notionClient.reportStatus(parsed.taskId, 'info', `Cascade started for ${parsed.taskName}...`, { tracer });
 
     tracer.startPhase('cascade');
     const cascadeResult = runCascade({
@@ -370,7 +372,7 @@ async function processDateCascade(payload) {
       tracer.set('update_count', 0);
       console.log(tracer.toConsoleLog());
       await Promise.all([
-        notionClient.reportStatus(parsed.studyId, 'info', `No updates needed for ${parsed.taskName}`, { tracer }),
+        notionClient.reportStatus(parsed.taskId, 'info', `No updates needed for ${parsed.taskName}`, { tracer }),
         logTerminalEvent({
           parsed,
           classified,
@@ -409,7 +411,7 @@ async function processDateCascade(payload) {
       (async () => {
         try {
           await notionClient.reportStatus(
-            parsed.studyId,
+            parsed.taskId,
             'success',
             `Cascade complete for ${parsed.taskName}: ${classified.cascadeMode} (${patched.updatedCount} task updates)`,
             { tracer },
@@ -466,7 +468,7 @@ async function processDateCascade(payload) {
     try {
       await Promise.all([
         notionClient.reportStatus(
-          parsed.studyId,
+          parsed.taskId,
           'error',
           `Cascade failed for ${parsed.taskName || 'task'}: ${String(error.message || error).slice(0, 200)}`,
           { tracer },
@@ -496,5 +498,41 @@ async function processDateCascade(payload) {
 
 export async function handleDateCascade(req, res) {
   res.status(200).json({ ok: true });
+
+  // Post "Cascade queued" immediately so the PM gets click feedback before
+  // the 5s debounce fires. Writes to the TASK's Automation Reporting field
+  // (not the study's) so multi-task cascades in the same study don't
+  // overwrite each other's queued/started/complete states. Fire-and-forget;
+  // parse errors or Notion failures must never block the enqueue below.
+  //
+  // Filter: skip the queued status for payloads that will not produce a
+  // cascade -- zero-delta echoes, Import Mode events, bot-echo webhooks,
+  // malformed payloads. This keeps the task's Reporting field silent when
+  // the engine has nothing to do.
+  try {
+    const rawParsed = parseWebhookPayload(req.body);
+    const hasNonZeroDelta = rawParsed
+      && typeof rawParsed.startDelta === 'number'
+      && typeof rawParsed.endDelta === 'number'
+      && (rawParsed.startDelta !== 0 || rawParsed.endDelta !== 0);
+    const shouldPostQueued = rawParsed
+      && !rawParsed.skip
+      && rawParsed.taskId
+      && hasNonZeroDelta
+      && !isImportMode(rawParsed)
+      && !rawParsed.editedByBot;
+    if (shouldPostQueued) {
+      notionClient
+        .reportStatus(
+          rawParsed.taskId,
+          'info',
+          `Cascade queued for ${rawParsed.taskName || 'task'} — starting in ~5s...`,
+        )
+        .catch(() => {});
+    }
+  } catch {
+    // Swallow parse/report errors; webhook must always succeed.
+  }
+
   cascadeQueue.enqueue(req.body, parseWebhookPayload, processDateCascade);
 }

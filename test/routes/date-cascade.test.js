@@ -183,6 +183,78 @@ describe('date-cascade route safety', () => {
     ], expect.any(Object));
   });
 
+  it('posts "Cascade queued" to the task on valid non-zero-delta webhooks', async () => {
+    // Unit 3: immediate click feedback, scoped to parsed.taskId.
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 2,
+      endDelta: 2,
+      editedByBot: false,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    // Allow the fire-and-forget reportStatus microtask to settle.
+    await Promise.resolve();
+
+    const queuedCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+      (args) => typeof args[2] === 'string' && args[2].includes('Cascade queued for Source'),
+    );
+    expect(queuedCalls).toHaveLength(1);
+    expect(queuedCalls[0][0]).toBe('source'); // task-scoped, not study
+  });
+
+  it('skips "Cascade queued" for bot-echo webhooks', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 2,
+      endDelta: 2,
+      editedByBot: true, // bot echo
+    });
+    mocks.isImportMode.mockReturnValue(false);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await Promise.resolve();
+
+    const queuedCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+      (args) => typeof args[2] === 'string' && args[2].includes('Cascade queued'),
+    );
+    expect(queuedCalls).toHaveLength(0);
+  });
+
+  it('skips "Cascade queued" when Import Mode is enabled', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      startDelta: 2,
+      endDelta: 2,
+    });
+    mocks.isImportMode.mockReturnValue(true);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await Promise.resolve();
+
+    const queuedCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+      (args) => typeof args[2] === 'string' && args[2].includes('Cascade queued'),
+    );
+    expect(queuedCalls).toHaveLength(0);
+  });
+
   it('exits early with no side effects when import mode is enabled', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
@@ -250,7 +322,14 @@ describe('date-cascade route safety', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.queryStudyTasks).toHaveBeenCalled();
     expect(mocks.classify).toHaveBeenCalled();
-    expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
+    // Unit 3: "Cascade queued" fires on the task's Automation Reporting
+    // immediately (before the debounce), but "Cascade started" is suppressed
+    // because the post-classify frozen check returns early.
+    const reportStatusCalls = mocks.mockClient.reportStatus.mock.calls;
+    const startedCalls = reportStatusCalls.filter(
+      (args) => typeof args[2] === 'string' && args[2].includes('Cascade started'),
+    );
+    expect(startedCalls).toHaveLength(0);
     expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
     expect(mocks.runCascade).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
@@ -440,16 +519,26 @@ describe('date-cascade route safety', () => {
     for (let i = 1; i < starts.length; i++) {
       expect(starts[i] >= starts[i - 1]).toBe(true);
     }
+    // Unit 3: cascade lifecycle reportStatus writes now target the TASK
+    // (not the study) so multi-task cascades don't overwrite each other's
+    // states. Sequence for a normal cascade: queued -> started -> complete,
+    // all scoped to parsed.taskId.
     expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
       1,
-      'study-1',
+      'source',
+      'info',
+      expect.stringContaining('Cascade queued for Source'),
+    );
+    expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
+      2,
+      'source',
       'info',
       'Cascade started for Source...',
       expect.any(Object),
     );
     expect(mocks.mockClient.reportStatus).toHaveBeenNthCalledWith(
-      2,
-      'study-1',
+      3,
+      'source',
       'success',
       'Cascade complete for Source: push-right (3 task updates)',
       expect.any(Object),
