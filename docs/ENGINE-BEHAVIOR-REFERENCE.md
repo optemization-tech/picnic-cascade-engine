@@ -74,13 +74,15 @@ Status Roll-Up (parent-direct snap-back):
 
 **Import Mode lifecycle:** The Notion button automation sets Import Mode = true before sending the webhook. The engine ensures it stays on during execution and always disables it in a finally block — even on abort or error.
 
-**Repeat-delivery date copying:** When repeat-delivery creates a new delivery (e.g., #11), it copies dates from the latest existing delivery (#10) task-by-task, matched by task name (with the delivery number normalized to the target `#N`). This inherits any manual date adjustments. Name-matching is deliberate — the blueprint has multiple `Data Delivery #N` subtrees with unique Template Source IDs, so TSID matching would be degenerate (always hits the blueprint source, never a production copy). See PR #18 rationale. Falls back to Contract Sign Date + Blueprint offset when no prior delivery exists.
+**Repeat-delivery date copying:** When repeat-delivery creates a new delivery (e.g., #11), it copies dates from the latest existing delivery (#10) task-by-task, matched by task name (with the delivery number normalized to the target `#N`). This inherits any manual date adjustments. Name-matching is deliberate — the blueprint has multiple `Data Delivery #N` subtrees with unique `[Do Not Edit] Template Source ID` values, so TSID matching would be degenerate (always hits the blueprint source, never a production copy). See PR #18 rationale. Falls back to Contract Sign Date + Blueprint offset when no prior delivery exists.
 
 **Blueprint-vs-in-study authority (Meg-confirmed 2026-04-22):** The Blueprint is the source of truth for STRUCTURE -- task names, dependencies, parent relationships, properties. Dates come from the PREVIOUS corresponding in-study task set when one exists, or from Blueprint offsets relative to Contract Sign Date when no previous exists. Implication: Blueprint offset edits do NOT retroactively propagate to studies that already have a prior task set; the next button press inherits from the (unchanged) previous in-study delivery's dates. Blueprint structural edits (renames, new tasks, dependency changes) DO propagate on every button press because Blueprint is fetched fresh each run (no process-level cache). To make Blueprint offset edits take effect in an existing study, the PM must manually correct the most-recent existing task set first, since that is what the next press will inherit from.
 
 **Add-task-set fallback when seed group missing:** If the study has no existing corresponding task set (e.g., PM deleted the seed TLF group), the engine gracefully falls back to Blueprint-offset date computation relative to Contract Sign Date. `resolveTaskSetNumbers` / `resolveNextDeliveryNumber` both return `1` in this case; no override is populated; `create-tasks.js` computes dates from Blueprint SDate/EDate offsets. Verified for all button types (TLF variants, additional-site, repeat-delivery).
 
 **Copy-blocks scope:** Add-task-set only passes newly created task IDs to copy-blocks, not the full idMapping (which includes existing tasks seeded for dependency resolution).
+
+**Owner property asymmetry (2026-04-28 rename):** `Owner` is renamed only in Blueprint; Study Tasks' `Owner` keeps its original name. The provisioning code reads `[Do Not Edit] Owner` from Blueprint and writes `Owner` to Study Tasks. The per-DB property-name constants enforce this by construction.
 
 ### 3) Module Mapping
 Map each behavior to concrete modules/functions:
@@ -308,13 +310,13 @@ On `SIGTERM` or `SIGINT`, the process drains in-flight work and exits cleanly be
 
 ### 9) Startup Import Mode Sweep
 
-On process start, the engine clears any `Import Mode = true` studies left over from prior crashes, OOMs, or `SIGKILL` events that skipped graceful shutdown.
+On process start, the engine clears any `[Do Not Edit] Import Mode = true` studies left over from prior crashes, OOMs, or `SIGKILL` events that skipped graceful shutdown.
 
 - Module: `src/startup/import-mode-sweep.js` (`sweepStuckImportMode(client, studiesDbId)`)
 - Invocation: inside an async IIFE after `app.listen()` resolves, in `src/index.js:27-33` — the listen callback does not await it, so the server accepts webhooks immediately while the sweep runs in parallel
 - Token pool: uses `provisionTokens` when configured, otherwise falls back to `tokens`
-- Query: `Studies` DB filtered on `Import Mode = true`
-- Patch: sets `Import Mode = false` per stuck study
+- Query: `Studies` DB filtered on `[Do Not Edit] Import Mode = true` (filter clause keys by property `.id`, so the renamed property still resolves)
+- Patch: sets `[Do Not Edit] Import Mode = false` per stuck study
 - Error tolerance: failures are caught inside the IIFE — the server never crashes because of sweep errors; structured log `{event: 'import_mode_sweep', studiesFound, studiesReset}` is emitted on completion
 - Rationale: Import Mode is a guard flag that suppresses cascades during bulk provisioning; if a study is left stuck `true`, Notion edits to that study silently no-op until a human clears it. The sweep is a safety net that removes that operational burden
 
@@ -329,8 +331,8 @@ See [CONCURRENCY-MODEL.md](CONCURRENCY-MODEL.md) for the full concurrency docume
 #### Reference Date contract
 
 Every cascade classifies deltas via `signedBDDelta(Reference, Dates)`. Two properties must be populated on a task for the engine to compute a non-zero delta:
-- `Reference Start Date`
-- `Reference End Date`
+- `[Do Not Edit] Reference Start Date`
+- `[Do Not Edit] Reference End Date`
 
 If either is missing, `src/notion/properties.js:30-31` falls back to the current `Dates` value, producing `delta = 0` and a silent skip at the Zero-Delta gate (`src/routes/date-cascade.js:147-149`).
 
@@ -351,7 +353,7 @@ Configured on the Study Tasks database (Notion-side, not code):
 | Name | `Fill out reference properties` |
 | Scope | View `Fill Refs` — filtered to non-bot / non-automation-created pages whose Reference still needs to be populated |
 | Triggers | `Dates is edited` (primary). `Page added` may also be wired. |
-| Actions | `Set Reference Start Date` ← formula of `Dates.start`; `Set Reference End Date` ← formula of `Dates.end` |
+| Actions | `Set [Do Not Edit] Reference Start Date` ← formula of `Dates.start`; `Set [Do Not Edit] Reference End Date` ← formula of `Dates.end` |
 | Status | Active |
 
 #### Critical invariant — do NOT overwrite already-populated Reference
@@ -364,7 +366,7 @@ The automation MUST NOT clobber Reference on a task whose Reference is already p
 4. Recomputed delta against `Reference = B, Dates = B` → `delta = 0` → no cascade. Silent.
 
 **Valid enforcement mechanisms (either, or both in combination):**
-- **View filter approach** — `Fill Refs` excludes pages where Reference is already populated (e.g., filter: `Reference Start Date is empty` OR `Reference End Date is empty`). Automation only ever fires on pages that need bootstrapping.
+- **View filter approach** — `Fill Refs` excludes pages where Reference is already populated (e.g., filter: `[Do Not Edit] Reference Start Date is empty` OR `[Do Not Edit] Reference End Date is empty`). Automation only ever fires on pages that need bootstrapping.
 - **Conditional formula approach** — `My value` formula returns existing Reference when populated, otherwise `Dates.start`/`Dates.end`. Idempotent — safe to re-fire.
 
 The current implementation relies on a view-filter scope (`Fill Refs`) targeting non-bot / non-automation-created pages. Whoever modifies the automation or the view must preserve the bootstrap-not-overwrite guarantee.
@@ -392,20 +394,20 @@ Parent-level edges are still stripped by `runCascade()` (see Section 1 Parent gu
 
 PMs can wire or rewire a task's `Blocked by` relation manually. When they do, the rule "every task starts after its predecessor's end" should be enforced upfront — without waiting for someone to drag a date.
 
-**Notion-side automation:** `Dep Edit Cascade` watches the `Blocked by` property on Study Tasks DB. Filters mirror the manual-task pattern — `Last edited by ≠ <bot integration users>`, `Reference Start Date is not empty` (matches the `Fill Refs` precedent above), `Subtask(s) is empty` (parent-task exclusion per BL-H5g). Watches `Blocked by` only — NOT `Blocking` — to avoid Notion's dual-sync double-fire.
+**Notion-side automation:** `Dep Edit Cascade` watches the `Blocked by` property on Study Tasks DB. Filters mirror the manual-task pattern — `Last edited by ≠ <bot integration users>`, `[Do Not Edit] Reference Start Date is not empty` (matches the `Fill Refs` precedent above), `Subtask(s) is empty` (parent-task exclusion per BL-H5g). Watches `Blocked by` only — NOT `Blocking` — to avoid Notion's dual-sync double-fire.
 
 **Engine-side handler:** [`src/routes/dep-edit.js`](../src/routes/dep-edit.js) → [`src/engine/cascade.js#tightenSeedAndDownstream`](../src/engine/cascade.js). Inherits 5s debounce + per-study FIFO via `cascadeQueue`, plus the `editedByBot` short-circuit at the route layer.
 
 **Behavior:** the seed is tightened to `nextBusinessDay(max(non-frozen blocker.end))`, end shifts by the same delta, and the downstream chain re-validates against the new positions via `tightenDownstreamFromSeed`. See Section 1 Behavior Matrix for the full row.
 
-**Reuse of the `Reference Start Date is not empty` filter** is critical for the same reason as `Fill Refs`: if the new automation fires on a manual task whose Reference is still empty, the cascade would compute `delta = 0` against the empty Reference and silently no-op. Filtering at the Notion automation layer prevents this and matches the bootstrap-then-cascade lifecycle above.
+**Reuse of the `[Do Not Edit] Reference Start Date is not empty` filter** is critical for the same reason as `Fill Refs`: if the new automation fires on a manual task whose Reference is still empty, the cascade would compute `delta = 0` against the empty Reference and silently no-op. Filtering at the Notion automation layer prevents this and matches the bootstrap-then-cascade lifecycle above.
 
 #### Failure modes
 
 | Condition | Symptom | Resolution |
 |---|---|---|
 | Automation disabled or `Fill Refs` view missing/misfiltered | Reference stays empty on manual tasks; first edit yields `delta = 0`; cascade silently no-ops | Re-enable the automation; verify the view still matches manually-added pages |
-| Automation overwrites already-populated Reference | Every subsequent manual-task edit yields `delta = 0` after stale-ref correction; cascades silently no-op | Tighten the view filter (`Reference Start Date is empty`) or guard the action formulas with an `if Reference is empty` conditional |
+| Automation overwrites already-populated Reference | Every subsequent manual-task edit yields `delta = 0` after stale-ref correction; cascades silently no-op | Tighten the view filter (`[Do Not Edit] Reference Start Date is empty`) or guard the action formulas with an `if Reference is empty` conditional |
 | `Fill Refs` view includes bot-created tasks | Engine's Reference writes during cascade re-trigger the automation; race with the post-cascade Reference PATCH | Add `Created by != <integration bot user(s)>` to the view filter |
 | Manual task created without Dates | No cascade expected; Reference remains empty until Dates is set | On first Dates set, the automation bootstraps Reference and the lifecycle proceeds normally |
 
@@ -423,19 +425,29 @@ For every behavior change:
 
 ## Changelog
 
+### 2026-04-28 — `[Do Not Edit]` property rename across Study Tasks / Studies / Study Blueprint
+
+Plan: `docs/plans/2026-04-28-001-refactor-property-names-constants-module-plan.md`.
+
+Meg renamed every engine-internal/system Notion property to carry a `[Do Not Edit] ` prefix (Study Tasks: `Reference Start Date`, `Reference End Date`, `Template Source ID`, `Last Modified By System`, `Processing Lock`, `Import Mode` rollup, `Notify on Done`, `ID`; Studies: `Import Mode` checkbox; Study Blueprint: `SDate Offset`, `EDate Offset`, `Notion ID`, `Owner`, `Launcher`, `Last Modified By System`, `Notify on Done`, `Duration`). Notion preserved property IDs across the rename.
+
+No behavior change. Engine source flips to ID-keyed reads/writes/filters via a centralized `src/notion/property-names.js` constants module so future renames don't break runtime resolution. This document updated everywhere a renamed property is named in prose, filter text, or action formulas (Sections 1, 9, 11). Historical changelog entries retain the old names where they describe behavior at the time of that PR.
+
+**Owner asymmetry:** `Owner` is renamed only in Blueprint; Study Tasks' `Owner` keeps its original name. The provisioning code reads `[Do Not Edit] Owner` from Blueprint and writes `Owner` to Study Tasks (see Section 2b — Provisioning Guards & Behavior).
+
 ### 2026-04-27 — Dep-edit cascade (`/webhook/dep-edit`)
 
 Plan: `docs/plans/2026-04-27-001-feat-dep-edit-cascade-plan.md`.
 
 New cascade trigger that fires when a Study Task's `Blocked by` relation is edited by a non-bot user. Two semantic sub-cases (violation, gap) share the same engine logic — both compute `seed.newStart = nextBD(max(non-frozen blocker.end))` and propagate downstream chain-wide via the existing `tightenDownstreamFromSeed`. Activity Log distinguishes the sub-cases via `details.subcase`.
 
-Behavior matrix (§1) gains a 7th row (`Dep-edit`) noting the trigger is dependency-graph-driven, not delta-driven. Module Mapping (§3) lists the new `tightenSeedAndDownstream` helper and `processDepEdit` route. Section 11 (Manual Task Support) adds a sub-section explaining the new automation reuses the `Reference Start Date is not empty` filter precedent and the `Subtask(s) is empty` filter (BL-H5g parent-task exclusion).
+Behavior matrix (§1) gains a 7th row (`Dep-edit`) noting the trigger is dependency-graph-driven, not delta-driven. Module Mapping (§3) lists the new `tightenSeedAndDownstream` helper and `processDepEdit` route. Section 11 (Manual Task Support) adds a sub-section explaining the new automation reuses the `[Do Not Edit] Reference Start Date is not empty` filter precedent and the `Subtask(s) is empty` filter (BL-H5g parent-task exclusion).
 
 Resolves Meg's 2026-04-24 manual subtask test report (`34c2386760c2803382ccdd9497460150`). Q1 (date-drag enforcement) and Q2 (chain-wide vs seed-only) confirmed at the 2026-04-27 New Features Review: dep-wire only, chain-wide.
 
 ### 2026-04-24 — Manual task support & Reference date bootstrap documented
 
-New Section 11 captures the scope extension that allows PMs to manually add tasks + wire `Blocked by` / `Blocking` dependencies and still have the cascade engine behave identically. Documents the Notion-side `Fill out reference properties` automation that bootstraps `Reference Start Date` / `Reference End Date` on manually-created pages via the `Fill Refs` view, and — critically — the invariant that the automation must not overwrite already-populated Reference values (otherwise `classify()`'s stale-reference correction would recompute `delta = 0` on every subsequent edit and silently no-op all manual-task cascades). Also documents expected lifecycle, failure modes, and the bot-created-page exclusion that prevents races with the engine's own Reference writes.
+New Section 11 captures the scope extension that allows PMs to manually add tasks + wire `Blocked by` / `Blocking` dependencies and still have the cascade engine behave identically. Documents the Notion-side `Fill out reference properties` automation that bootstraps `[Do Not Edit] Reference Start Date` / `[Do Not Edit] Reference End Date` on manually-created pages via the `Fill Refs` view, and — critically — the invariant that the automation must not overwrite already-populated Reference values (otherwise `classify()`'s stale-reference correction would recompute `delta = 0` on every subsequent edit and silently no-op all manual-task cascades). Also documents expected lifecycle, failure modes, and the bot-created-page exclusion that prevents races with the engine's own Reference writes.
 
 No code change. L1 capture of a Notion-side mechanism the engine's behavior now depends on.
 
@@ -463,7 +475,7 @@ Sections 1, 2, 3, 5, and 6 were updated to match the current engine:
 
 ### 2026-04-16 — PR C: repeat-delivery rename-aware date-copy lookup
 
-**Section 2b correction (this doc):** the "Repeat-delivery date copying" row previously claimed matching was by Template Source ID. That was aspirational and never true in code — PR #18 deliberately moved *from* TSID *to* name-based matching because the blueprint has 9 separate `Data Delivery #N` subtrees with unique TSIDs, making TSID matching degenerate (always hits the blueprint source, never a production copy). Row now documents name-matching with delivery-number normalization.
+**Section 2b correction (this doc):** the "Repeat-delivery date copying" row previously claimed matching was by `[Do Not Edit] Template Source ID`. That was aspirational and never true in code — PR #18 deliberately moved *from* TSID *to* name-based matching because the blueprint has 9 separate `Data Delivery #N` subtrees with unique TSIDs, making TSID matching degenerate (always hits the blueprint source, never a production copy). Row now documents name-matching with delivery-number normalization.
 
 **Code fix (`src/routes/add-task-set.js`):** the `latestDates` build loop now normalizes keys from `#N` (existing production delivery) to `#${nextNum}` (the target delivery being created). `applyDeliveryNumbering` rewrites `task._taskName` from `#1` → `#${nextNum}` *before* the override lookup, so unnormalized keys missed and the new delivery fell through to the blueprint-offset formula. Meg's 2026-04-16 reproduction showed `Data Delivery #3` starting Dec 7 while `Repeat QC` ended Dec 8 — Delivery before QC ended. After the fix, `Data Delivery #${nextNum}` inherits the previous delivery's manually shifted dates correctly.
 
@@ -477,7 +489,7 @@ New operational sections 7, 8, and 9 added to this document. Changes:
 
 - **Webhook authentication** (new Section 7): `x-webhook-secret` header + `WEBHOOK_SECRET` env var + `timingSafeEqual` comparison. Fail-open when env var unset for local dev. `GET /health` exempt. Production cutover: 2026-04-12, all 6 Notion automations updated.
 - **Graceful shutdown** (new Section 8): `SIGTERM`/`SIGINT` handler drains `CascadeQueue` + `FlightTracker` in parallel with an 8 s cap; Railway sends `SIGKILL` after ~10 s. `FlightTracker` tracks fire-and-forget webhook handlers so in-flight work is not lost during Railway redeploys.
-- **Startup Import Mode sweep** (new Section 9): async IIFE after `app.listen()` clears stuck `Import Mode = true` studies. Safety net for crashes/OOMs that bypassed graceful shutdown.
+- **Startup Import Mode sweep** (new Section 9): async IIFE after `app.listen()` clears stuck `[Do Not Edit] Import Mode = true` studies. Safety net for crashes/OOMs that bypassed graceful shutdown.
 
 ### 2026-03-31 — Meg-confirmed behavior corrections (confirmed by Meg and Seb)
 

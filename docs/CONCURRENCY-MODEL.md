@@ -40,7 +40,7 @@ Tracks in-flight async operations via a Set of Promises. Unlike CascadeQueue, Fl
 
 ### 1.3 Import Mode — Study-Level Circuit Breaker
 
-**Property:** `Import Mode` checkbox on the Studies database page
+**Property:** `[Do Not Edit] Import Mode` checkbox on the Studies database page (renamed 2026-04-28; rollup of the same property surfaces on Study Tasks pages)
 **Set by:** `inception`, `add-task-set`, `undo-cascade` (Notion button automations set it ON before the webhook fires; the route disables it after processing)
 **Checked by:** `date-cascade` (skips with `import_mode_skip` reason), `status-rollup` (early return)
 
@@ -54,9 +54,9 @@ Import Mode prevents cascade webhooks from firing real cascades while a multi-st
 5. Route disables Import Mode in a `finally` block (ensures cleanup even on errors)
 6. Startup sweep (`src/index.js`) clears any stuck Import Mode entries from prior crashes
 
-### 1.4 LMBS (Last Modified By System) — Echo Prevention
+### 1.4 LMBS (`[Do Not Edit] Last Modified By System`) — Echo Prevention
 
-**Property:** `Last Modified By System` checkbox on each task page
+**Property:** `[Do Not Edit] Last Modified By System` checkbox on each task page (renamed 2026-04-28)
 **Pattern:** Set `LMBS = true` before writing dates → write dates → clear `LMBS = false`
 
 When the engine patches a task's dates, Notion fires a "When Dates changes" webhook. Without LMBS, this would trigger an infinite cascade loop. The engine detects echoes by checking if the webhook's `editedByBot` flag is true (the last editor was a bot/integration, not a person).

@@ -70,7 +70,7 @@ The cascade mode is determined by which dates change. How you edit in Notion mat
 
 **Before every test action, the Notion AI operator (or human tester) MUST:**
 
-1. **Record the source task's current dates** (start, end) and reference dates (Reference Start, Reference End).
+1. **Record the source task's current dates** (start, end) and reference dates (`[Do Not Edit] Reference Start Date`, `[Do Not Edit] Reference End Date`).
 2. **Record current dates of all expected affected tasks:**
    - For `start-left` and `pull-right`: all upstream blockers (follow "Blocked by" chain)
    - For `pull-left`: all downstream dependents on the edited chain (follow "Blocking" chain)
