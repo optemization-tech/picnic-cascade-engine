@@ -486,6 +486,134 @@ function pullRightUpstream(sourceId, refStart, deltaBD, updatesMap, taskById) {
   }
 }
 
+// -----------------------------------------------------------
+// tightenSeedAndDownstream: dep-edit cascade orchestrator.
+// Triggered when a Study Task's `Blocked by` relation is edited
+// by a non-bot user. Tightens the seed against its non-frozen
+// blockers, then propagates downstream via tightenDownstreamFromSeed.
+//
+// Two semantic sub-cases share the same engine logic:
+//   - violation: blocker.end > seed.start → push seed right
+//   - gap:       blocker.end + nextBD < seed.start → pull seed left
+// Both compute newStart = nextBusinessDay(max(non-frozen blocker.end))
+// and shift seed.end by the same delta, then call
+// tightenDownstreamFromSeed for chain-wide propagation.
+//
+// Mirrors runCascade's BL-H5g parent-edge stripping so parent tasks
+// neither participate as blockers nor act as cascade triggers (D6).
+//
+// Mutates a fresh internal updatesMap; does NOT mutate input tasks.
+// Used by: src/routes/dep-edit.js
+// -----------------------------------------------------------
+export function tightenSeedAndDownstream({ seedTaskId, tasks }) {
+  // Build taskById lookup (mirror runCascade pattern)
+  const taskById = {};
+  for (const t of tasks) {
+    taskById[t.id] = { ...t };
+  }
+
+  // BL-H5g: strip parent-level dependency edges (mirror runCascade:520-540).
+  const parentIds = new Set();
+  for (const t of tasks) {
+    if (t.parentId && taskById[t.parentId]) {
+      parentIds.add(t.parentId);
+    }
+  }
+
+  // D6: parent-task seed exclusion. Parent tasks should not trigger this cascade.
+  if (parentIds.has(seedTaskId)) {
+    return depEditNoopResult('parent-task');
+  }
+
+  if (parentIds.size > 0) {
+    for (const id of Object.keys(taskById)) {
+      const t = taskById[id];
+      if (parentIds.has(id)) {
+        t.blockedByIds = [];
+        t.blockingIds = [];
+      } else {
+        t.blockedByIds = (t.blockedByIds || []).filter((bid) => !parentIds.has(bid));
+        t.blockingIds = (t.blockingIds || []).filter((bid) => !parentIds.has(bid));
+      }
+    }
+  }
+
+  const seed = taskById[seedTaskId];
+  if (!seed) return depEditNoopResult('seed-not-found');
+  if (isFrozen(seed)) return depEditNoopResult('seed-frozen');
+  if (!seed.start || !seed.end) return depEditNoopResult('seed-no-dates');
+
+  // Compute seed's tight start against non-frozen blockers
+  let effectiveBlockerEnd = null;
+  for (const blockerId of (seed.blockedByIds || [])) {
+    const blocker = taskById[blockerId];
+    if (!blocker) continue;
+    if (isFrozen(blocker)) continue;
+    if (!blocker.end) continue;
+    if (!effectiveBlockerEnd || blocker.end > effectiveBlockerEnd) {
+      effectiveBlockerEnd = blocker.end;
+    }
+  }
+
+  if (!effectiveBlockerEnd) return depEditNoopResult('no-effective-blockers');
+
+  const newStart = nextBusinessDay(effectiveBlockerEnd);
+
+  // Already tight? No-op (avoid Activity Log noise).
+  if (newStart.getTime() === seed.start.getTime()) {
+    return depEditNoopResult('already-tight');
+  }
+
+  const subcase = newStart > seed.start ? 'violation' : 'gap';
+  const seedDuration = countBDInclusive(seed.start, seed.end);
+  const newEnd = addBusinessDays(newStart, seedDuration - 1);
+
+  const updatesMap = {
+    [seedTaskId]: {
+      taskId: seedTaskId,
+      taskName: seed.name,
+      newStart: formatDate(newStart),
+      newEnd: formatDate(newEnd),
+      duration: seedDuration,
+    },
+  };
+
+  // Tighten downstream chain. Seed set is just [seedTaskId] (D3) — no upstream pass
+  // ran, so no other tasks are in updatesMap yet.
+  const cycleDiagnostics = tightenDownstreamFromSeed(new Set([seedTaskId]), updatesMap, taskById);
+
+  // Build output (matches runCascade's output shape for route-side ergonomics).
+  const updates = Object.values(updatesMap);
+  const movedTaskMap = {};
+  for (const u of updates) {
+    movedTaskMap[u.taskId] = { newStart: u.newStart, newEnd: u.newEnd };
+  }
+  const movedTaskIds = Object.keys(movedTaskMap);
+
+  return {
+    updates,
+    movedTaskMap,
+    movedTaskIds,
+    subcase,
+    downstreamCount: updates.length - 1,
+    summary: `dep-edit ${subcase}: ${updates.length} task(s) tightened (triggered by ${seed.name})`,
+    diagnostics: cycleDiagnostics,
+  };
+}
+
+function depEditNoopResult(reason) {
+  return {
+    updates: [],
+    movedTaskMap: {},
+    movedTaskIds: [],
+    subcase: 'no-op',
+    reason,
+    downstreamCount: 0,
+    summary: `dep-edit no-op: ${reason}`,
+    diagnostics: emptyCycleDiagnostics(),
+  };
+}
+
 // ============================================================
 // MAIN EXPORT
 // ============================================================
