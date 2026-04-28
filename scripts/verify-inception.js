@@ -6,6 +6,7 @@
 
 import 'dotenv/config';
 import { NotionClient } from '../src/notion/client.js';
+import { STUDY_TASKS_PROPS, findById } from '../src/notion/property-names.js';
 
 const studyPageId = process.argv[2];
 if (!studyPageId) {
@@ -30,7 +31,7 @@ const studyTasksDbId = process.env.STUDY_TASKS_DB_ID;
 console.log(`\nQuerying all tasks for study ${studyPageId}...`);
 const allTasks = await client.queryDatabase(
   studyTasksDbId,
-  { property: 'Study', relation: { contains: studyPageId } },
+  { property: STUDY_TASKS_PROPS.STUDY.id, relation: { contains: studyPageId } },
   100,
 );
 
@@ -50,12 +51,11 @@ const earliestDate = { date: '9999-99-99', task: '' };
 const latestDate = { date: '0000-00-00', task: '' };
 
 for (const task of allTasks) {
-  const props = task.properties || {};
-  const name = props['Task Name']?.title?.[0]?.plain_text || '(no name)';
+  const name = findById(task, STUDY_TASKS_PROPS.TASK_NAME)?.title?.[0]?.plain_text || '(no name)';
   const id = task.id;
 
   // Dates
-  const dates = props['Dates']?.date;
+  const dates = findById(task, STUDY_TASKS_PROPS.DATES)?.date;
   const startDate = dates?.start;
   const endDate = dates?.end;
   if (!startDate) {
@@ -70,8 +70,8 @@ for (const task of allTasks) {
   }
 
   // Reference dates should match
-  const refStart = props['Reference Start Date']?.date?.start;
-  const refEnd = props['Reference End Date']?.date?.start;
+  const refStart = findById(task, STUDY_TASKS_PROPS.REF_START)?.date?.start;
+  const refEnd = findById(task, STUDY_TASKS_PROPS.REF_END)?.date?.start;
   if (refStart && startDate && refStart !== startDate) {
     issues.push(`[REF START MISMATCH] ${name}: ref=${refStart} actual=${startDate}`);
   }
@@ -80,46 +80,46 @@ for (const task of allTasks) {
   }
 
   // Template Source ID
-  const templateId = props['Template Source ID']?.rich_text?.[0]?.plain_text;
+  const templateId = findById(task, STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID)?.rich_text?.[0]?.plain_text;
   if (!templateId) {
     issues.push(`[NO TEMPLATE ID] ${name} (${id})`);
     noTemplateIdCount++;
   }
 
   // Study relation
-  const studyRel = props['Study']?.relation;
+  const studyRel = findById(task, STUDY_TASKS_PROPS.STUDY)?.relation;
   if (!studyRel || studyRel.length === 0 || studyRel[0].id !== studyPageId) {
     issues.push(`[WRONG STUDY] ${name} (${id})`);
   }
 
   // Parent task (count, don't flag — root tasks have no parent)
-  const parentRel = props['Parent Task']?.relation;
+  const parentRel = findById(task, STUDY_TASKS_PROPS.PARENT_TASK)?.relation;
   if (parentRel && parentRel.length > 0) noParentCount++;
 
   // Blocked by / Blocking
-  const blockedBy = props['Blocked by']?.relation || [];
-  const blocking = props['Blocking']?.relation || [];
+  const blockedBy = findById(task, STUDY_TASKS_PROPS.BLOCKED_BY)?.relation || [];
+  const blocking = findById(task, STUDY_TASKS_PROPS.BLOCKING)?.relation || [];
   if (blockedBy.length > 0) hasBlockedByCount++;
   if (blocking.length > 0) hasBlockingCount++;
 
   // LMBS flag
-  const lmbs = props['Last Modified By System']?.checkbox;
+  const lmbs = findById(task, STUDY_TASKS_PROPS.LMBS)?.checkbox;
   if (lmbs !== true) {
     issues.push(`[LMBS NOT SET] ${name} (${id})`);
   }
 
   // Owner Role
-  const role = props['Owner Role']?.select?.name;
+  const role = findById(task, STUDY_TASKS_PROPS.OWNER_ROLE)?.select?.name;
   if (role) ownerRoles[role] = (ownerRoles[role] || 0) + 1;
 
   // Tags
-  const tags = props['Tags']?.multi_select || [];
+  const tags = findById(task, STUDY_TASKS_PROPS.TAGS)?.multi_select || [];
   for (const tag of tags) {
     tagNames[tag.name] = (tagNames[tag.name] || 0) + 1;
   }
 
   // Status
-  const status = props['Status']?.status?.name;
+  const status = findById(task, STUDY_TASKS_PROPS.STATUS)?.status?.name;
   if (status !== 'Not started') {
     issues.push(`[UNEXPECTED STATUS] ${name}: ${status}`);
   }
@@ -129,7 +129,7 @@ for (const task of allTasks) {
 console.log('Checking content blocks on 20 random tasks...');
 const sample = allTasks.sort(() => Math.random() - 0.5).slice(0, 20);
 for (const task of sample) {
-  const name = task.properties?.['Task Name']?.title?.[0]?.plain_text || '(no name)';
+  const name = findById(task, STUDY_TASKS_PROPS.TASK_NAME)?.title?.[0]?.plain_text || '(no name)';
   try {
     const blocks = await client.request('GET', `/blocks/${task.id}/children?page_size=1`);
     if (blocks.results && blocks.results.length > 0) {
