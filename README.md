@@ -24,6 +24,10 @@ Optional:
 - Override token:
   - add `--token <notion_token>`
 
+## Property-Names Validator
+
+`npm run check:property-names` pings the live Notion DB schemas (Study Tasks, Studies, Study Blueprint, Activity Log) and asserts every `*_PROPS` constant in `src/notion/property-names.js` resolves to a real property with the same `.name` and expected type. After Meg renames a property in the Notion UI, this script flags the constants that need their `.name` field updated. Workspace sanity guard at script start asserts each DB title matches the expected title, so a misconfigured `NOTION_TOKEN_1` can't silently false-pass. Exit 0 on full match; exit 1 with a stderr drift report otherwise. Engine reads/writes/filters now key by property `.id` so they're rename-immune at runtime — the validator is the sanity net for the `.name` fields, which are documentation hygiene only post-D2b.
+
 ## Architecture
 
 - **src/engine/** — Pure function modules (cascade, parent-subtask, classify). No Notion calls. Fully testable.

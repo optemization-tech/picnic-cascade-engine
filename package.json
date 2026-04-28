@@ -15,6 +15,7 @@
     "patch:task-date": "node scripts/patch-task-date.js",
     "fire:date-webhook": "node scripts/fire-date-webhook.js",
     "check:study-blocker-starts": "node scripts/check-study-blocker-starts.js",
+    "check:property-names": "node scripts/check-property-names.js",
     "benchmark": "node scripts/benchmark.js"
   },
   "dependencies": {
