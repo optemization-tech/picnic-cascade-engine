@@ -1,19 +1,5 @@
 import { parseDate, countBDInclusive } from '../../src/utils/business-days.js';
-
-function task(id, name, start, end, { status = 'Not Started', blockedByIds = [], blockingIds = [] } = {}) {
-  const s = parseDate(start);
-  const e = parseDate(end);
-  return {
-    id,
-    name,
-    start: s,
-    end: e,
-    duration: (s && e) ? countBDInclusive(s, e) : 1,
-    status,
-    blockedByIds,
-    blockingIds,
-  };
-}
+import { task } from './cascade-tasks.js';
 
 /**
  * Two chains sharing a common task B:

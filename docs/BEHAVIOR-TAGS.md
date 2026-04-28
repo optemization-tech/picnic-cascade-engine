@@ -37,7 +37,48 @@ For the behavior contract itself (governance matrix, cross-chain algorithm, chan
 - `BEH-DEBOUNCE-ECHO`: The cascade queue treats bot echo webhooks as debounced noise instead of user edits.
 - `BEH-AUTOMATION-REPORTING`: Success, failure, and no-action outcomes are surfaced consistently in automation reporting and activity logs.
 
-## 5) Current Known Gaps
+## 5) Dep-Edit Cascade
+
+Engine helper (`tightenSeedAndDownstream`):
+- `BEH-DEP-EDIT-VIOLATION`: When the seed's blocker ends after the seed's current start, the seed pushes right to `nextBusinessDay(blocker.end)` with duration preserved.
+- `BEH-DEP-EDIT-GAP`: When the seed's blocker ends well before the seed's current start, the seed pulls left to `nextBusinessDay(blocker.end)` with duration preserved.
+- `BEH-DEP-EDIT-CHAIN-WIDE`: After the seed is tightened, the full reachable downstream chain re-validates against the new positions via `tightenDownstreamFromSeed`.
+- `BEH-DEP-EDIT-FAN-IN`: When the seed has multiple blockers, `seed.newStart` is computed from the maximum non-frozen blocker end.
+- `BEH-DEP-EDIT-NOOP-ALREADY-TIGHT`: When `nextBusinessDay(max blocker.end) === seed.start`, the helper returns `subcase: 'no-op'` and writes nothing.
+- `BEH-DEP-EDIT-NOOP-NO-EFFECTIVE-BLOCKERS`: When the seed has no blockers (or all blockers are frozen), the helper returns `subcase: 'no-op'`.
+- `BEH-DEP-EDIT-NOOP-SEED-FROZEN`: A frozen seed never moves; the helper returns `subcase: 'no-op'`.
+- `BEH-DEP-EDIT-NOOP-SEED-NOT-FOUND`: A seed task ID not present in the supplied `tasks` list returns `subcase: 'no-op'`.
+- `BEH-DEP-EDIT-NOOP-SEED-NO-DATES`: A seed with `start: null` or `end: null` returns `subcase: 'no-op'` with `reason: 'seed-no-dates'`.
+- `BEH-DEP-EDIT-MIXED-BLOCKERS-STALE`: When the seed's `blockedByIds` contains a mix of valid and stale (non-existent) task IDs, only the valid blockers contribute to `max(blocker.end)`.
+- `BEH-DEP-EDIT-MIXED-BLOCKERS-NO-END`: When some blockers have no `end` date, they are excluded from the `max(blocker.end)` reduction; valid blockers still contribute.
+- `BEH-DEP-EDIT-FROZEN-BLOCKER-EXCLUDED`: Frozen blockers are excluded from the `max(blocker.end)` computation.
+- `BEH-DEP-EDIT-FROZEN-DOWNSTREAM-SKIPPED`: Frozen downstream tasks are skipped during chain-wide tightening.
+- `BEH-DEP-EDIT-PARENT-SEED-EXCLUDED`: Parent tasks (with non-empty `Subtask(s)`) refuse to act as cascade triggers; the helper short-circuits with `reason: 'parent-task'`.
+- `BEH-DEP-EDIT-PARENT-BLOCKER-STRIPPED`: Parent-task blockers are stripped from leaf seeds before the cascade runs (mirrors `runCascade`'s BL-H5g invariant).
+- `BEH-DEP-EDIT-CYCLE-DIAGNOSTICS`: When the dependency graph contains a cycle, the helper returns gracefully with `diagnostics.cycleDetected = true`.
+- `BEH-DEP-EDIT-MEG-APR24-T1`: Reproduces the Apr 24 worked example: Reiterate Draft (7/14–7/27) wired as blocker for IIR (start 7/14) → IIR snaps to 7/28.
+- `BEH-DEP-EDIT-FULL-CHAIN-VIOLATION`: On the realistic 200-task fixture, an artificially extended blocker followed by `tightenSeedAndDownstream` leaves the seed's moved subtree gap-clean.
+- `BEH-DEP-EDIT-FULL-CHAIN-GAP`: On the realistic fixture, an artificially shortened blocker followed by `tightenSeedAndDownstream` leaves the seed's moved subtree gap-clean (parallel siblings out of scope, R-4).
+- `BEH-DEP-EDIT-FULL-CHAIN-FROZEN-DOWNSTREAM`: Frozen downstream tasks remain in the original positions even when reachable from the seed.
+- `BEH-DEP-EDIT-FULL-CHAIN-NON-REACHABLE-UNCHANGED`: Tasks unreachable from the seed via `blockingIds` BFS are unchanged.
+
+Route (`processDepEdit` in `src/routes/dep-edit.js`):
+- `BEH-DEP-EDIT-ROUTE-VIOLATION`: Webhook → cascade runs → `patchPages` writes the seed and downstream → Activity Log records `cascadeMode: 'dep-edit'` with `details.subcase: 'violation'`.
+- `BEH-DEP-EDIT-ROUTE-GAP`: Same flow as violation but `details.subcase: 'gap'`.
+- `BEH-DEP-EDIT-ROUTE-NOOP-SILENT`: When the helper returns `subcase: 'no-op'`, the route writes nothing and skips Activity Log entirely (avoids noise on idempotent triggers).
+- `BEH-DEP-EDIT-ROUTE-EDITED-BY-BOT`: `parsed.editedByBot === true` short-circuits before any Notion read or Activity Log write (defense-in-depth alongside Notion automation filter and `cascadeQueue` echo guard).
+- `BEH-DEP-EDIT-ROUTE-NO-DATES`: `parsed.hasDates === false` short-circuits.
+- `BEH-DEP-EDIT-ROUTE-PARENT-TASK`: `parsed.hasSubtasks === true` short-circuits (parent-task exclusion at the route layer).
+- `BEH-DEP-EDIT-ROUTE-MISSING-STUDY`: Missing `studyId` short-circuits.
+- `BEH-DEP-EDIT-ROUTE-EMPTY-STUDY`: `queryStudyTasks` returning empty (stale `studyId` or racing deletion) short-circuits before calling the helper.
+- `BEH-DEP-EDIT-ROUTE-PARSE-SKIP`: `parseWebhookPayload` returning `skip: true` (malformed payload — no page id, no properties) short-circuits before any guard chain.
+- `BEH-DEP-EDIT-ROUTE-ERROR`: A `patchPages` failure logs an error to Activity Log and posts a study comment.
+- `BEH-DEP-EDIT-ROUTE-FAILURE-PRESERVES-CONTEXT`: When `patchPages` throws after `tightenSeedAndDownstream` has computed updates, the failure Activity Log row preserves the cascade context (`subcase`, `movement.updatedCount`, `movedTaskIds`) so operators can diagnose what the cascade attempted to write.
+- `BEH-DEP-EDIT-ROUTE-QUERY-REJECT`: A `queryStudyTasks` rejection (Notion 5xx, network timeout) logs an error to Activity Log and posts a study comment without invoking the helper or attempting writes.
+- `BEH-DEP-EDIT-ROUTE-200-IMMEDIATE`: The route replies `200 {ok: true}` before any async work begins.
+- `BEH-DEP-EDIT-ROUTE-ENQUEUE`: The route enqueues via `cascadeQueue.enqueue(payload, parseFn, processFn)` — inheriting 5s debounce + per-study FIFO.
+
+## 6) Current Known Gaps
 
 - V1 parent `case-a` now drags connected dependencies with shifted subtasks, but it still infers a single delta from the parent envelope. It does not yet classify parent edits into distinct start-left, end-left, and drag modes.
 - V2 still has no `parentMode`. Its parent fan-out recomputes direct subtask offsets from the moved parent's start date and does not drag dependency-connected tasks beyond those subtasks.
