@@ -33,6 +33,16 @@ Definitions:
 | Drag left | `startDelta < 0 && endDelta < 0` | `drag-left` | Connected component | No per-edge conflict pass; every reachable non-frozen task in the connected component translates by the same delta | Uniform translation across the connected component | Drag earlier shifts the connected component around the source left by a shared delta |
 | Drag right | `startDelta > 0 && endDelta > 0` | `drag-right` | Connected component | No per-edge conflict pass; every reachable non-frozen task in the connected component translates by the same delta | Uniform translation across the connected component | Drag later shifts the connected component around the source right by a shared delta |
 | Complete Freeze | Task status is frozen (`Done`/`N/A`) | N/A | Route + engine gates | Frozen tasks never move and are excluded from blocker constraints | N/A | Frozen tasks remain fixed while cascades continue around them where valid |
+| Dep-edit | `Blocked by` relation edited by non-bot user (NOT a date delta) | `dep-edit` | Seed task + reachable downstream chain | Seed pushed/pulled to `nextBusinessDay(max(non-frozen blocker.end))`; downstream chain re-tightened against new positions via `tightenDownstreamFromSeed` | Tight (no gaps preserved); seed and downstream end up butt-to-butt against their respective blockers | Wiring or rewiring `Blocked by` enforces "start after predecessor end" upfront, eliminating the violation/gap that would otherwise persist until someone drags dates |
+
+**Dep-edit cascade — special case:**
+- Trigger fires on `Blocked by` edits, not on date deltas. The other 6 modes are date-driven (`signedBDDelta`-classified); dep-edit is dependency-graph-driven.
+- Two semantic sub-cases (`violation` and `gap`) share the same engine logic — both compute seed.newStart = nextBD(max(non-frozen blocker.end)) and shift seed.end by the same delta, then propagate downstream via `tightenDownstreamFromSeed`. The Activity Log distinguishes them via `details.subcase`.
+- Parent-task gating (BL-H5g): the cascade refuses to operate on tasks where `Subtask(s)` is non-empty, mirroring the parent-edge stripping invariant `runCascade` enforces for every other mode. Three-layer defense: Notion automation filter `Subtask(s) is empty`, route-level guard, helper-level early-return.
+- No-op when seed is already tight (avoids Activity Log noise on idempotent triggers).
+- Pre-existing violations on parallel sibling branches that share the seed's blocker are NOT fixed by this cascade — engine fixes only the touched subgraph (PR #66 simplification). Operators run `scripts/check-study-blocker-starts.js` to spot residual violations.
+
+
 
 Parent guard:
 - Any task with subtasks is blocked for direct date edits and produces a warning to edit subtasks directly.
@@ -78,7 +88,8 @@ Map each behavior to concrete modules/functions:
   - `computeCascadeMode()`
   - `classify()`
 - `src/engine/cascade.js`
-  - `runCascade()`
+  - `runCascade()` — dispatches the 6 date-edit modes
+  - `tightenSeedAndDownstream()` — dep-edit cascade orchestrator (mirrors `runCascade`'s parent-edge stripping; calls `tightenDownstreamFromSeed` for chain-wide propagation)
   - `conflictOnlyDownstream()`
   - `pullLeftUpstream()`
   - `tightenDownstreamFromSeed()`
@@ -90,6 +101,8 @@ Map each behavior to concrete modules/functions:
 - `src/routes/date-cascade.js`
   - `processDateCascade()` (orchestration and terminal status semantics)
   - `buildActivityDetails()` (diagnostics mapping)
+- `src/routes/dep-edit.js`
+  - `processDepEdit()` (orchestration for the dep-edit cascade; reuses `cascadeQueue` for 5s debounce + per-study FIFO; silent no-op when `tightenSeedAndDownstream` returns `subcase: 'no-op'`)
 - `src/utils/business-days.js`
   - `signedBDDelta()`, `nextBusinessDay()`, `addBusinessDays()`, `countBDInclusive()`, `isBusinessDay()`
 
@@ -375,6 +388,18 @@ Manually-wired `Blocked by` / `Blocking` relations are consumed unchanged by `qu
 
 Parent-level edges are still stripped by `runCascade()` (see Section 1 Parent guard). If a PM wires a dependency from a parent task to another parent, the engine silently ignores that edge. The guard applies equally to manually- and engine-created tasks.
 
+#### Dep-edit cascade — fires on `Blocked by` edits (2026-04-27)
+
+PMs can wire or rewire a task's `Blocked by` relation manually. When they do, the rule "every task starts after its predecessor's end" should be enforced upfront — without waiting for someone to drag a date.
+
+**Notion-side automation:** `Dep Edit Cascade` watches the `Blocked by` property on Study Tasks DB. Filters mirror the manual-task pattern — `Last edited by ≠ <bot integration users>`, `Reference Start Date is not empty` (matches the `Fill Refs` precedent above), `Subtask(s) is empty` (parent-task exclusion per BL-H5g). Watches `Blocked by` only — NOT `Blocking` — to avoid Notion's dual-sync double-fire.
+
+**Engine-side handler:** [`src/routes/dep-edit.js`](../src/routes/dep-edit.js) → [`src/engine/cascade.js#tightenSeedAndDownstream`](../src/engine/cascade.js). Inherits 5s debounce + per-study FIFO via `cascadeQueue`, plus the `editedByBot` short-circuit at the route layer.
+
+**Behavior:** the seed is tightened to `nextBusinessDay(max(non-frozen blocker.end))`, end shifts by the same delta, and the downstream chain re-validates against the new positions via `tightenDownstreamFromSeed`. See Section 1 Behavior Matrix for the full row.
+
+**Reuse of the `Reference Start Date is not empty` filter** is critical for the same reason as `Fill Refs`: if the new automation fires on a manual task whose Reference is still empty, the cascade would compute `delta = 0` against the empty Reference and silently no-op. Filtering at the Notion automation layer prevents this and matches the bootstrap-then-cascade lifecycle above.
+
 #### Failure modes
 
 | Condition | Symptom | Resolution |
@@ -397,6 +422,16 @@ For every behavior change:
 5. Record decision in pulse log
 
 ## Changelog
+
+### 2026-04-27 — Dep-edit cascade (`/webhook/dep-edit`)
+
+Plan: `docs/plans/2026-04-27-001-feat-dep-edit-cascade-plan.md`.
+
+New cascade trigger that fires when a Study Task's `Blocked by` relation is edited by a non-bot user. Two semantic sub-cases (violation, gap) share the same engine logic — both compute `seed.newStart = nextBD(max(non-frozen blocker.end))` and propagate downstream chain-wide via the existing `tightenDownstreamFromSeed`. Activity Log distinguishes the sub-cases via `details.subcase`.
+
+Behavior matrix (§1) gains a 7th row (`Dep-edit`) noting the trigger is dependency-graph-driven, not delta-driven. Module Mapping (§3) lists the new `tightenSeedAndDownstream` helper and `processDepEdit` route. Section 11 (Manual Task Support) adds a sub-section explaining the new automation reuses the `Reference Start Date is not empty` filter precedent and the `Subtask(s) is empty` filter (BL-H5g parent-task exclusion).
+
+Resolves Meg's 2026-04-24 manual subtask test report (`34c2386760c2803382ccdd9497460150`). Q1 (date-drag enforcement) and Q2 (chain-wide vs seed-only) confirmed at the 2026-04-27 New Features Review: dep-wire only, chain-wide.
 
 ### 2026-04-24 — Manual task support & Reference date bootstrap documented
 

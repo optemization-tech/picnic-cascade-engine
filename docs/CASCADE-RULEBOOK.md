@@ -8,7 +8,9 @@ Extracted from code as of 2026-04-20. Source files under `src/`.
 
 ### 1.1 Mode Classification
 
-Classification happens in `src/engine/classify.js`, function `computeCascadeMode()` (line 9).
+Two trigger paradigms, two classification paths:
+
+**A. Date-edit modes (6, delta-driven).** Classification happens in `src/engine/classify.js`, function `computeCascadeMode()` (line 9), based on signed business-day deltas computed in `parseWebhookPayload()` (`src/gates/guards.js` lines 53-66) via `signedBDDelta(refDate, newDate)`.
 
 | `startDelta` | `endDelta` | Mode |
 |---|---|---|
@@ -20,7 +22,9 @@ Classification happens in `src/engine/classify.js`, function `computeCascadeMode
 | `< 0` | `< 0` | `drag-left` |
 | all other combos | | `null` (no cascade) |
 
-Deltas are signed business-day differences computed in `parseWebhookPayload()` (`src/gates/guards.js` lines 53-66) via `signedBDDelta(refDate, newDate)`.
+These 6 modes dispatch through `runCascade()`'s `switch (cascadeMode)` in `src/engine/cascade.js`.
+
+**B. Dep-edit mode (1, blocker-driven).** Triggered when a task's `Blocked by` relation is edited by a non-bot user (Notion automation, not a delta computation). Classification is implicit — there is only one mode (`dep-edit`), and the seed task itself determines the sub-case (`violation`, `gap`, or `no-op`) based on its position relative to its non-frozen blockers. Dispatched through a fresh route at `src/routes/dep-edit.js` → `src/engine/cascade.js#tightenSeedAndDownstream`, NOT through `runCascade`. See §3.7.
 
 ### 1.2 Drag Normalization
 
@@ -107,13 +111,15 @@ After `classify()` runs, if `classified.skip === true` or `classified.cascadeMod
 - Only one cascade runs per study at a time.
 - Subsequent cascades for the same study wait until the current one completes.
 
-**Bypass conditions** (lines 30-39): Payloads that can't be parsed, are marked `skip`, or lack `taskId`/`studyId` skip the queue and go directly to `processDateCascade()`.
+**Bypass conditions** (lines 30-39): Payloads that can't be parsed, are marked `skip`, or lack `taskId`/`studyId` skip the queue and go directly to the registered processor.
+
+**Routes that share `cascadeQueue`**: `processDateCascade` (date-cascade.js) and `processDepEdit` (dep-edit.js). Both inherit the 5s debounce, the bot-echo guard, and the per-study FIFO. `cascadeQueue.enqueue(payload, parseFn, processFn)` is the unified surface; the route just provides its own `processFn`. Status-rollup intentionally does NOT share the queue (it doesn't move dates and runs through `flightTracker` instead).
 
 ---
 
 ## 3. Per-Mode Behavior
 
-All mode dispatch happens in `runCascade()` in `src/engine/cascade.js`.
+Date-edit modes 3.1-3.6 dispatch through `runCascade()` in `src/engine/cascade.js`. Mode 3.7 (Dep-Edit) takes a different path — fresh route, no `runCascade` indirection — see §3.7 below.
 
 ### 3.1 Push-Right
 
@@ -214,6 +220,44 @@ All mode dispatch happens in `runCascade()` in `src/engine/cascade.js`.
 
 The distinction from drag-left is the direction of the shared translation.
 
+### 3.7 Dep-Edit
+
+**Trigger**: A Study Task's `Blocked by` relation is edited by a non-bot user. NOT a delta-classified mode — fired by Notion automation (`Dep Edit Cascade` watching the `Blocked by` property) instead of a date change.
+
+**Notion automation filters** (defense in depth alongside the engine guards):
+- `Last edited by ≠ <bot integration users>` — prevents engine-write echo loops
+- `Reference Start Date is not empty` — prevents `delta = 0` silent no-ops on un-bootstrapped manual tasks (matches the `Fill Refs` precedent at ENGINE-BEHAVIOR-REFERENCE §11)
+- `Subtask(s) is empty` — parent-task exclusion (BL-H5g; see §4.2)
+- Watches `Blocked by` only, NOT `Blocking` — avoids Notion dual-sync double-fire on a single user edit
+
+**Engine handler**: `src/routes/dep-edit.js` → `processDepEdit()`. Mirrors the date-cascade route shape: parse payload, defense-in-depth early-return guards (`editedByBot`, `!hasDates`, `hasSubtasks`, missing `studyId`), reply 200 immediately, enqueue via `cascadeQueue` (5s debounce + per-study FIFO; see §2.8). Inside the queued worker:
+
+1. **Fetch study tasks** via `queryStudyTasks(studyId)` — single round-trip; returns normalized tasks with `blockedByIds`/`blockingIds`. Same pattern as `date-cascade.js`.
+2. **Tighten seed** via `tightenSeedAndDownstream({ seedTaskId, tasks })` (`src/engine/cascade.js`). The helper:
+   - Mirrors `runCascade`'s BL-H5g parent-edge stripping (cascade.js:520-540) — parent tasks neither act as cascade triggers nor as constraint blockers on leaf seeds.
+   - Computes `seed.newStart = nextBusinessDay(max(non-frozen blocker.effectiveEnd))`. Frozen blockers are excluded from `max`. Frozen seeds short-circuit with `subcase: 'no-op'`.
+   - Determines sub-case: `subcase = newStart === seed.start ? 'no-op' : newStart > seed.start ? 'violation' : 'gap'`.
+   - Writes the seed update to `updatesMap`, then calls `tightenDownstreamFromSeed(new Set([seedTaskId]), updatesMap, taskById)` for chain-wide propagation. Seed set is single-task (D3 in plan) — there's no upstream pass to consider.
+3. **Apply or skip**: if `subcase === 'no-op'`, the route silently skips Activity Log (matches status-rollup's idempotent-no-op pattern; avoids noise on already-tight chains, frozen seeds, etc.). Otherwise, `notionClient.patchPages` writes the updates and Activity Log records `cascadeMode: 'dep-edit'` with `details.subcase`, `details.downstreamCount`, `details.cycleNodes`.
+
+**Key properties**:
+- **Seed-then-downstream** — the seed is computed FIRST (before `tightenDownstreamFromSeed`), because that helper's topo loop deliberately skips seeds (line 401). For the date-edit `start-left` mode, seeds were authored upstream by `pullLeftUpstream`; for dep-edit, no upstream pass runs, so the orchestrator authors the seed directly.
+- **Chain-wide tightening** matches `start-left`'s philosophy. Reachable downstream tasks tighten to `nextBusinessDay(max(non-frozen blocker.effectiveEnd))` with duration preserved from the pre-cascade snapshot (Bug 2A.2 invariant).
+- **No upstream pass** — dep-edit only walks downstream from the seed. If the user wired a blocker that itself violates against ITS upstream, the upstream chain is not reconciled by this cascade. Operators run `scripts/check-study-blocker-starts.js` to spot residual violations.
+- **Pre-existing parallel-branch violations remain** — if the seed's blocker has parallel sibling downstream tasks (other tasks blocked by the same blocker), and those siblings already had violations, the dep-edit cascade does NOT fix them. Engine fixes only the touched subgraph (PR #66 simplification). Documented at ENGINE-BEHAVIOR-REFERENCE Risk R-4.
+
+**Sub-case decision matrix:**
+
+| Seed state vs blockers | newStart computed | Subcase | Action |
+|---|---|---|---|
+| Seed is a parent task (`subtaskIds.length > 0`) | n/a | `no-op` (reason: `parent-task`) | Return early. Notion filter should prevent this; route + helper guards are defense in depth. |
+| Seed has no non-frozen blockers | n/a | `no-op` (reason: `no-effective-blockers`) | Return early. PM may have removed the only blocker — no chain to integrate into. |
+| Seed is frozen (Done) | n/a | `no-op` (reason: `seed-frozen`) | Frozen tasks don't move. Skip. |
+| `nextBD(max blocker.end) === seed.start` | tight already | `no-op` (reason: `already-tight`) | Already correct. Don't write, don't log noise. |
+| `nextBD(max blocker.end) > seed.start` | future | `violation` | Push seed right + tighten downstream. |
+| `nextBD(max blocker.end) < seed.start` | past | `gap` | Pull seed left + tighten downstream. |
+| Cycle detected during downstream BFS | n/a | `violation` or `gap` (whichever fired) | Tighten what we can; surface diagnostics from `tightenDownstreamFromSeed` to Activity Log. |
+
 ---
 
 ## 4. Cross-Cutting Rules
@@ -229,12 +273,14 @@ The distinction from drag-left is the direction of the shared translation.
 
 ### 4.2 Parent Edge Stripping (BL-H5g)
 
-`runCascade()`:
+`runCascade()` and `tightenSeedAndDownstream()`:
 1. Identifies all parent IDs (tasks that have at least one child with `parentId` pointing to them).
 2. For each parent: sets `blockedByIds = []` and `blockingIds = []`.
 3. For all other tasks: filters out any parent IDs from their `blockedByIds` and `blockingIds`.
 
 **Effect**: Parent tasks are invisible to the dependency graph during cascade. Dependencies flow only between leaf/subtask-level tasks.
+
+For `tightenSeedAndDownstream` specifically (the dep-edit cascade orchestrator), the same stripping runs at the top of the function, AND parent-task seeds short-circuit with `subcase: 'no-op'` (reason: `'parent-task'`) before any computation runs. This is defense in depth alongside the Notion automation's `Subtask(s) is empty` filter.
 
 ### 4.3 Blocker Constraint Formula
 
