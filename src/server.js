@@ -2,6 +2,7 @@ import express from 'express';
 import { webhookAuth } from './middleware/webhook-auth.js';
 import { handleDateCascade } from './routes/date-cascade.js';
 import { handleStatusRollup } from './routes/status-rollup.js';
+import { handleDepEdit } from './routes/dep-edit.js';
 import { handleInception } from './routes/inception.js';
 import { handleAddTaskSet } from './routes/add-task-set.js';
 import { handleCopyBlocks } from './routes/copy-blocks.js';
@@ -35,6 +36,7 @@ export function createServer() {
   // Cascade webhook endpoints (use cascade token pool)
   app.post('/webhook/date-cascade', handleDateCascade);
   app.post('/webhook/status-rollup', handleStatusRollup);
+  app.post('/webhook/dep-edit', handleDepEdit);
 
   // Provisioning webhook endpoints (use provision token pool)
   app.post('/webhook/inception', handleInception);
