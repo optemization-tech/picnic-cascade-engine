@@ -4,9 +4,14 @@
 import { parseDate, countBDInclusive } from '../../src/utils/business-days.js';
 
 /**
- * Helper to build a task with sensible defaults.
+ * Canonical task fixture builder. Exported so other test files
+ * (cross-chain-tasks.js, dep-edit-cascade.test.js) can reuse one signature
+ * instead of maintaining drifting local copies.
+ *
+ * Pass `parentId` to mark a task as a subtask of another (exercises
+ * BL-H5g parent-edge stripping).
  */
-function task(id, name, start, end, { status = 'Not Started', blockedByIds = [], blockingIds = [] } = {}) {
+export function task(id, name, start, end, { status = 'Not Started', blockedByIds = [], blockingIds = [], parentId = null } = {}) {
   const s = parseDate(start);
   const e = parseDate(end);
   return {
@@ -18,6 +23,7 @@ function task(id, name, start, end, { status = 'Not Started', blockedByIds = [],
     status,
     blockedByIds,
     blockingIds,
+    parentId,
   };
 }
 
