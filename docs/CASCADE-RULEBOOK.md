@@ -44,6 +44,8 @@ This runs twice: first in `parseWebhookPayload()` (guards.js lines 61-66), then 
 
 Sets `staleRefCorrected: true` flag in the output.
 
+> **Manual-task caveat.** This correction path is why the Notion-side `Fill out reference properties` automation (ENGINE-BEHAVIOR-REFERENCE §11) must NOT overwrite already-populated Reference dates. If it did, every PM edit on a manually-added task would leave DB `Reference == Dates`, stale-ref correction would adopt that, and the recomputed delta would be `0` — silent no-op. The bootstrap automation's `Fill Refs` view filter and/or conditional formula are what preserve the invariant.
+
 ---
 
 ## 2. Guards and Gates
