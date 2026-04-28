@@ -241,6 +241,17 @@ describe('tightenSeedAndDownstream full study invariants', () => {
     expect(result.subcase).toBe('violation');
     expect(result.updates.length).toBeGreaterThan(1); // seed + downstream
 
+    // Strengthened membership check: the seed must be in movedTaskIds, and at least
+    // one direct downstream of the seed must also be present. Without this, an
+    // under-tightening regression (seed moves but its direct downstreams aren't
+    // walked) would slip past the gap-violation assertion below.
+    expect(result.movedTaskIds).toContain(seed.id);
+    const directDownstreamIds = seed.blockingIds.filter((id) => tasks.some((t) => t.id === id));
+    if (directDownstreamIds.length > 0) {
+      const movedDirectDownstream = directDownstreamIds.filter((id) => result.movedTaskIds.includes(id));
+      expect(movedDirectDownstream.length).toBeGreaterThan(0);
+    }
+
     const finalTasks = applyDepEditResult(tasks, result);
     // Only check violations within the moved subtree — parallel siblings of
     // the seed (sharing the same blocker but not downstream of seed) are
@@ -269,6 +280,14 @@ describe('tightenSeedAndDownstream full study invariants', () => {
     const result = tightenSeedAndDownstream({ seedTaskId: seed.id, tasks });
     expect(result.subcase).toBe('gap');
     expect(result.updates.length).toBeGreaterThan(1); // seed + downstream
+
+    // Same membership check as the violation case — guards against under-tightening.
+    expect(result.movedTaskIds).toContain(seed.id);
+    const directDownstreamIds = seed.blockingIds.filter((id) => tasks.some((t) => t.id === id));
+    if (directDownstreamIds.length > 0) {
+      const movedDirectDownstream = directDownstreamIds.filter((id) => result.movedTaskIds.includes(id));
+      expect(movedDirectDownstream.length).toBeGreaterThan(0);
+    }
 
     const finalTasks = applyDepEditResult(tasks, result);
     expect(violationsWithinMovedSet(finalTasks, result.movedTaskIds)).toEqual([]);

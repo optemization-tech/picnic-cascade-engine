@@ -5,30 +5,15 @@ import { parseDate, countBDInclusive } from '../../src/utils/business-days.js';
 import {
   fanIn,
   linearTightChain,
+  task,
 } from '../fixtures/cascade-tasks.js';
 import { parentWithAccidentalDep } from '../fixtures/cross-chain-tasks.js';
 
 // -----------------------------------------------------------
-// Fixture helpers — small, dep-edit-specific scenarios.
-// Inlined here (not in fixtures/cascade-tasks.js) because they
-// only matter for the dep-edit handler's input shape.
+// Dep-edit-specific scenario fixtures. The generic `task()` builder
+// is imported from cascade-tasks.js to avoid duplicating the helper
+// (and its drift-prone signature) across test files.
 // -----------------------------------------------------------
-
-function task(id, name, start, end, { status = 'Not Started', blockedByIds = [], blockingIds = [], parentId = null } = {}) {
-  const s = parseDate(start);
-  const e = parseDate(end);
-  return {
-    id,
-    name,
-    start: s,
-    end: e,
-    duration: (s && e) ? countBDInclusive(s, e) : 1,
-    status,
-    blockedByIds,
-    blockingIds,
-    parentId,
-  };
-}
 
 /**
  * Violation chain: A→B where A's end overlaps B's start.
@@ -248,6 +233,68 @@ describe('tightenSeedAndDownstream', () => {
       const result = tightenSeedAndDownstream({ seedTaskId: 'missing', tasks: linearTightChain() });
       expect(result.subcase).toBe('no-op');
       expect(result.reason).toBe('seed-not-found');
+    });
+
+    // @behavior BEH-DEP-EDIT-NOOP-SEED-NO-DATES
+    it('returns no-op when seed has no dates (start or end is null)', () => {
+      // task() with undefined start/end produces null Date objects.
+      const tasks = [
+        task('a', 'Task A', '2026-03-30', '2026-04-03', { blockingIds: ['b'] }),
+        task('b', 'Task B', undefined, undefined, { blockedByIds: ['a'] }),
+      ];
+      const result = tightenSeedAndDownstream({ seedTaskId: 'b', tasks });
+      expect(result.subcase).toBe('no-op');
+      expect(result.reason).toBe('seed-no-dates');
+    });
+
+    // @behavior BEH-DEP-EDIT-NOOP-NO-EFFECTIVE-BLOCKERS
+    it('returns no-op when all blockers reference missing task IDs (stale dual-sync)', () => {
+      const tasks = [
+        task('b', 'Task B', '2026-04-01', '2026-04-02', { blockedByIds: ['ghost-1', 'ghost-2'] }),
+      ];
+      const result = tightenSeedAndDownstream({ seedTaskId: 'b', tasks });
+      expect(result.subcase).toBe('no-op');
+      expect(result.reason).toBe('no-effective-blockers');
+    });
+
+    // @behavior BEH-DEP-EDIT-NOOP-NO-EFFECTIVE-BLOCKERS
+    it('returns no-op when single blocker has no end date', () => {
+      const tasks = [
+        task('a', 'Task A', '2026-03-30', undefined, { blockingIds: ['b'] }),
+        task('b', 'Task B', '2026-04-01', '2026-04-02', { blockedByIds: ['a'] }),
+      ];
+      const result = tightenSeedAndDownstream({ seedTaskId: 'b', tasks });
+      expect(result.subcase).toBe('no-op');
+      expect(result.reason).toBe('no-effective-blockers');
+    });
+  });
+
+  describe('mixed blocker scenarios (defensive)', () => {
+    // @behavior BEH-DEP-EDIT-MIXED-BLOCKERS-STALE
+    it('uses only valid blockers when mixed valid + stale blocker IDs are present', () => {
+      const tasks = [
+        task('a', 'Task A', '2026-03-30', '2026-04-03', { blockingIds: ['b'] }),
+        task('b', 'Task B', '2026-04-01', '2026-04-02', { blockedByIds: ['a', 'ghost-stale'] }),
+      ];
+      const result = tightenSeedAndDownstream({ seedTaskId: 'b', tasks });
+      // Should compute against A only; A.end=Apr 03 → newStart=Apr 06 → violation
+      expect(result.subcase).toBe('violation');
+      const update = result.updates.find((u) => u.taskId === 'b');
+      expect(update).toMatchObject({ newStart: '2026-04-06', newEnd: '2026-04-07' });
+    });
+
+    // @behavior BEH-DEP-EDIT-MIXED-BLOCKERS-NO-END
+    it('uses only blockers with end dates when one blocker has no end', () => {
+      const tasks = [
+        task('a1', 'A1 has end', '2026-03-30', '2026-04-03', { blockingIds: ['b'] }),
+        task('a2', 'A2 missing end', '2026-04-13', undefined, { blockingIds: ['b'] }),
+        task('b', 'Task B', '2026-04-01', '2026-04-02', { blockedByIds: ['a1', 'a2'] }),
+      ];
+      const result = tightenSeedAndDownstream({ seedTaskId: 'b', tasks });
+      // Should ignore A2 (no end), compute against A1 only
+      expect(result.subcase).toBe('violation');
+      const update = result.updates.find((u) => u.taskId === 'b');
+      expect(update).toMatchObject({ newStart: '2026-04-06', newEnd: '2026-04-07' });
     });
   });
 

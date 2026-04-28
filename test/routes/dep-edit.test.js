@@ -231,6 +231,20 @@ describe('handleDepEdit', () => {
 
       expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
     });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-PARSE-SKIP
+    it('skips when parseWebhookPayload returns skip=true (malformed payload)', async () => {
+      mocks.parseWebhookPayload.mockReturnValue({ skip: true, reason: 'no-page-id' });
+
+      const { req, res } = makeReqRes({ malformed: true });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
+      expect(mocks.tightenSeedAndDownstream).not.toHaveBeenCalled();
+      expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+      expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    });
   });
 
   describe('error handling', () => {
@@ -251,6 +265,59 @@ describe('handleDepEdit', () => {
       await handleDepEdit(req, res);
       await new Promise((r) => setImmediate(r));
 
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed' }),
+      );
+      expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+        expect.objectContaining({ workflow: 'Dep Edit Cascade', status: 'failed' }),
+      );
+    });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-FAILURE-PRESERVES-CONTEXT
+    it('failure-path Activity Log preserves cascade result context (subcase, movement)', async () => {
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed({ refStart: '2026-04-01', refEnd: '2026-04-02' }));
+      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }, { id: 'task-2' }]);
+      mocks.tightenSeedAndDownstream.mockReturnValue({
+        subcase: 'violation',
+        updates: [
+          { taskId: 'task-1', taskName: 'Test Task', newStart: '2026-04-06', newEnd: '2026-04-07' },
+          { taskId: 'task-2', taskName: 'Downstream', newStart: '2026-04-08', newEnd: '2026-04-09' },
+        ],
+        movedTaskIds: ['task-1', 'task-2'],
+        downstreamCount: 1,
+        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      });
+      mocks.mockClient.patchPages.mockRejectedValue(new Error('Notion 502'));
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      // Without result threading, details would show subcase: null and updatedCount: 0
+      // even though the cascade actually computed work that the patch failed to apply.
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'failed',
+          details: expect.objectContaining({
+            subcase: 'violation',
+            downstreamCount: 1,
+            movement: expect.objectContaining({ updatedCount: 2, movedTaskIds: ['task-1', 'task-2'] }),
+          }),
+        }),
+      );
+    });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-QUERY-REJECT
+    it('logs error and posts study comment when queryStudyTasks throws', async () => {
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+      mocks.queryStudyTasks.mockRejectedValue(new Error('Notion 503 — service unavailable'));
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mocks.tightenSeedAndDownstream).not.toHaveBeenCalled();
+      expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
       expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'failed' }),
       );

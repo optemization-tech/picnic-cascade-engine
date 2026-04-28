@@ -48,6 +48,9 @@ Engine helper (`tightenSeedAndDownstream`):
 - `BEH-DEP-EDIT-NOOP-NO-EFFECTIVE-BLOCKERS`: When the seed has no blockers (or all blockers are frozen), the helper returns `subcase: 'no-op'`.
 - `BEH-DEP-EDIT-NOOP-SEED-FROZEN`: A frozen seed never moves; the helper returns `subcase: 'no-op'`.
 - `BEH-DEP-EDIT-NOOP-SEED-NOT-FOUND`: A seed task ID not present in the supplied `tasks` list returns `subcase: 'no-op'`.
+- `BEH-DEP-EDIT-NOOP-SEED-NO-DATES`: A seed with `start: null` or `end: null` returns `subcase: 'no-op'` with `reason: 'seed-no-dates'`.
+- `BEH-DEP-EDIT-MIXED-BLOCKERS-STALE`: When the seed's `blockedByIds` contains a mix of valid and stale (non-existent) task IDs, only the valid blockers contribute to `max(blocker.end)`.
+- `BEH-DEP-EDIT-MIXED-BLOCKERS-NO-END`: When some blockers have no `end` date, they are excluded from the `max(blocker.end)` reduction; valid blockers still contribute.
 - `BEH-DEP-EDIT-FROZEN-BLOCKER-EXCLUDED`: Frozen blockers are excluded from the `max(blocker.end)` computation.
 - `BEH-DEP-EDIT-FROZEN-DOWNSTREAM-SKIPPED`: Frozen downstream tasks are skipped during chain-wide tightening.
 - `BEH-DEP-EDIT-PARENT-SEED-EXCLUDED`: Parent tasks (with non-empty `Subtask(s)`) refuse to act as cascade triggers; the helper short-circuits with `reason: 'parent-task'`.
@@ -68,7 +71,10 @@ Route (`processDepEdit` in `src/routes/dep-edit.js`):
 - `BEH-DEP-EDIT-ROUTE-PARENT-TASK`: `parsed.hasSubtasks === true` short-circuits (parent-task exclusion at the route layer).
 - `BEH-DEP-EDIT-ROUTE-MISSING-STUDY`: Missing `studyId` short-circuits.
 - `BEH-DEP-EDIT-ROUTE-EMPTY-STUDY`: `queryStudyTasks` returning empty (stale `studyId` or racing deletion) short-circuits before calling the helper.
+- `BEH-DEP-EDIT-ROUTE-PARSE-SKIP`: `parseWebhookPayload` returning `skip: true` (malformed payload — no page id, no properties) short-circuits before any guard chain.
 - `BEH-DEP-EDIT-ROUTE-ERROR`: A `patchPages` failure logs an error to Activity Log and posts a study comment.
+- `BEH-DEP-EDIT-ROUTE-FAILURE-PRESERVES-CONTEXT`: When `patchPages` throws after `tightenSeedAndDownstream` has computed updates, the failure Activity Log row preserves the cascade context (`subcase`, `movement.updatedCount`, `movedTaskIds`) so operators can diagnose what the cascade attempted to write.
+- `BEH-DEP-EDIT-ROUTE-QUERY-REJECT`: A `queryStudyTasks` rejection (Notion 5xx, network timeout) logs an error to Activity Log and posts a study comment without invoking the helper or attempting writes.
 - `BEH-DEP-EDIT-ROUTE-200-IMMEDIATE`: The route replies `200 {ok: true}` before any async work begins.
 - `BEH-DEP-EDIT-ROUTE-ENQUEUE`: The route enqueues via `cascadeQueue.enqueue(payload, parseFn, processFn)` — inheriting 5s debounce + per-study FIFO.
 
