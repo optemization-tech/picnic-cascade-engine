@@ -11,11 +11,9 @@
  * no encode step at call sites). Verified 2026-04-28 that Notion's PATCH
  * endpoint accepts URL-encoded ids as `properties` keys (Step 0b spot-test).
  *
- * History: on 2026-04-28 Meg renamed 16 system-internal properties across
- * Study Tasks and Study Blueprint to carry a `[Do Not Edit] ` prefix —
- * making the PM-protected surface area visually obvious in Notion. Studies'
- * `Import Mode` was NOT renamed despite the plan's initial table; verified
- * via Step 0a (live DB schema fetch). See
+ * History: on 2026-04-28 Meg renamed 17 system-internal properties across
+ * Study Tasks, Studies, and Study Blueprint to carry a `[Do Not Edit] ` prefix —
+ * making the PM-protected surface area visually obvious in Notion. See
  * docs/plans/2026-04-28-001-refactor-property-names-constants-module-plan.md
  * for the full rename event + this module's role.
  *
@@ -93,14 +91,16 @@ export const STUDY_TASKS_PROPS = Object.freeze({
 /**
  * Studies DB (`cad23867-60c2-836f-a27d-0131c25b6dcd`).
  *
- * No renames as of 2026-04-28 (Step 0a verified — `Import Mode` here was NOT
- * prefixed; only the rollup form on Study Tasks was renamed).
+ * Renamed 2026-04-28: `Import Mode` → `[Do Not Edit] Import Mode`.
+ * (Step 0a observed `Import Mode` in a transient un-renamed window; Tem confirmed
+ * the canonical state is `[Do Not Edit] Import Mode` to match the Study Tasks
+ * rollup name.)
  */
 export const STUDIES_PROPS = Object.freeze({
   STUDY_NAME:           { name: 'Study Name (Internal)',                    id: 'title' },
   CONTRACT_SIGN_DATE:   { name: 'Contract Sign Date',                       id: 'KUl%5D' },
   CONTRACT_END_DATE:    { name: 'Contract End Date',                        id: 'f%5Bxi' },
-  IMPORT_MODE:          { name: 'Import Mode',                              id: '%3FhIH' },
+  IMPORT_MODE:          { name: '[Do Not Edit] Import Mode',                id: '%3FhIH' },
   AUTOMATION_REPORTING: { name: 'Automation Reporting',                     id: '%5BJmF' },
   CASCADE_QUEUE:        { name: 'Cascade Queue',                            id: 'KK%3FA' },
   TASKS:                { name: 'Tasks',                                    id: 'x%3D%3BN' },

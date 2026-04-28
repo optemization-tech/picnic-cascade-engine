@@ -100,7 +100,9 @@ For every implementer reading this plan: this is the authoritative list of renam
 
 ### Studies DB (`cad23867-60c2-836f-a27d-0131c25b6dcd`)
 
-No renames. Note: the plan originally listed Studies' `Import Mode` as renamed to `[Do Not Edit] Import Mode` — Step 0a verification (2026-04-28) found Studies `Import Mode` (id `%3FhIH`, checkbox) was NOT renamed. Only Study Tasks' `Import Mode` (the rollup at id `UAXj`) carries the `[Do Not Edit]` prefix.
+| Old name | New name | Notion property ID | Type |
+|---|---|---|---|
+| Import Mode | `[Do Not Edit] Import Mode` | `%3FhIH` | checkbox |
 
 ### Study Blueprint DB (`8fe23867-60c2-83e9-a95d-01ade939f5c2`)
 
@@ -243,9 +245,8 @@ export const STUDIES_PROPS = Object.freeze({
   AUTOMATION_REPORTING: { name: 'Automation Reporting',  id: '%5BJmF' },
   CASCADE_QUEUE:        { name: 'Cascade Queue',         id: 'KK%3FA' },
   TASKS:                { name: 'Tasks',                 id: 'x%3D%3BN' },
-  // Note: Studies Import Mode was NOT renamed (Step 0a verified 2026-04-28).
-  // Only Study Tasks' Import Mode (the rollup-from-Studies) carries the prefix.
-  IMPORT_MODE:          { name: 'Import Mode',            id: '%3FhIH' },
+  // [Do Not Edit] family
+  IMPORT_MODE:          { name: '[Do Not Edit] Import Mode', id: '%3FhIH' },
 });
 
 export const BLUEPRINT_PROPS = Object.freeze({
