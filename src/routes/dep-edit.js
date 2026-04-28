@@ -18,13 +18,30 @@ function summarizeFailure(error) {
 }
 
 function buildActivityDetails({ parsed, result, error, noActionReason }) {
+  // Surface seed-task pre/post dates by finding the seed update inside the result.
+  // Falls back to webhook payload's refStart/refEnd for the originals (which the
+  // payload-first parser populates before the cascade computes anything).
+  const seedUpdate = result?.updates?.find?.((u) => u.taskId === parsed?.taskId);
   return {
-    subcase: result?.subcase || null,
-    reason: result?.reason || null,
-    downstreamCount: result?.downstreamCount ?? 0,
-    movedTaskIds: result?.movedTaskIds || [],
-    cycleDetected: Boolean(result?.diagnostics?.cycleDetected),
-    cycleTaskIds: result?.diagnostics?.cycleTaskIds || [],
+    // Standard shape consumed by ActivityLogService.detailLines() — populating these
+    // keys makes the rendered bullet section non-empty in the Notion Activity Log
+    // entry. Dep-edit doesn't have caps/residue, so crossChain stays zeroed.
+    movement: {
+      updatedCount: result?.updates?.length ?? 0,
+      movedTaskIds: result?.movedTaskIds || [],
+    },
+    sourceDates: {
+      originalStart: parsed?.refStart || null,
+      originalEnd: parsed?.refEnd || null,
+      modifiedStart: seedUpdate?.newStart || null,
+      modifiedEnd: seedUpdate?.newEnd || null,
+    },
+    crossChain: {
+      capHit: false,
+      residueCount: 0,
+      residueExamples: [],
+      clampedEdges: [],
+    },
     error: error
       ? {
         errorCode: error.code || null,
@@ -33,6 +50,16 @@ function buildActivityDetails({ parsed, result, error, noActionReason }) {
       }
       : { errorCode: null, errorMessage: null, phase: null },
     noActionReason: noActionReason || null,
+
+    // Dep-edit-specific fields. These live at the top level of details (not under
+    // a sub-object) so they appear in the raw JSON dump for forensics. detailLines()
+    // doesn't read them today; if PMs want subcase visible in bullets, lift them
+    // into detailLines() centrally.
+    subcase: result?.subcase || null,
+    reason: result?.reason || null,
+    downstreamCount: result?.downstreamCount ?? 0,
+    cycleDetected: Boolean(result?.diagnostics?.cycleDetected),
+    cycleTaskIds: result?.diagnostics?.cycleTaskIds || [],
   };
 }
 
@@ -74,6 +101,12 @@ function buildUpdateProperties(update, sourceTaskName, subcase) {
 async function processDepEdit(payload) {
   const parsed = parseWebhookPayload(payload);
   if (parsed.skip) return;
+
+  // Hoisted so the catch-block's logTerminalEvent can include cascade context
+  // when patchPages throws AFTER tightenSeedAndDownstream has computed updates.
+  // Without this, failure rows show subcase: null / movedTaskIds: [] even though
+  // the cascade actually computed work the patch failed to apply.
+  let result = null;
 
   // Defense-in-depth guards. The Notion automation should filter these out
   // (D5/D6 in the plan), but route-level checks ensure correctness even if
@@ -126,7 +159,7 @@ async function processDepEdit(payload) {
       return;
     }
 
-    const result = tightenSeedAndDownstream({ seedTaskId: parsed.taskId, tasks: allTasks });
+    result = tightenSeedAndDownstream({ seedTaskId: parsed.taskId, tasks: allTasks });
 
     if (result.subcase === 'no-op') {
       // Silent no-op (matches status-rollup's silent-when-idempotent pattern).
@@ -177,6 +210,7 @@ async function processDepEdit(payload) {
           parsed,
           status: 'failed',
           summary: summarizeFailure(error),
+          result,  // hoisted above the try; preserves cascade context if patchPages threw post-compute
           error,
         }),
         studyCommentService.postComment({
