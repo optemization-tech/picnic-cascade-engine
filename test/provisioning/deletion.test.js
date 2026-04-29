@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { deleteStudyTasks } from '../../src/provisioning/deletion.js';
+import { STUDY_TASKS_PROPS as ST } from '../../src/notion/property-names.js';
 
 function makeMockClient({ tasks = [] } = {}) {
   const client = {
@@ -30,7 +31,7 @@ describe('deleteStudyTasks', () => {
     expect(client.request).toHaveBeenCalledWith(
       'POST',
       `/databases/${studyTasksDbId}/query`,
-      { filter: { property: 'Study', relation: { contains: studyId } }, page_size: 100 },
+      { filter: { property: ST.STUDY.id, relation: { contains: studyId } }, page_size: 100 },
       { tracer: undefined },
     );
     expect(client.requestBatch).toHaveBeenCalledTimes(1);

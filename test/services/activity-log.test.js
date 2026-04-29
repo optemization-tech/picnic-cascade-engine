@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ActivityLogService } from '../../src/services/activity-log.js';
+import { ACTIVITY_LOG_PROPS as AL } from '../../src/notion/property-names.js';
 
 function makeService() {
   const notionClient = { request: vi.fn().mockResolvedValue({ id: 'page-123' }) };
@@ -38,16 +39,16 @@ describe('ActivityLogService', () => {
     expect(notionClient.request).toHaveBeenCalledWith('POST', '/pages', expect.objectContaining({
       parent: { database_id: 'db-activity' },
       properties: expect.objectContaining({
-        Summary: {
+        [AL.SUMMARY.id]: {
           rich_text: [{ type: 'text', text: { content: 'pull-left: Task One (4 updates)' } }],
         },
-        Status: { select: { name: 'Success' } },
-        Workflow: { select: { name: 'Date Cascade' } },
-        'Trigger Type': { select: { name: 'Automation' } },
-        'Cascade Mode': { select: { name: 'pull-left' } },
-        'Execution ID': { rich_text: [{ type: 'text', text: { content: 'exec-1' } }] },
-        Study: { relation: [{ id: 'study-1' }] },
-        'Study Tasks': { relation: [{ id: 'task-1' }] },
+        [AL.STATUS.id]: { select: { name: 'Success' } },
+        [AL.WORKFLOW.id]: { select: { name: 'Date Cascade' } },
+        [AL.TRIGGER_TYPE.id]: { select: { name: 'Automation' } },
+        [AL.CASCADE_MODE.id]: { select: { name: 'pull-left' } },
+        [AL.EXECUTION_ID.id]: { rich_text: [{ type: 'text', text: { content: 'exec-1' } }] },
+        [AL.STUDY.id]: { relation: [{ id: 'study-1' }] },
+        [AL.STUDY_TASKS.id]: { relation: [{ id: 'task-1' }] },
       }),
       children: expect.any(Array),
     }));
@@ -74,8 +75,8 @@ describe('ActivityLogService', () => {
       details: {},
     });
 
-    const first = notionClient.request.mock.calls[0][2].properties.Status.select.name;
-    const second = notionClient.request.mock.calls[1][2].properties.Status.select.name;
+    const first = notionClient.request.mock.calls[0][2].properties[AL.STATUS.id].select.name;
+    const second = notionClient.request.mock.calls[1][2].properties[AL.STATUS.id].select.name;
     expect(first).toBe('No Action');
     expect(second).toBe('Failed');
   });
@@ -104,7 +105,7 @@ describe('ActivityLogService', () => {
 
     expect(notionClient.request).toHaveBeenCalledTimes(1);
     const payload = notionClient.request.mock.calls[0][2];
-    expect(payload.properties['Tested by']).toEqual({
+    expect(payload.properties[AL.TESTED_BY.id]).toEqual({
       people: [{ id: 'person-user-id' }],
     });
   });
@@ -123,7 +124,7 @@ describe('ActivityLogService', () => {
 
     expect(notionClient.request).toHaveBeenCalledTimes(1);
     const payload = notionClient.request.mock.calls[0][2];
-    expect(payload.properties['Tested by']).toBeUndefined();
+    expect(payload.properties[AL.TESTED_BY.id]).toBeUndefined();
   });
 
   it('omits Tested by when triggeredByUserId is absent', async () => {
@@ -138,7 +139,7 @@ describe('ActivityLogService', () => {
 
     expect(notionClient.request).toHaveBeenCalledTimes(1);
     const payload = notionClient.request.mock.calls[0][2];
-    expect(payload.properties['Tested by']).toBeUndefined();
+    expect(payload.properties[AL.TESTED_BY.id]).toBeUndefined();
   });
 
   it('renders narrowRetrySuppressed line in body when present', async () => {
