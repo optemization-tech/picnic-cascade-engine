@@ -14,10 +14,17 @@
 
 import 'dotenv/config';
 import { parseDate, addBusinessDays, signedBDDelta, formatDate } from '../src/utils/business-days.js';
+import { BLUEPRINT_PROPS, findById } from '../src/notion/property-names.js';
 
 const BLUEPRINT_DB_ID = process.env.BLUEPRINT_V2_DB_ID || '08b23867-60c2-837b-8d9e-01b5fac3682e';
 const TOKEN = process.env.NOTION_TOKEN_1;
 const ANCHOR = parseDate('2027-01-01');
+
+// `Relative SDate Offset` / `Relative EDate Offset` are NOT in the constants
+// module — they're script-local writes that don't appear elsewhere in the
+// engine. Keep name-keyed inline per the U4 plan note.
+const REL_SDATE_OFFSET_NAME = 'Relative SDate Offset';
+const REL_EDATE_OFFSET_NAME = 'Relative EDate Offset';
 
 if (!TOKEN) {
   console.error('Missing NOTION_TOKEN_1 env var');
@@ -55,15 +62,15 @@ async function queryAll(dbId) {
 }
 
 function extractTask(page) {
-  const p = page.properties || {};
+  const props = page.properties || {};
   return {
     id: page.id,
-    name: p['Task Name']?.title?.[0]?.plain_text || page.id.substring(0, 8),
-    parentId: (p['Parent Task']?.relation || [])[0]?.id || null,
-    soff: p['SDate Offset']?.number,
-    eoff: p['EDate Offset']?.number,
-    existingRelSoff: p['Relative SDate Offset']?.number ?? null,
-    existingRelEoff: p['Relative EDate Offset']?.number ?? null,
+    name: findById(page, BLUEPRINT_PROPS.TASK_NAME)?.title?.[0]?.plain_text || page.id.substring(0, 8),
+    parentId: (findById(page, BLUEPRINT_PROPS.PARENT_TASK)?.relation || [])[0]?.id || null,
+    soff: findById(page, BLUEPRINT_PROPS.SDATE_OFFSET)?.number,
+    eoff: findById(page, BLUEPRINT_PROPS.EDATE_OFFSET)?.number,
+    existingRelSoff: props[REL_SDATE_OFFSET_NAME]?.number ?? null,
+    existingRelEoff: props[REL_EDATE_OFFSET_NAME]?.number ?? null,
   };
 }
 
@@ -143,8 +150,8 @@ async function main() {
       batch.map((p) =>
         notionRequest('PATCH', `/pages/${p.id}`, {
           properties: {
-            'Relative SDate Offset': { number: p.relativeSoff },
-            'Relative EDate Offset': { number: p.relativeEoff },
+            [REL_SDATE_OFFSET_NAME]: { number: p.relativeSoff },
+            [REL_EDATE_OFFSET_NAME]: { number: p.relativeEoff },
           },
         }),
       ),
@@ -163,8 +170,8 @@ async function main() {
   const spotCheck = patches.slice(0, 5);
   for (const p of spotCheck) {
     const page = await notionRequest('GET', `/pages/${p.id}`);
-    const relSoff = page.properties['Relative SDate Offset']?.number;
-    const relEoff = page.properties['Relative EDate Offset']?.number;
+    const relSoff = page.properties[REL_SDATE_OFFSET_NAME]?.number;
+    const relEoff = page.properties[REL_EDATE_OFFSET_NAME]?.number;
     const match = relSoff === p.relativeSoff && relEoff === p.relativeEoff;
     console.log(
       `  ${match ? '✓' : '✗'} ${p.name} (parent: ${p.parentName})` +
