@@ -1,3 +1,5 @@
+import { ACTIVITY_LOG_PROPS } from '../notion/property-names.js';
+
 function truncate(text, max = 2000) {
   if (!text) return '';
   const normalized = String(text);
@@ -134,31 +136,35 @@ export class ActivityLogService {
 
     const sourceDates = event.details?.sourceDates || {};
 
+    // Activity Log writes are id-keyed per D2b. Activity Log itself has no
+    // renames (per plan § Renamed Properties), but the constants module is
+    // the engine's full property surface and bare-string writes are gone
+    // everywhere except the documented reportStatus carve-out.
     const properties = {
-      Entry: { title: richText(toTitle(event.workflow, event.sourceTaskName)) },
-      Summary: { rich_text: richText(event.summary || 'No summary') },
-      Details: { rich_text: richText('See page body for diagnostics.') },
-      Status: { select: { name: statusName } },
-      Workflow: { select: { name: truncate(event.workflow || 'Unknown', 100) } },
-      'Trigger Type': { select: { name: truncate(event.triggerType || 'Unknown', 100) } },
-      'Cascade Mode': { select: { name: truncate(event.cascadeMode || 'N/A', 100) } },
-      'Execution ID': { rich_text: richText(event.executionId || 'N/A') },
+      [ACTIVITY_LOG_PROPS.ENTRY.id]: { title: richText(toTitle(event.workflow, event.sourceTaskName)) },
+      [ACTIVITY_LOG_PROPS.SUMMARY.id]: { rich_text: richText(event.summary || 'No summary') },
+      [ACTIVITY_LOG_PROPS.DETAILS.id]: { rich_text: richText('See page body for diagnostics.') },
+      [ACTIVITY_LOG_PROPS.STATUS.id]: { select: { name: statusName } },
+      [ACTIVITY_LOG_PROPS.WORKFLOW.id]: { select: { name: truncate(event.workflow || 'Unknown', 100) } },
+      [ACTIVITY_LOG_PROPS.TRIGGER_TYPE.id]: { select: { name: truncate(event.triggerType || 'Unknown', 100) } },
+      [ACTIVITY_LOG_PROPS.CASCADE_MODE.id]: { select: { name: truncate(event.cascadeMode || 'N/A', 100) } },
+      [ACTIVITY_LOG_PROPS.EXECUTION_ID.id]: { rich_text: richText(event.executionId || 'N/A') },
     };
 
-    if (event.sourceTaskId) properties['Study Tasks'] = { relation: [{ id: event.sourceTaskId }] };
-    if (event.studyId) properties.Study = { relation: [{ id: event.studyId }] };
+    if (event.sourceTaskId) properties[ACTIVITY_LOG_PROPS.STUDY_TASKS.id] = { relation: [{ id: event.sourceTaskId }] };
+    if (event.studyId) properties[ACTIVITY_LOG_PROPS.STUDY.id] = { relation: [{ id: event.studyId }] };
     // 'Tested by' — only set for real person IDs. Bot/integration user IDs
     // cause Notion 400 errors (wasting ~8s in retries with exponential backoff).
     if (event.triggeredByUserId && !event.editedByBot) {
-      properties['Tested by'] = { people: [{ id: event.triggeredByUserId }] };
+      properties[ACTIVITY_LOG_PROPS.TESTED_BY.id] = { people: [{ id: event.triggeredByUserId }] };
     }
     const totalMs = event.details?.timing?.totalMs;
-    if (typeof totalMs === 'number') properties['Duration (ms)'] = { number: totalMs };
+    if (typeof totalMs === 'number') properties[ACTIVITY_LOG_PROPS.DURATION_MS.id] = { number: totalMs };
     if (sourceDates.originalStart || sourceDates.originalEnd) {
-      properties['Original Dates'] = { date: { start: sourceDates.originalStart || sourceDates.originalEnd, end: sourceDates.originalEnd || null } };
+      properties[ACTIVITY_LOG_PROPS.ORIGINAL_DATES.id] = { date: { start: sourceDates.originalStart || sourceDates.originalEnd, end: sourceDates.originalEnd || null } };
     }
     if (sourceDates.modifiedStart || sourceDates.modifiedEnd) {
-      properties['Modified Dates'] = { date: { start: sourceDates.modifiedStart || sourceDates.modifiedEnd, end: sourceDates.modifiedEnd || null } };
+      properties[ACTIVITY_LOG_PROPS.MODIFIED_DATES.id] = { date: { start: sourceDates.modifiedStart || sourceDates.modifiedEnd, end: sourceDates.modifiedEnd || null } };
     }
 
     const payload = {

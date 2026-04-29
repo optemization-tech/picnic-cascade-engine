@@ -9,6 +9,7 @@ import { wireRemainingRelations } from '../provisioning/wire-relations.js';
 import { copyBlocks, prefetchTemplateBlocks } from '../provisioning/copy-blocks.js';
 import { flightTracker } from '../services/flight-tracker.js';
 import { withStudyLock } from '../services/study-lock.js';
+import { STUDIES_PROPS, STUDY_TASKS_PROPS } from '../notion/property-names.js';
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -37,7 +38,7 @@ async function processInception(body) {
     // Enable Import Mode — blocks date-cascade from firing during bulk creation
     tracer.startPhase('enableImportMode');
     await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-      properties: { 'Import Mode': { checkbox: true } },
+      properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: true } },
     }, { tracer });
     tracer.endPhase('enableImportMode');
 
@@ -55,7 +56,7 @@ async function processInception(body) {
       try {
         return await notionClient.queryDatabase(
           config.notion.studyTasksDbId,
-          { property: 'Study', relation: { contains: studyPageId } },
+          { property: STUDY_TASKS_PROPS.STUDY.id, relation: { contains: studyPageId } },
           1,
           { tracer },
         );
@@ -71,8 +72,15 @@ async function processInception(body) {
     ]);
     studyPage = fetchedStudyPage;
 
-    studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
-    const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start || null;
+    // Reshape study page properties into id-keyed map (D2b read pattern).
+    // Read 2 properties from the same page — one O(n) reshape beats two
+    // findById scans.
+    const studyPropsById = Object.create(null);
+    for (const value of Object.values(studyPage.properties || {})) {
+      if (value && value.id) studyPropsById[value.id] = value;
+    }
+    studyName = studyPropsById[STUDIES_PROPS.STUDY_NAME.id]?.title?.[0]?.text?.content || 'Unknown Study';
+    const contractSignDate = studyPropsById[STUDIES_PROPS.CONTRACT_SIGN_DATE.id]?.date?.start || null;
 
     // Fail-loud on empty Contract Sign Date — no silent "today" fallback.
     // Silent anchoring produces wrong dates across the whole study; post a
@@ -207,7 +215,7 @@ async function processInception(body) {
       tracer.startPhase('disableImportMode');
       try {
         return await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-          properties: { 'Import Mode': { checkbox: false } },
+          properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false } },
         }, { tracer });
       } finally {
         tracer.endPhase('disableImportMode');
@@ -300,7 +308,7 @@ async function processInception(body) {
     // Critical: always disable Import Mode — leaving it on blocks all cascades
     try {
       await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-        properties: { 'Import Mode': { checkbox: false } },
+        properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false } },
       }, { tracer });
     } catch (cleanupError) {
       console.warn('[inception] failed to disable Import Mode in finally:', cleanupError.message);

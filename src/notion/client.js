@@ -309,6 +309,17 @@ export class NotionClient {
 
   async reportStatus(studyId, level, message, { tracer } = {}) {
     const richText = buildReportingText(level, message);
+    // D2b carve-out (per plan): the only property writer in the codebase
+    // that uses a name-keyed payload instead of an ID-keyed payload. Cross-DB
+    // polymorphic — `studyId` here may be a Studies page or a Study Tasks
+    // page. Both DBs have an `Automation Reporting` rich_text property
+    // but they have different IDs (STUDIES_PROPS.AUTOMATION_REPORTING.id
+    // ≠ STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id). An ID-keyed write
+    // would 400 against the wrong DB. The shared property NAME is the
+    // load-bearing identifier here, so we accept the rename-vulnerability
+    // for this one helper. If either DB ever renames `Automation Reporting`,
+    // this is the call site to update; the validator
+    // (scripts/check-property-names.js) will surface the drift.
     return this.request('PATCH', `/pages/${studyId}`, {
       properties: {
         'Automation Reporting': { rich_text: richText },
