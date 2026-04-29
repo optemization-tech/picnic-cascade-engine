@@ -5,10 +5,16 @@ import {
   countBDInclusive,
   addBusinessDays,
 } from '../utils/business-days.js';
+import { STUDY_TASKS_PROPS, findById } from '../notion/property-names.js';
 
 /**
  * Parse Notion webhook payload into a normalized task edit object.
  * Mirrors WF-R Fetch & Validate behavior (payload-first extraction).
+ *
+ * Webhook `properties` arrives in the same shape as a page response —
+ * name-keyed at the top level, with each value carrying an `.id` field
+ * that is rename-stable. We pick by id (D2b read pattern) so the parser
+ * survives Notion property renames.
  */
 export function parseWebhookPayload(payload) {
   const body = payload?.body || payload || {};
@@ -24,31 +30,34 @@ export function parseWebhookPayload(payload) {
     return { skip: true, reason: 'No properties in webhook payload' };
   }
 
-  const dates = props['Dates']?.date || null;
+  // Fake "page" wrapper so findById's `page.properties` access shape works.
+  const page = { properties: props };
+
+  const dates = findById(page, STUDY_TASKS_PROPS.DATES)?.date || null;
   const hasDates = Boolean(dates?.start);
   const newStart = hasDates ? dates.start : null;
   let newEnd = hasDates ? (dates.end || dates.start) : null;
 
-  const refStart = props['Reference Start Date']?.date?.start || newStart;
-  const refEnd = props['Reference End Date']?.date?.start || newEnd;
+  const refStart = findById(page, STUDY_TASKS_PROPS.REF_START)?.date?.start || newStart;
+  const refEnd = findById(page, STUDY_TASKS_PROPS.REF_END)?.date?.start || newEnd;
 
-  const taskName = props['Task Name']?.title?.[0]?.text?.content
-    || props['Task Name']?.title?.[0]?.plain_text
-    || props['Name']?.title?.[0]?.text?.content
-    || props['Name']?.title?.[0]?.plain_text
+  const titleArr = findById(page, STUDY_TASKS_PROPS.TASK_NAME)?.title || [];
+  const taskName = titleArr[0]?.text?.content
+    || titleArr[0]?.plain_text
     || pageId.substring(0, 8);
 
-  const studyRel = props['Study']?.relation || [];
-  const parentRel = props['Parent Task']?.relation || [];
-  const subtaskRel = props['Subtask(s)']?.relation || [];
+  const studyRel = findById(page, STUDY_TASKS_PROPS.STUDY)?.relation || [];
+  const parentRel = findById(page, STUDY_TASKS_PROPS.PARENT_TASK)?.relation || [];
+  const subtaskRel = findById(page, STUDY_TASKS_PROPS.SUBTASKS)?.relation || [];
 
-  const status = props['Status']?.status?.name || '';
+  const status = findById(page, STUDY_TASKS_PROPS.STATUS)?.status?.name || '';
   // Import Mode can arrive as rollup boolean/array or direct checkbox.
-  const importModeRollup = props['Import Mode']?.rollup;
+  const importModeProp = findById(page, STUDY_TASKS_PROPS.IMPORT_MODE_ROLLUP);
+  const importModeRollup = importModeProp?.rollup;
   const importModeFromRollup = importModeRollup?.type === 'array'
     ? importModeRollup.array?.[0]?.checkbox === true
     : importModeRollup?.boolean === true;
-  const importMode = importModeFromRollup || props['Import Mode']?.checkbox === true;
+  const importMode = importModeFromRollup || importModeProp?.checkbox === true;
 
   let startDelta = 0;
   let endDelta = 0;

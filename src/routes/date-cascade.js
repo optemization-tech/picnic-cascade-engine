@@ -4,6 +4,7 @@ import { classify } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { buildReportingText } from '../utils/reporting.js';
+import { STUDIES_PROPS, STUDY_TASKS_PROPS } from '../notion/property-names.js';
 import {
   addBusinessDays,
   countBDInclusive,
@@ -140,8 +141,8 @@ async function applyError1SideEffects({ studyId, sourceTaskId, refStart, refEnd,
   if (studyId) {
     ops.push(notionClient.request('PATCH', `/pages/${studyId}`, {
       properties: {
-        'Import Mode': { checkbox: false },
-        'Automation Reporting': {
+        [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false },
+        [STUDIES_PROPS.AUTOMATION_REPORTING.id]: {
           rich_text: [{
             type: 'text',
             text: { content: DIRECT_PARENT_WARNING },
@@ -154,10 +155,10 @@ async function applyError1SideEffects({ studyId, sourceTaskId, refStart, refEnd,
 
   if (sourceTaskId && refStart && refEnd) {
     ops.push(notionClient.patchPage(sourceTaskId, {
-      'Dates': { date: { start: refStart, end: refEnd } },
-      'Reference Start Date': { date: { start: refStart } },
-      'Reference End Date': { date: { start: refEnd } },
-      'Automation Reporting': {
+      [STUDY_TASKS_PROPS.DATES.id]: { date: { start: refStart, end: refEnd } },
+      [STUDY_TASKS_PROPS.REF_START.id]: { date: { start: refStart } },
+      [STUDY_TASKS_PROPS.REF_END.id]: { date: { start: refEnd } },
+      [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
         rich_text: buildReportingText('warning', DIRECT_PARENT_REVERT_WARNING),
       },
     }, { tracer }));
@@ -169,10 +170,10 @@ async function applyError1SideEffects({ studyId, sourceTaskId, refStart, refEnd,
 
 function buildUpdateProperties(update, sourceTaskName, cascadeMode) {
   return {
-    'Dates': { date: { start: update.newStart, end: update.newEnd } },
-    'Reference Start Date': { date: { start: update.newReferenceStartDate || update.newStart } },
-    'Reference End Date': { date: { start: update.newReferenceEndDate || update.newEnd } },
-    'Automation Reporting': {
+    [STUDY_TASKS_PROPS.DATES.id]: { date: { start: update.newStart, end: update.newEnd } },
+    [STUDY_TASKS_PROPS.REF_START.id]: { date: { start: update.newReferenceStartDate || update.newStart } },
+    [STUDY_TASKS_PROPS.REF_END.id]: { date: { start: update.newReferenceEndDate || update.newEnd } },
+    [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
       rich_text: [{
         type: 'text',
         text: {

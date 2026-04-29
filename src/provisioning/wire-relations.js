@@ -6,6 +6,8 @@
  *   "Build remaining patches" — merge WF-2 (parents) + WF-3 (deps) logic
  */
 
+import { STUDY_TASKS_PROPS } from '../notion/property-names.js';
+
 // ── main export ────────────────────────────────────────────────────────────
 
 /**
@@ -34,7 +36,7 @@ export async function wireRemainingRelations(client, { idMapping, depTracking, p
     parentPatches.push({
       taskId: newTaskId,
       properties: {
-        'Parent Task': { relation: [{ id: newParentId }] },
+        [STUDY_TASKS_PROPS.PARENT_TASK.id]: { relation: [{ id: newParentId }] },
       },
     });
   }
@@ -62,7 +64,7 @@ export async function wireRemainingRelations(client, { idMapping, depTracking, p
     depPatches.push({
       taskId: newTaskId,
       properties: {
-        'Blocked by': { relation: allIds.map((id) => ({ id })) },
+        [STUDY_TASKS_PROPS.BLOCKED_BY.id]: { relation: allIds.map((id) => ({ id })) },
       },
     });
   }

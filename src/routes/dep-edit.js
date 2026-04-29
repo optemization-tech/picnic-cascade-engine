@@ -6,6 +6,7 @@ import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { cascadeQueue } from '../services/cascade-queue.js';
+import { STUDY_TASKS_PROPS } from '../notion/property-names.js';
 
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
@@ -83,10 +84,10 @@ async function logTerminalEvent({ parsed, status, summary, result, noActionReaso
 
 function buildUpdateProperties(update, sourceTaskName, subcase) {
   return {
-    'Dates': { date: { start: update.newStart, end: update.newEnd } },
-    'Reference Start Date': { date: { start: update.newStart } },
-    'Reference End Date': { date: { start: update.newEnd } },
-    'Automation Reporting': {
+    [STUDY_TASKS_PROPS.DATES.id]: { date: { start: update.newStart, end: update.newEnd } },
+    [STUDY_TASKS_PROPS.REF_START.id]: { date: { start: update.newStart } },
+    [STUDY_TASKS_PROPS.REF_END.id]: { date: { start: update.newEnd } },
+    [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
       rich_text: [{
         type: 'text',
         text: {

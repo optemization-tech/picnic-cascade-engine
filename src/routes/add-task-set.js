@@ -9,6 +9,20 @@ import { withStudyLock } from '../services/study-lock.js';
 import { fetchBlueprint, buildTaskTree, filterBlueprintSubtree } from '../provisioning/blueprint.js';
 import { createStudyTasks } from '../provisioning/create-tasks.js';
 import { wireRemainingRelations } from '../provisioning/wire-relations.js';
+import { STUDIES_PROPS, STUDY_TASKS_PROPS, findById } from '../notion/property-names.js';
+
+/**
+ * Reshape a Notion page's `properties` object into an id-keyed map (D2b).
+ * Helper used by hot loops below — beats calling findById per-property
+ * when N>50 pages × multiple reads each.
+ */
+function propsById(page) {
+  const map = Object.create(null);
+  for (const value of Object.values(page?.properties || {})) {
+    if (value && value.id) map[value.id] = value;
+  }
+  return map;
+}
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
   activityLogDbId: config.notion.activityLogDbId,
@@ -24,10 +38,11 @@ function resolveNextDeliveryNumber(existingTasks) {
   const pattern = /Data Delivery #(\d+)/;
 
   for (const page of existingTasks) {
-    const name =
-      page.properties?.['Task Name']?.title?.[0]?.text?.content ||
-      page.properties?.['Task Name']?.title?.[0]?.plain_text ||
-      '';
+    // Reshape per-page once (D2b); only read Task Name from this loop.
+    const taskName = findById(page, STUDY_TASKS_PROPS.TASK_NAME);
+    const name = taskName?.title?.[0]?.text?.content
+      || taskName?.title?.[0]?.plain_text
+      || '';
     const match = name.match(pattern);
     if (match) {
       const num = parseInt(match[1], 10);
@@ -63,12 +78,13 @@ function resolveTaskSetNumbers(existingTasks = [], filteredLevels) {
   const numbers = new Map();
   if (filteredLevels.length === 0 || filteredLevels[0].tasks.length === 0) return numbers;
 
-  // Build a count of existing production tasks per Template Source ID
+  // Build a count of existing production tasks per Template Source ID.
+  // Hot loop (per plan U2): read 1 property from each of N pages.
   const tsidCounts = {};
   for (const page of existingTasks) {
-    const tsid =
-      page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text ||
-      page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+    const tsidProp = findById(page, STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID);
+    const tsid = tsidProp?.rich_text?.[0]?.plain_text
+      || tsidProp?.rich_text?.[0]?.text?.content;
     if (tsid) tsidCounts[tsid] = (tsidCounts[tsid] || 0) + 1;
   }
 
@@ -126,7 +142,7 @@ async function processAddTaskSet(req) {
     // to be active when we arrive here. We just ensure it stays on.)
     tracer.startPhase('enableImportMode');
     await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-      properties: { 'Import Mode': { checkbox: true } },
+      properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: true } },
     }, { tracer });
     tracer.endPhase('enableImportMode');
 
@@ -146,7 +162,7 @@ async function processAddTaskSet(req) {
           fetchBlueprint(notionClient, config.notion.blueprintDbId, { tracer }),
           notionClient.queryDatabase(
             config.notion.studyTasksDbId,
-            { property: 'Study', relation: { contains: studyPageId } },
+            { property: STUDY_TASKS_PROPS.STUDY.id, relation: { contains: studyPageId } },
             100,
             { tracer },
           ),
@@ -170,8 +186,10 @@ async function processAddTaskSet(req) {
     const blueprintTasks = blueprintTasksRaw || [];
     const existingTasks = existingTasksRaw || [];
 
-    const contractSignDate = studyPage.properties?.['Contract Sign Date']?.date?.start || null;
-    studyName = studyPage.properties?.['Study Name (Internal)']?.title?.[0]?.text?.content || 'Unknown Study';
+    // Reshape the study page once (D2b); reads two properties below.
+    const studyPropsById = propsById(studyPage);
+    const contractSignDate = studyPropsById[STUDIES_PROPS.CONTRACT_SIGN_DATE.id]?.date?.start || null;
+    studyName = studyPropsById[STUDIES_PROPS.STUDY_NAME.id]?.title?.[0]?.text?.content || 'Unknown Study';
 
     // Fail-loud on empty Contract Sign Date — no silent "today" fallback.
     // Check happens BEFORE other guards (duplicate, missing subtree) because
@@ -308,11 +326,13 @@ async function processAddTaskSet(req) {
       }
     }
 
-    // Build templateId -> productionId mapping from existing tasks
+    // Build templateId -> productionId mapping from existing tasks.
+    // Hot loop (per plan U2): one read per page — findById is fine.
     const existingIdMapping = {};
     for (const page of existingTasks) {
-      const tsid = page.properties?.['Template Source ID']?.rich_text?.[0]?.plain_text
-        || page.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+      const tsidProp = findById(page, STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID);
+      const tsid = tsidProp?.rich_text?.[0]?.plain_text
+        || tsidProp?.rich_text?.[0]?.text?.content;
       if (tsid && page.id) {
         existingIdMapping[tsid] = page.id;
       }
@@ -336,9 +356,10 @@ async function processAddTaskSet(req) {
       if (existingProductionPageId) {
         // Best-effort name lookup for a useful error message.
         const existingPage = existingTasks.find((p) => p.id === existingProductionPageId);
+        const existingNameProp = existingPage ? findById(existingPage, STUDY_TASKS_PROPS.TASK_NAME) : null;
         const existingName =
-          existingPage?.properties?.['Task Name']?.title?.[0]?.plain_text
-          || existingPage?.properties?.['Task Name']?.title?.[0]?.text?.content
+          existingNameProp?.title?.[0]?.plain_text
+          || existingNameProp?.title?.[0]?.text?.content
           || 'this task';
         const duplicateSummary = `Cannot add '${existingName}' — it already exists in this study.`;
         await Promise.all([
@@ -391,10 +412,13 @@ async function processAddTaskSet(req) {
       const maxNum = nextNum - 1; // nextNum was resolved earlier
       const deliveryPattern = new RegExp(`Data Delivery #${maxNum}`);
 
-      // Find the parent task for the latest delivery
+      // Find the parent task for the latest delivery.
+      // Hot loop (per plan U2): reads 3 properties per page across N pages —
+      // reshape `page.properties` once via propsById helper.
       let latestDeliveryParentId = null;
       for (const page of existingTasks) {
-        const name = page.properties?.['Task Name']?.title?.[0]?.plain_text || '';
+        const byId = propsById(page);
+        const name = byId[STUDY_TASKS_PROPS.TASK_NAME.id]?.title?.[0]?.plain_text || '';
         if (deliveryPattern.test(name) && name.includes('Activities')) {
           latestDeliveryParentId = page.id;
           break;
@@ -410,10 +434,11 @@ async function processAddTaskSet(req) {
         // unique TSIDs, so TSID matching would be degenerate. See PR #18.
         const latestDates = {};
         for (const page of existingTasks) {
-          const parentRel = page.properties?.['Parent Task']?.relation || [];
+          const byId = propsById(page);
+          const parentRel = byId[STUDY_TASKS_PROPS.PARENT_TASK.id]?.relation || [];
           if (parentRel.some((r) => r.id === latestDeliveryParentId)) {
-            const name = page.properties?.['Task Name']?.title?.[0]?.plain_text || '';
-            const dates = page.properties?.['Dates']?.date;
+            const name = byId[STUDY_TASKS_PROPS.TASK_NAME.id]?.title?.[0]?.plain_text || '';
+            const dates = byId[STUDY_TASKS_PROPS.DATES.id]?.date;
             if (name && dates?.start) {
               const normalizedKey = name.trim().replace(/#\d+/g, `#${nextNum}`);
               latestDates[normalizedKey] = { start: dates.start, end: dates.end };
@@ -424,7 +449,7 @@ async function processAddTaskSet(req) {
         // Also grab the parent's own dates
         for (const page of existingTasks) {
           if (page.id === latestDeliveryParentId) {
-            const dates = page.properties?.['Dates']?.date;
+            const dates = findById(page, STUDY_TASKS_PROPS.DATES)?.date;
             if (dates?.start) {
               latestDates['__parent__'] = { start: dates.start, end: dates.end };
             }
@@ -509,7 +534,7 @@ async function processAddTaskSet(req) {
           renames.push({
             taskId: productionId,
             properties: {
-              'Task Name': { title: [{ type: 'text', text: { content: `${task._taskName} #${num}` } }] },
+              [STUDY_TASKS_PROPS.TASK_NAME.id]: { title: [{ type: 'text', text: { content: `${task._taskName} #${num}` } }] },
             },
           });
         }
@@ -539,7 +564,7 @@ async function processAddTaskSet(req) {
         tracer.startPhase('disableImportMode');
         try {
           return await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-            properties: { 'Import Mode': { checkbox: false } },
+            properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false } },
           }, { tracer });
         } finally {
           tracer.endPhase('disableImportMode');
@@ -635,7 +660,7 @@ async function processAddTaskSet(req) {
     // Critical: always disable Import Mode
     try {
       await notionClient.request('PATCH', `/pages/${studyPageId}`, {
-        properties: { 'Import Mode': { checkbox: false } },
+        properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false } },
       }, { tracer });
     } catch (cleanupError) {
       console.warn('[add-task-set] failed to disable Import Mode in finally:', cleanupError.message);

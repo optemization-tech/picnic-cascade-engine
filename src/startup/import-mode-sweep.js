@@ -9,6 +9,8 @@
  * error is caught and logged.
  */
 
+import { STUDIES_PROPS } from '../notion/property-names.js';
+
 /**
  * Query for studies with Import Mode stuck ON and disable it.
  * @param {import('../notion/client.js').NotionClient} notionClient
@@ -19,14 +21,14 @@ export async function sweepStuckImportMode(notionClient, studiesDbId) {
   try {
     const stuckStudies = await notionClient.queryDatabase(
       studiesDbId,
-      { property: 'Import Mode', checkbox: { equals: true } },
+      { property: STUDIES_PROPS.IMPORT_MODE.id, checkbox: { equals: true } },
     );
 
     let resetCount = 0;
     for (const study of stuckStudies) {
       try {
         await notionClient.patchPage(study.id, {
-          'Import Mode': { checkbox: false },
+          [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false },
         });
         resetCount++;
         console.warn(`[import-mode-sweep] Reset stuck Import Mode for study ${study.id}`);

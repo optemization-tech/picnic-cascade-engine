@@ -5,7 +5,7 @@
  * Ported from n8n Code nodes in PH1 Inception WF-1: Create & Wire.
  */
 
-const PARENT_RELATION_PROPERTY = 'Parent Task';
+import { BLUEPRINT_PROPS } from '../notion/property-names.js';
 
 /**
  * Fetch all Blueprint tasks from the Notion database (paginated).
@@ -24,16 +24,23 @@ export async function fetchBlueprint(client, blueprintDbId, { tracer } = {}) {
 
 /**
  * Parse a single Notion blueprint page into internal task fields.
+ *
+ * Hot path — called ~245 times per inception / add-task-set. Reshape
+ * page.properties into an id-keyed map once, then look up the three
+ * properties in O(1) instead of three O(n) findById scans per page.
  */
 function parseTask(page) {
-  const props = page.properties || {};
-  const parentRelation = props[PARENT_RELATION_PROPERTY]?.relation || [];
+  const propsById = Object.fromEntries(
+    Object.values(page?.properties || {}).map((p) => [p.id, p]),
+  );
+  const parentRelation = propsById[BLUEPRINT_PROPS.PARENT_TASK.id]?.relation || [];
   const parentId = parentRelation.length > 0 ? parentRelation[0].id : null;
-  const blockedByRelation = props['Blocked by']?.relation || [];
+  const blockedByRelation = propsById[BLUEPRINT_PROPS.BLOCKED_BY.id]?.relation || [];
   const blockedByIds = blockedByRelation.map((r) => r.id);
+  const taskNameProp = propsById[BLUEPRINT_PROPS.TASK_NAME.id];
   const taskName =
-    props['Task Name']?.title?.[0]?.text?.content ||
-    props['Task Name']?.title?.[0]?.plain_text ||
+    taskNameProp?.title?.[0]?.text?.content ||
+    taskNameProp?.title?.[0]?.plain_text ||
     'Untitled';
 
   return {
