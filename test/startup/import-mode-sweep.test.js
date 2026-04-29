@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sweepStuckImportMode } from '../../src/startup/import-mode-sweep.js';
+import { STUDIES_PROPS as S } from '../../src/notion/property-names.js';
 
 describe('sweepStuckImportMode', () => {
   let mockClient;
@@ -26,7 +27,7 @@ describe('sweepStuckImportMode', () => {
     expect(result).toEqual({ studiesFound: 0, studiesReset: 0 });
     expect(mockClient.queryDatabase).toHaveBeenCalledWith(
       'db-studies',
-      { property: 'Import Mode', checkbox: { equals: true } },
+      { property: S.IMPORT_MODE.id, checkbox: { equals: true } },
     );
     expect(mockClient.patchPage).not.toHaveBeenCalled();
 
@@ -52,10 +53,10 @@ describe('sweepStuckImportMode', () => {
     expect(result).toEqual({ studiesFound: 2, studiesReset: 2 });
     expect(mockClient.patchPage).toHaveBeenCalledTimes(2);
     expect(mockClient.patchPage).toHaveBeenCalledWith('study-aaa', {
-      'Import Mode': { checkbox: false },
+      [S.IMPORT_MODE.id]: { checkbox: false },
     });
     expect(mockClient.patchPage).toHaveBeenCalledWith('study-bbb', {
-      'Import Mode': { checkbox: false },
+      [S.IMPORT_MODE.id]: { checkbox: false },
     });
 
     // Verify structured JSON log

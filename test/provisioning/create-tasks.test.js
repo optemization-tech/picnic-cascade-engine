@@ -1,10 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createStudyTasks } from '../../src/provisioning/create-tasks.js';
+import {
+  STUDY_TASKS_PROPS as ST,
+  BLUEPRINT_PROPS as BP,
+} from '../../src/notion/property-names.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
  * Build a minimal task object matching the shape produced by buildTaskTree().
+ *
+ * Mock fixture is Blueprint-shaped — properties keyed by `.name`, with `.id`
+ * embedded inside each value so production's `findById` resolves correctly.
  */
 function taskEntry(id, name, {
   parentId = null,
@@ -28,18 +35,22 @@ function taskEntry(id, name, {
     _templateIcon: icon,
     _templateBlockedBy: blockedByIds,
     properties: {
-      'Task Name': { title: [{ text: { content: name } }] },
-      'Parent Task': { relation: parentId ? [{ id: parentId }] : [] },
-      'Blocked by': { relation: blockedByIds.map((bid) => ({ id: bid })) },
-      'SDate Offset': { number: sDateOffset },
-      'EDate Offset': { number: eDateOffset },
-      'Status': status ? { status: { name: status } } : { status: null },
-      'Owner': { people: owner },
-      'Tags': { multi_select: tags.map((t) => ({ name: t })) },
-      'Milestone': { multi_select: milestone.map((m) => ({ name: m })) },
-      'Owner Role': ownerRole ? { select: { name: ownerRole } } : { select: null },
-      'External Visibility': externalVisibility ? { select: { name: externalVisibility } } : { select: null },
-      'Task Instructions': { relation: taskInstructions.map((r) => ({ id: r })) },
+      [BP.TASK_NAME.name]:           { id: BP.TASK_NAME.id,           type: 'title',        title: [{ text: { content: name } }] },
+      [BP.PARENT_TASK.name]:         { id: BP.PARENT_TASK.id,         type: 'relation',     relation: parentId ? [{ id: parentId }] : [] },
+      [BP.BLOCKED_BY.name]:          { id: BP.BLOCKED_BY.id,          type: 'relation',     relation: blockedByIds.map((bid) => ({ id: bid })) },
+      [BP.SDATE_OFFSET.name]:        { id: BP.SDATE_OFFSET.id,        type: 'number',       number: sDateOffset },
+      [BP.EDATE_OFFSET.name]:        { id: BP.EDATE_OFFSET.id,        type: 'number',       number: eDateOffset },
+      // Note: 'Status' is on Study Tasks, but Blueprint pages can carry one too;
+      // production's blueprint-read uses these names — they're the same string in both DBs.
+      'Status':                      status ? { status: { name: status } } : { status: null },
+      [BP.OWNER.name]:               { id: BP.OWNER.id,               type: 'people',       people: owner },
+      [BP.TAGS.name]:                { id: BP.TAGS.id,                type: 'multi_select', multi_select: tags.map((t) => ({ name: t })) },
+      [BP.MILESTONE.name]:           { id: BP.MILESTONE.id,           type: 'multi_select', multi_select: milestone.map((m) => ({ name: m })) },
+      [BP.OWNER_ROLE.name]:          { id: BP.OWNER_ROLE.id,          type: 'select',       select: ownerRole ? { name: ownerRole } : null },
+      [BP.EXTERNAL_VISIBILITY.name]: { id: BP.EXTERNAL_VISIBILITY.id, type: 'select',       select: externalVisibility ? { name: externalVisibility } : null },
+      // Task Instructions is not a renamed property and not currently in the
+      // constants module's surface; leaving as bare string until follow-up adds it.
+      'Task Instructions':           { relation: taskInstructions.map((r) => ({ id: r })) },
     },
   };
 }
@@ -58,6 +69,10 @@ function buildLevels(...levelDefs) {
 /**
  * Create a mock client whose request() returns a fake Notion page with Template Source ID.
  * Keeps a log of all POST calls for assertion.
+ *
+ * After U2, production writes Template Source ID by `.id`, so the body
+ * inspection looks up by `[ST.TEMPLATE_SOURCE_ID.id]`. The echo-response is
+ * Notion-shaped (name-keyed with `.id` inside the value).
  */
 function mockClient({ createdPageIdFn } = {}) {
   let callCount = 0;
@@ -71,12 +86,14 @@ function mockClient({ createdPageIdFn } = {}) {
         postCalls.push(body);
         callCount++;
         // Echo back Template Source ID so content-based join works
-        const templateId = body.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+        const templateId = body.properties?.[ST.TEMPLATE_SOURCE_ID.id]?.rich_text?.[0]?.text?.content;
         const newId = createdPageIdFn ? createdPageIdFn(templateId, callCount) : `prod-${callCount}`;
         return {
           id: newId,
           properties: {
-            'Template Source ID': {
+            [ST.TEMPLATE_SOURCE_ID.name]: {
+              id: ST.TEMPLATE_SOURCE_ID.id,
+              type: 'rich_text',
               rich_text: [{ text: { content: templateId }, plain_text: templateId }],
             },
           },
@@ -113,10 +130,10 @@ describe('createStudyTasks — date calculation', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Dates'].date.start).toBe('2026-03-30');
-    expect(body.properties['Dates'].date.end).toBe('2026-04-06');
-    expect(body.properties['Reference Start Date'].date.start).toBe('2026-03-30');
-    expect(body.properties['Reference End Date'].date.start).toBe('2026-04-06');
+    expect(body.properties[ST.DATES.id].date.start).toBe('2026-03-30');
+    expect(body.properties[ST.DATES.id].date.end).toBe('2026-04-06');
+    expect(body.properties[ST.REF_START.id].date.start).toBe('2026-03-30');
+    expect(body.properties[ST.REF_END.id].date.start).toBe('2026-04-06');
   });
 
   it('uses business days (skips weekends)', async () => {
@@ -129,8 +146,8 @@ describe('createStudyTasks — date calculation', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Dates'].date.start).toBe('2026-04-06');
-    expect(body.properties['Dates'].date.end).toBe('2026-04-13');
+    expect(body.properties[ST.DATES.id].date.start).toBe('2026-04-06');
+    expect(body.properties[ST.DATES.id].date.end).toBe('2026-04-13');
   });
 
   it('snaps zero-offset weekend to next business day', async () => {
@@ -146,8 +163,8 @@ describe('createStudyTasks — date calculation', () => {
     });
 
     const body = client.postCalls[0];
-    expect(body.properties['Dates'].date.start).toBe('2026-04-06'); // Mon (snapped)
-    expect(body.properties['Dates'].date.end).toBe('2026-04-07'); // Tue (2 BDs from Sat)
+    expect(body.properties[ST.DATES.id].date.start).toBe('2026-04-06'); // Mon (snapped)
+    expect(body.properties[ST.DATES.id].date.end).toBe('2026-04-07'); // Tue (2 BDs from Sat)
   });
 });
 
@@ -162,22 +179,23 @@ describe('createStudyTasks — null stripping', () => {
 
     const body = client.postCalls[0];
     // Required properties are always present
-    expect(body.properties['Task Name']).toBeDefined();
-    expect(body.properties['Dates']).toBeDefined();
-    expect(body.properties['Study']).toBeDefined();
-    expect(body.properties['Template Source ID']).toBeDefined();
+    expect(body.properties[ST.TASK_NAME.id]).toBeDefined();
+    expect(body.properties[ST.DATES.id]).toBeDefined();
+    expect(body.properties[ST.STUDY.id]).toBeDefined();
+    expect(body.properties[ST.TEMPLATE_SOURCE_ID.id]).toBeDefined();
+    // Automation Reporting is the documented D2b carve-out — written by name.
     expect(body.properties['Automation Reporting']).toBeDefined();
 
     // Optional properties should NOT be present when empty
-    expect(body.properties['Status']).toBeUndefined();
-    expect(body.properties['Owner']).toBeUndefined();
-    expect(body.properties['Tags']).toBeUndefined();
-    expect(body.properties['Milestone']).toBeUndefined();
-    expect(body.properties['Owner Role']).toBeUndefined();
-    expect(body.properties['External Visibility']).toBeUndefined();
+    expect(body.properties[ST.STATUS.id]).toBeUndefined();
+    expect(body.properties[ST.OWNER.id]).toBeUndefined();
+    expect(body.properties[ST.TAGS.id]).toBeUndefined();
+    expect(body.properties[ST.MILESTONE.id]).toBeUndefined();
+    expect(body.properties[ST.OWNER_ROLE.id]).toBeUndefined();
+    expect(body.properties[ST.EXTERNAL_VISIBILITY.id]).toBeUndefined();
     expect(body.properties['Task Instructions']).toBeUndefined();
-    expect(body.properties['Blocked by']).toBeUndefined();
-    expect(body.properties['Parent Task']).toBeUndefined();
+    expect(body.properties[ST.BLOCKED_BY.id]).toBeUndefined();
+    expect(body.properties[ST.PARENT_TASK.id]).toBeUndefined();
   });
 
   it('includes optional properties when they have values', async () => {
@@ -198,12 +216,12 @@ describe('createStudyTasks — null stripping', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Status']).toEqual({ status: { name: 'Not Started' } });
-    expect(body.properties['Owner']).toEqual({ people: [{ object: 'user', id: 'user-1' }] });
-    expect(body.properties['Tags']).toEqual({ multi_select: [{ name: 'urgent' }, { name: 'launch' }] });
-    expect(body.properties['Milestone']).toEqual({ multi_select: [{ name: 'Phase 1' }] });
-    expect(body.properties['Owner Role']).toEqual({ select: { name: 'PM' } });
-    expect(body.properties['External Visibility']).toEqual({ select: { name: 'Visible' } });
+    expect(body.properties[ST.STATUS.id]).toEqual({ status: { name: 'Not Started' } });
+    expect(body.properties[ST.OWNER.id]).toEqual({ people: [{ object: 'user', id: 'user-1' }] });
+    expect(body.properties[ST.TAGS.id]).toEqual({ multi_select: [{ name: 'urgent' }, { name: 'launch' }] });
+    expect(body.properties[ST.MILESTONE.id]).toEqual({ multi_select: [{ name: 'Phase 1' }] });
+    expect(body.properties[ST.OWNER_ROLE.id]).toEqual({ select: { name: 'PM' } });
+    expect(body.properties[ST.EXTERNAL_VISIBILITY.id]).toEqual({ select: { name: 'Visible' } });
     expect(body.properties['Task Instructions']).toEqual({ relation: [{ id: 'instr-1' }] });
     expect(body.icon).toEqual({ type: 'emoji', emoji: '🚀' });
   });
@@ -214,7 +232,7 @@ describe('createStudyTasks — null stripping', () => {
 describe('createStudyTasks — null offset skipping', () => {
   it('skips tasks with null SDate Offset', async () => {
     const task = taskEntry('t1', 'Task 1');
-    task.properties['SDate Offset'] = { number: null };
+    task.properties[BP.SDATE_OFFSET.name] = { id: BP.SDATE_OFFSET.id, type: 'number', number: null };
     const levels = buildLevels([task]);
     const client = mockClient();
 
@@ -226,7 +244,7 @@ describe('createStudyTasks — null offset skipping', () => {
 
   it('skips tasks with null EDate Offset', async () => {
     const task = taskEntry('t1', 'Task 1');
-    task.properties['EDate Offset'] = { number: null };
+    task.properties[BP.EDATE_OFFSET.name] = { id: BP.EDATE_OFFSET.id, type: 'number', number: null };
     const levels = buildLevels([task]);
     const client = mockClient();
 
@@ -239,7 +257,7 @@ describe('createStudyTasks — null offset skipping', () => {
   it('creates tasks with valid offsets alongside skipped ones', async () => {
     const validTask = taskEntry('t1', 'Valid', { sDateOffset: 0, eDateOffset: 5 });
     const nullTask = taskEntry('t2', 'Null');
-    nullTask.properties['SDate Offset'] = { number: null };
+    nullTask.properties[BP.SDATE_OFFSET.name] = { id: BP.SDATE_OFFSET.id, type: 'number', number: null };
 
     const levels = buildLevels([validTask, nullTask]);
     const client = mockClient();
@@ -268,7 +286,7 @@ describe('createStudyTasks — dependency tracking', () => {
     const result = await createStudyTasks(client, levels, baseOptions);
 
     const depBody = client.postCalls[1];
-    expect(depBody.properties['Blocked by']).toBeUndefined();
+    expect(depBody.properties[ST.BLOCKED_BY.id]).toBeUndefined();
     expect(result.depTracking).toEqual([
       {
         templateId: 't-dep',
@@ -292,7 +310,7 @@ describe('createStudyTasks — dependency tracking', () => {
     });
 
     const depBody = client.postCalls[0];
-    expect(depBody.properties['Blocked by']).toEqual({
+    expect(depBody.properties[ST.BLOCKED_BY.id]).toEqual({
       relation: [{ id: 'prod-existing-task' }],
     });
     expect(result.depTracking).toEqual([
@@ -315,7 +333,7 @@ describe('createStudyTasks — dependency tracking', () => {
     const result = await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Blocked by']).toBeUndefined();
+    expect(body.properties[ST.BLOCKED_BY.id]).toBeUndefined();
     expect(result.depTracking).toEqual([
       {
         templateId: 't-dep',
@@ -341,7 +359,7 @@ describe('createStudyTasks — parent tracking', () => {
     const result = await createStudyTasks(client, levels, baseOptions);
 
     const childBody = client.postCalls[1];
-    expect(childBody.properties['Parent Task']).toBeUndefined();
+    expect(childBody.properties[ST.PARENT_TASK.id]).toBeUndefined();
     expect(result.parentTracking).toEqual([
       {
         templateId: 't-child',
@@ -364,7 +382,7 @@ describe('createStudyTasks — parent tracking', () => {
     });
 
     const body = client.postCalls[0];
-    expect(body.properties['Parent Task']).toEqual({
+    expect(body.properties[ST.PARENT_TASK.id]).toEqual({
       relation: [{ id: 'prod-existing-parent' }],
     });
     expect(result.parentTracking).toEqual([]);
@@ -402,7 +420,9 @@ describe('createStudyTasks — content-based ID accumulation', () => {
         return {
           id: 'prod-x',
           properties: {
-            'Template Source ID': {
+            [ST.TEMPLATE_SOURCE_ID.name]: {
+              id: ST.TEMPLATE_SOURCE_ID.id,
+              type: 'rich_text',
               rich_text: [{ plain_text: 'tpl-x' }],
             },
           },
@@ -513,7 +533,7 @@ describe('createStudyTasks — property mapping', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Study']).toEqual({ relation: [{ id: 'study-001' }] });
+    expect(body.properties[ST.STUDY.id]).toEqual({ relation: [{ id: 'study-001' }] });
   });
 
   it('sets parent database_id to studyTasksDbId', async () => {
@@ -533,7 +553,7 @@ describe('createStudyTasks — property mapping', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Template Source ID']).toEqual({
+    expect(body.properties[ST.TEMPLATE_SOURCE_ID.id]).toEqual({
       rich_text: [{ type: 'text', text: { content: 'tpl-abc-123' } }],
     });
   });
@@ -545,6 +565,7 @@ describe('createStudyTasks — property mapping', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
+    // Automation Reporting is the D2b carve-out — production writes by name.
     const reportingText = body.properties['Automation Reporting'].rich_text[0].text.content;
     expect(reportingText).toContain('Inception v4');
     expect(reportingText).toContain('abcdef12'); // first 8 chars of template ID
@@ -561,7 +582,7 @@ describe('createStudyTasks — property mapping', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Owner']).toEqual({
+    expect(body.properties[ST.OWNER.id]).toEqual({
       people: [
         { object: 'user', id: 'user-a' },
         { object: 'user', id: 'user-b' },
@@ -583,7 +604,7 @@ describe('createStudyTasks — extraTags merging', () => {
     });
 
     const body = client.postCalls[0];
-    expect(body.properties['Tags']).toEqual({
+    expect(body.properties[ST.TAGS.id]).toEqual({
       multi_select: [{ name: 'Manual Workstream / Item' }],
     });
   });
@@ -600,7 +621,7 @@ describe('createStudyTasks — extraTags merging', () => {
     });
 
     const body = client.postCalls[0];
-    expect(body.properties['Tags']).toEqual({
+    expect(body.properties[ST.TAGS.id]).toEqual({
       multi_select: [
         { name: 'blueprint-a' },
         { name: 'blueprint-b' },
@@ -622,7 +643,7 @@ describe('createStudyTasks — extraTags merging', () => {
 
     const body = client.postCalls[0];
     // "Manual Workstream / Item" appears exactly once, not twice.
-    expect(body.properties['Tags']).toEqual({
+    expect(body.properties[ST.TAGS.id]).toEqual({
       multi_select: [
         { name: 'Manual Workstream / Item' },
         { name: 'other' },
@@ -637,7 +658,7 @@ describe('createStudyTasks — extraTags merging', () => {
     await createStudyTasks(client, levels, { ...baseOptions, extraTags: [] });
 
     const body = client.postCalls[0];
-    expect(body.properties['Tags']).toBeUndefined();
+    expect(body.properties[ST.TAGS.id]).toBeUndefined();
   });
 
   it('defaults extraTags to [] when omitted from options (no regression on existing callers)', async () => {
@@ -650,7 +671,7 @@ describe('createStudyTasks — extraTags merging', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    expect(body.properties['Tags']).toEqual({
+    expect(body.properties[ST.TAGS.id]).toEqual({
       multi_select: [{ name: 'only-blueprint' }],
     });
   });
@@ -670,7 +691,7 @@ describe('createStudyTasks — extraTags merging', () => {
 
     expect(client.postCalls).toHaveLength(3);
     for (const body of client.postCalls) {
-      expect(body.properties['Tags']).toEqual({
+      expect(body.properties[ST.TAGS.id]).toEqual({
         multi_select: [{ name: 'Manual Workstream / Item' }],
       });
     }
@@ -732,11 +753,15 @@ describe('createStudyTasks — parallel page creation', () => {
     const client = {
       optimalBatchSize: 2,
       request: vi.fn(async (method, path, body) => {
-        const templateId = body.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+        const templateId = body.properties?.[ST.TEMPLATE_SOURCE_ID.id]?.rich_text?.[0]?.text?.content;
         return {
           id: `prod-${templateId}`,
           properties: {
-            'Template Source ID': { rich_text: [{ text: { content: templateId } }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: {
+              id: ST.TEMPLATE_SOURCE_ID.id,
+              type: 'rich_text',
+              rich_text: [{ text: { content: templateId } }],
+            },
           },
         };
       }),

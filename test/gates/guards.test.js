@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseWebhookPayload, isImportMode, isFrozen } from '../../src/gates/guards.js';
+import { STUDY_TASKS_PROPS as ST } from '../../src/notion/property-names.js';
 
 function buildPayload(overrides = {}) {
   return {
@@ -8,15 +9,15 @@ function buildPayload(overrides = {}) {
         id: 'task-1',
         last_edited_by: { id: 'user-1', type: 'person' },
         properties: {
-          'Task Name': { title: [{ text: { content: 'Task One' } }] },
-          'Dates': { date: { start: '2026-04-01', end: '2026-04-02' } },
-          'Reference Start Date': { date: { start: '2026-04-01' } },
-          'Reference End Date': { date: { start: '2026-04-02' } },
-          'Status': { status: { name: 'Not Started' } },
-          'Import Mode': { rollup: { type: 'boolean', boolean: false } },
-          'Study': { relation: [{ id: 'study-1' }] },
-          'Parent Task': { relation: [] },
-          'Subtask(s)': { relation: [] },
+          [ST.TASK_NAME.name]:           { id: ST.TASK_NAME.id,           type: 'title',    title: [{ text: { content: 'Task One' } }] },
+          [ST.DATES.name]:               { id: ST.DATES.id,               type: 'date',     date: { start: '2026-04-01', end: '2026-04-02' } },
+          [ST.REF_START.name]:           { id: ST.REF_START.id,           type: 'date',     date: { start: '2026-04-01' } },
+          [ST.REF_END.name]:             { id: ST.REF_END.id,             type: 'date',     date: { start: '2026-04-02' } },
+          [ST.STATUS.name]:              { id: ST.STATUS.id,              type: 'status',   status: { name: 'Not Started' } },
+          [ST.IMPORT_MODE_ROLLUP.name]:  { id: ST.IMPORT_MODE_ROLLUP.id,  type: 'rollup',   rollup: { type: 'boolean', boolean: false } },
+          [ST.STUDY.name]:               { id: ST.STUDY.id,               type: 'relation', relation: [{ id: 'study-1' }] },
+          [ST.PARENT_TASK.name]:         { id: ST.PARENT_TASK.id,         type: 'relation', relation: [] },
+          [ST.SUBTASKS.name]:            { id: ST.SUBTASKS.id,            type: 'relation', relation: [] },
           ...(overrides.properties || {}),
         },
       },
@@ -45,7 +46,11 @@ describe('guards parseWebhookPayload', () => {
   it('extracts import mode from rollup array', () => {
     const parsed = parseWebhookPayload(buildPayload({
       properties: {
-        'Import Mode': { rollup: { type: 'array', array: [{ checkbox: true }] } },
+        [ST.IMPORT_MODE_ROLLUP.name]: {
+          id: ST.IMPORT_MODE_ROLLUP.id,
+          type: 'rollup',
+          rollup: { type: 'array', array: [{ checkbox: true }] },
+        },
       },
     }));
     expect(parsed.importMode).toBe(true);
@@ -55,7 +60,11 @@ describe('guards parseWebhookPayload', () => {
   it('extracts import mode from direct checkbox', () => {
     const parsed = parseWebhookPayload(buildPayload({
       properties: {
-        'Import Mode': { checkbox: true },
+        [ST.IMPORT_MODE_ROLLUP.name]: {
+          id: ST.IMPORT_MODE_ROLLUP.id,
+          type: 'checkbox',
+          checkbox: true,
+        },
       },
     }));
     expect(parsed.importMode).toBe(true);
@@ -65,7 +74,7 @@ describe('guards parseWebhookPayload', () => {
   it('captures frozen status from payload', () => {
     const parsed = parseWebhookPayload(buildPayload({
       properties: {
-        Status: { status: { name: 'Done' } },
+        [ST.STATUS.name]: { id: ST.STATUS.id, type: 'status', status: { name: 'Done' } },
       },
     }));
     expect(parsed.status).toBe('Done');

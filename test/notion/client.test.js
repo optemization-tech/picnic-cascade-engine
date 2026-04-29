@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NotionClient } from '../../src/notion/client.js';
+import { STUDY_TASKS_PROPS as ST } from '../../src/notion/property-names.js';
 
 describe('NotionClient', () => {
   beforeEach(() => {
@@ -79,14 +80,14 @@ describe('NotionClient', () => {
       retry: { maxAttempts: 2, baseMs: 1 },
     });
     await client.patchPage('page-1', {
-      Status: { status: { name: 'Done' } },
+      [ST.STATUS.id]: { status: { name: 'Done' } },
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body).toEqual({
       properties: {
-        Status: { status: { name: 'Done' } },
+        [ST.STATUS.id]: { status: { name: 'Done' } },
       },
     });
   });
@@ -94,7 +95,7 @@ describe('NotionClient', () => {
   it('createPages preserves input order while distributing work across tokens', async () => {
     const fetchMock = vi.fn(async (url, options) => {
       const body = JSON.parse(options.body);
-      const templateId = body.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+      const templateId = body.properties?.[ST.TEMPLATE_SOURCE_ID.id]?.rich_text?.[0]?.text?.content;
       const delayMs = templateId === 'b' ? 1 : 10;
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       return {
@@ -114,8 +115,8 @@ describe('NotionClient', () => {
     });
 
     const pages = await client.createPages([
-      { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'a' } }] } } },
-      { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'b' } }] } } },
+      { properties: { [ST.TEMPLATE_SOURCE_ID.id]: { rich_text: [{ type: 'text', text: { content: 'a' } }] } } },
+      { properties: { [ST.TEMPLATE_SOURCE_ID.id]: { rich_text: [{ type: 'text', text: { content: 'b' } }] } } },
     ]);
 
     expect(pages.map((page) => page.id)).toEqual(['page-a', 'page-b']);
@@ -139,8 +140,8 @@ describe('NotionClient', () => {
     });
 
     const result = await client.patchPages([
-      { taskId: 'task-1', properties: { Status: { status: { name: 'Done' } } } },
-      { taskId: 'task-2', properties: { Status: { status: { name: 'In Progress' } } } },
+      { taskId: 'task-1', properties: { [ST.STATUS.id]: { status: { name: 'Done' } } } },
+      { taskId: 'task-2', properties: { [ST.STATUS.id]: { status: { name: 'In Progress' } } } },
     ]);
 
     expect(result).toEqual({
@@ -171,6 +172,7 @@ describe('NotionClient', () => {
     const call = fetchMock.mock.calls[0];
     expect(call[0]).toContain('/pages/study-1');
     const body = JSON.parse(call[1].body);
+    // reportStatus is the documented D2b carve-out: cross-DB writer keys by name.
     const rich = body.properties['Automation Reporting'].rich_text[0];
     expect(rich.text.content).toContain('❇️');
     expect(rich.text.content).toContain('Cascade complete');
@@ -443,7 +445,7 @@ describe('NotionClient', () => {
         retry: { maxAttempts: 3, baseMs: 1 },
       });
 
-      const result = await client.patchPage('page-1', { Status: { status: { name: 'Done' } } }, { tracer });
+      const result = await client.patchPage('page-1', { [ST.STATUS.id]: { status: { name: 'Done' } } }, { tracer });
       expect(result.id).toBe('page-1');
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(tracer.suppressedCalls).toBe(0);
@@ -503,7 +505,7 @@ describe('NotionClient', () => {
 
       // patchPage → PATCH /pages/:id (idempotent). Timeout cap still applies.
       await expect(
-        client.patchPage('page-1', { Status: { status: { name: 'Done' } } }, { tracer }),
+        client.patchPage('page-1', { [ST.STATUS.id]: { status: { name: 'Done' } } }, { tracer }),
       ).rejects.toThrow(/timeout/);
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(tracer.suppressedCalls).toBe(0);
@@ -542,7 +544,7 @@ describe('NotionClient', () => {
         retry: { maxAttempts: 3, baseMs: 1 },
       });
 
-      const result = await client.patchPage('page-1', { Status: { status: { name: 'Done' } } }, { tracer });
+      const result = await client.patchPage('page-1', { [ST.STATUS.id]: { status: { name: 'Done' } } }, { tracer });
       expect(result.id).toBe('page-1');
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(tracer.suppressedCalls).toBe(0);
@@ -578,7 +580,7 @@ describe('NotionClient', () => {
     it('all-success createPages returns page objects in input order', async () => {
       const fetchMock = vi.fn(async (url, options) => {
         const body = JSON.parse(options.body);
-        const templateId = body.properties?.['Template Source ID']?.rich_text?.[0]?.text?.content;
+        const templateId = body.properties?.[ST.TEMPLATE_SOURCE_ID.id]?.rich_text?.[0]?.text?.content;
         return {
           ok: true,
           status: 200, statusText: 'OK', headers: { get: () => null },
@@ -595,8 +597,8 @@ describe('NotionClient', () => {
       });
 
       const result = await client.createPages([
-        { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'a' } }] } } },
-        { properties: { 'Template Source ID': { rich_text: [{ type: 'text', text: { content: 'b' } }] } } },
+        { properties: { [ST.TEMPLATE_SOURCE_ID.id]: { rich_text: [{ type: 'text', text: { content: 'a' } }] } } },
+        { properties: { [ST.TEMPLATE_SOURCE_ID.id]: { rich_text: [{ type: 'text', text: { content: 'b' } }] } } },
       ], { tracer });
 
       expect(result.length).toBe(2);

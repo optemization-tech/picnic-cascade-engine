@@ -56,6 +56,10 @@ vi.mock('../../src/services/cascade-queue.js', () => ({
 }));
 
 import { handleUndoCascade } from '../../src/routes/undo-cascade.js';
+import {
+  STUDY_TASKS_PROPS as ST,
+  STUDIES_PROPS as S,
+} from '../../src/notion/property-names.js';
 
 function makeReqRes(body = {}) {
   const req = { body };
@@ -116,7 +120,7 @@ describe('undo-cascade route', () => {
       ([method, path, body]) =>
         method === 'PATCH' &&
         path === '/pages/study-1' &&
-        body?.properties?.['Import Mode']?.checkbox === false,
+        body?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     expect(importModeCalls).toHaveLength(1);
   });
@@ -148,10 +152,10 @@ describe('undo-cascade route', () => {
     expect(restoreCall[0].taskId).toBe('task-a'); // oldStart 2026-04-01
     expect(restoreCall[1].taskId).toBe('task-b'); // oldStart 2026-04-05
     const taskA = restoreCall.find((u) => u.taskId === 'task-a');
-    expect(taskA.properties['Dates']).toEqual({ date: { start: '2026-04-01', end: '2026-04-02' } });
-    expect(taskA.properties['Reference Start Date']).toEqual({ date: { start: '2026-04-01' } });
-    expect(taskA.properties['Reference End Date']).toEqual({ date: { start: '2026-04-02' } });
-    expect(taskA.properties['Last Modified By System']).toBeUndefined();
+    expect(taskA.properties[ST.DATES.id]).toEqual({ date: { start: '2026-04-01', end: '2026-04-02' } });
+    expect(taskA.properties[ST.REF_START.id]).toEqual({ date: { start: '2026-04-01' } });
+    expect(taskA.properties[ST.REF_END.id]).toEqual({ date: { start: '2026-04-02' } });
+    expect(taskA.properties[ST.LMBS.id]).toBeUndefined();
 
     // Success reported
     expect(mocks.mockClient.reportStatus).toHaveBeenCalledWith(
@@ -236,7 +240,7 @@ describe('undo-cascade route', () => {
       ([method, path, body]) =>
         method === 'PATCH' &&
         path === '/pages/study-1' &&
-        body?.properties?.['Import Mode']?.checkbox === false,
+        body?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     expect(importModeCalls).toHaveLength(2);
   });
@@ -262,7 +266,7 @@ describe('undo-cascade route', () => {
       ([method, path, body]) =>
         method === 'PATCH' &&
         path === '/pages/study-1' &&
-        body?.properties?.['Import Mode']?.checkbox === false,
+        body?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     expect(importModeCalls).toHaveLength(1);
   });

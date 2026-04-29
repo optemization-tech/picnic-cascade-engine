@@ -1,19 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import { fetchBlueprint, buildTaskTree, filterBlueprintSubtree } from '../../src/provisioning/blueprint.js';
+import { BLUEPRINT_PROPS as BP } from '../../src/notion/property-names.js';
 
 /**
  * Helper: build a minimal Notion page object resembling a Blueprint task.
+ *
+ * Mock fixtures key by `.name` (matches Notion's actual response shape) and
+ * embed `.id` inside each value so production's `findById` resolves correctly.
  */
 function blueprintPage(id, name, { parentId = null, blockedByIds = [], icon = null } = {}) {
   return {
     id,
     icon,
     properties: {
-      'Task Name': { title: [{ text: { content: name } }] },
-      'Parent Task': { relation: parentId ? [{ id: parentId }] : [] },
-      'Blocked by': { relation: blockedByIds.map((bid) => ({ id: bid })) },
-      'SDate Offset': { number: 0 },
-      'EDate Offset': { number: 0 },
+      [BP.TASK_NAME.name]:    { id: BP.TASK_NAME.id,    type: 'title',    title: [{ text: { content: name } }] },
+      [BP.PARENT_TASK.name]:  { id: BP.PARENT_TASK.id,  type: 'relation', relation: parentId ? [{ id: parentId }] : [] },
+      [BP.BLOCKED_BY.name]:   { id: BP.BLOCKED_BY.id,   type: 'relation', relation: blockedByIds.map((bid) => ({ id: bid })) },
+      [BP.SDATE_OFFSET.name]: { id: BP.SDATE_OFFSET.id, type: 'number',   number: 0 },
+      [BP.EDATE_OFFSET.name]: { id: BP.EDATE_OFFSET.id, type: 'number',   number: 0 },
     },
   };
 }
@@ -206,9 +210,9 @@ describe('buildTaskTree', () => {
       id: 't1',
       icon: null,
       properties: {
-        'Task Name': { title: [{ plain_text: 'Fallback Name' }] },
-        'Parent Task': { relation: [] },
-        'Blocked by': { relation: [] },
+        [BP.TASK_NAME.name]:   { id: BP.TASK_NAME.id,   type: 'title',    title: [{ plain_text: 'Fallback Name' }] },
+        [BP.PARENT_TASK.name]: { id: BP.PARENT_TASK.id, type: 'relation', relation: [] },
+        [BP.BLOCKED_BY.name]:  { id: BP.BLOCKED_BY.id,  type: 'relation', relation: [] },
       },
     };
 
@@ -221,9 +225,9 @@ describe('buildTaskTree', () => {
       id: 't1',
       icon: null,
       properties: {
-        'Task Name': { title: [] },
-        'Parent Task': { relation: [] },
-        'Blocked by': { relation: [] },
+        [BP.TASK_NAME.name]:   { id: BP.TASK_NAME.id,   type: 'title',    title: [] },
+        [BP.PARENT_TASK.name]: { id: BP.PARENT_TASK.id, type: 'relation', relation: [] },
+        [BP.BLOCKED_BY.name]:  { id: BP.BLOCKED_BY.id,  type: 'relation', relation: [] },
       },
     };
 
