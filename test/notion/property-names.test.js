@@ -131,3 +131,35 @@ describe('findById', () => {
     expect(found?.date?.start).toBe('2026-04-28');
   });
 });
+
+describe('cross-DB id coincidences (intentional, per Notion per-DB-uniqueness contract)', () => {
+  it('STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID and BLUEPRINT_PROPS.NOTION_ID share id kQjP', () => {
+    expect(STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID.id).toBe(BLUEPRINT_PROPS.NOTION_ID.id);
+    expect(STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID.id).toBe('kQjP');
+  });
+
+  it('STUDY_TASKS_PROPS.OWNER and BLUEPRINT_PROPS.OWNER share id but names differ (Owner asymmetry)', () => {
+    expect(STUDY_TASKS_PROPS.OWNER.id).toBe(BLUEPRINT_PROPS.OWNER.id);
+    expect(STUDY_TASKS_PROPS.OWNER.name).toBe('Owner');
+    expect(BLUEPRINT_PROPS.OWNER.name).toBe('[Do Not Edit] Owner');
+    expect(STUDY_TASKS_PROPS.OWNER.name).not.toBe(BLUEPRINT_PROPS.OWNER.name);
+  });
+});
+
+describe('deep freeze contract (rename-immunity guarantee)', () => {
+  it('STUDY_TASKS_PROPS group object is frozen', () => {
+    expect(Object.isFrozen(STUDY_TASKS_PROPS)).toBe(true);
+  });
+
+  it('inner property defs are also frozen — mutation throws in strict mode', () => {
+    expect(Object.isFrozen(STUDY_TASKS_PROPS.REF_START)).toBe(true);
+    expect(() => { STUDY_TASKS_PROPS.REF_START.name = 'corrupted'; }).toThrow(TypeError);
+    expect(STUDY_TASKS_PROPS.REF_START.name).toBe('[Do Not Edit] Reference Start Date');
+  });
+
+  it('all four DB groups deep-freeze their inner defs', () => {
+    expect(Object.isFrozen(STUDIES_PROPS.IMPORT_MODE)).toBe(true);
+    expect(Object.isFrozen(BLUEPRINT_PROPS.OWNER)).toBe(true);
+    expect(Object.isFrozen(ACTIVITY_LOG_PROPS.ENTRY)).toBe(true);
+  });
+});

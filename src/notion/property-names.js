@@ -25,6 +25,20 @@
  */
 
 /**
+ * Recursively freeze every nested object. `Object.freeze` is shallow — without
+ * this helper, `STUDY_TASKS_PROPS.REF_START.name = 'foo'` would silently succeed
+ * and corrupt the singleton. Per ce-code-review #71 (P2 finding).
+ */
+function deepFreeze(obj) {
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+      deepFreeze(value);
+    }
+  }
+  return Object.freeze(obj);
+}
+
+/**
  * Study Tasks DB (`40f23867-60c2-830e-aad6-8159ca69a8d6`).
  *
  * Renamed-to-prefixed (2026-04-28):
@@ -35,7 +49,7 @@
  * The provisioning code that copies Owner from Blueprint to Study Tasks must
  * read BLUEPRINT_PROPS.OWNER and write STUDY_TASKS_PROPS.OWNER.
  */
-export const STUDY_TASKS_PROPS = Object.freeze({
+export const STUDY_TASKS_PROPS = deepFreeze({
   // Title + identity
   TASK_NAME:           { name: 'Task Name',                                 id: 'title' },
   ID:                  { name: '[Do Not Edit] ID',                          id: 'mnjr' },
@@ -96,7 +110,7 @@ export const STUDY_TASKS_PROPS = Object.freeze({
  * the canonical state is `[Do Not Edit] Import Mode` to match the Study Tasks
  * rollup name.)
  */
-export const STUDIES_PROPS = Object.freeze({
+export const STUDIES_PROPS = deepFreeze({
   STUDY_NAME:           { name: 'Study Name (Internal)',                    id: 'title' },
   CONTRACT_SIGN_DATE:   { name: 'Contract Sign Date',                       id: 'KUl%5D' },
   CONTRACT_END_DATE:    { name: 'Contract End Date',                        id: 'f%5Bxi' },
@@ -152,7 +166,7 @@ export const STUDIES_PROPS = Object.freeze({
  * Provisioning copies Owner from Blueprint → Study Tasks; per-DB grouping
  * keeps the asymmetry obvious by construction.
  */
-export const BLUEPRINT_PROPS = Object.freeze({
+export const BLUEPRINT_PROPS = deepFreeze({
   TASK_NAME:           { name: 'Task Name',                                 id: 'title' },
 
   // Engine-touched (non-renamed)
@@ -191,7 +205,7 @@ export const BLUEPRINT_PROPS = Object.freeze({
  *
  * No renames; included for full property surface (R2 from plan).
  */
-export const ACTIVITY_LOG_PROPS = Object.freeze({
+export const ACTIVITY_LOG_PROPS = deepFreeze({
   ENTRY:           { name: 'Entry',                                          id: 'title' },
   SUMMARY:         { name: 'Summary',                                        id: 'AI%3A%7B' },
   DETAILS:         { name: 'Details',                                        id: 'wXQq' },
