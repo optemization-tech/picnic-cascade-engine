@@ -71,6 +71,10 @@ vi.mock('../../src/services/cascade-queue.js', () => ({
 }));
 
 import { handleDateCascade } from '../../src/routes/date-cascade.js';
+import {
+  STUDY_TASKS_PROPS as ST,
+  STUDIES_PROPS as S,
+} from '../../src/notion/property-names.js';
 
 function makeReqRes(body = {}) {
   return {
@@ -177,7 +181,7 @@ describe('date-cascade route safety', () => {
       expect.objectContaining({
         taskId: 'source',
         properties: expect.objectContaining({
-          Dates: { date: { start: '2026-04-06', end: '2026-04-06' } },
+          [ST.DATES.id]: { date: { start: '2026-04-06', end: '2026-04-06' } },
         }),
       }),
     ], expect.any(Object));
@@ -503,7 +507,7 @@ describe('date-cascade route safety', () => {
     expect(mocks.mockClient.patchPage).toHaveBeenCalledWith(
       'parent-1',
       expect.objectContaining({
-        Dates: { date: { start: '2026-05-06', end: '2026-07-01' } },
+        [ST.DATES.id]: { date: { start: '2026-05-06', end: '2026-07-01' } },
       }),
       expect.any(Object),
     );
@@ -557,8 +561,8 @@ describe('date-cascade route safety', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(mocks.mockClient.request).toHaveBeenCalledWith('PATCH', '/pages/study-1', {
       properties: {
-        'Import Mode': { checkbox: false },
-        'Automation Reporting': {
+        [S.IMPORT_MODE.id]: { checkbox: false },
+        [S.AUTOMATION_REPORTING.id]: {
           rich_text: [{
             type: 'text',
             text: { content: '⚠️ This task has subtasks — edit a subtask directly to shift dates and trigger cascading.' },
@@ -568,9 +572,9 @@ describe('date-cascade route safety', () => {
       },
     }, expect.any(Object));
     expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('source', expect.objectContaining({
-      'Dates': { date: { start: '2026-04-01', end: '2026-04-02' } },
-      'Reference Start Date': { date: { start: '2026-04-01' } },
-      'Reference End Date': { date: { start: '2026-04-02' } },
+      [ST.DATES.id]: { date: { start: '2026-04-01', end: '2026-04-02' } },
+      [ST.REF_START.id]: { date: { start: '2026-04-01' } },
+      [ST.REF_END.id]: { date: { start: '2026-04-02' } },
     }), expect.any(Object));
   });
 
@@ -632,9 +636,9 @@ describe('date-cascade route safety', () => {
       expect.objectContaining({ taskId: 'a' }),
     ], expect.any(Object));
     const patchPayload = mocks.mockClient.patchPages.mock.calls[0][0];
-    expect(patchPayload.every((u) => u.properties['Last Modified By System'] === undefined)).toBe(true);
+    expect(patchPayload.every((u) => u.properties[ST.LMBS.id] === undefined)).toBe(true);
     // Patch payload sorted by ascending start date (top-of-timeline first)
-    const starts = patchPayload.map((u) => u.properties['Dates'].date.start);
+    const starts = patchPayload.map((u) => u.properties[ST.DATES.id].date.start);
     for (let i = 1; i < starts.length; i++) {
       expect(starts[i] >= starts[i - 1]).toBe(true);
     }

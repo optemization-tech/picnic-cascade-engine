@@ -71,6 +71,10 @@ vi.mock('../../src/services/study-comment.js', () => ({
 
 import { handleAddTaskSet } from '../../src/routes/add-task-set.js';
 import { _resetStudyLocks } from '../../src/services/study-lock.js';
+import {
+  STUDY_TASKS_PROPS as ST,
+  STUDIES_PROPS as S,
+} from '../../src/notion/property-names.js';
 
 /**
  * Flush microtasks to let the detached void promise chain settle.
@@ -95,9 +99,9 @@ function mockStudyPage({ importMode = false, contractSignDate = '2026-01-15' } =
   return {
     id: 'study-1',
     properties: {
-      'Import Mode': { checkbox: importMode },
-      'Contract Sign Date': { date: { start: contractSignDate } },
-      'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+      [S.IMPORT_MODE.name]:        { id: S.IMPORT_MODE.id,        type: 'checkbox', checkbox: importMode },
+      [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',     date: { start: contractSignDate } },
+      [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title',    title: [{ text: { content: 'Test Study' } }] },
     },
   };
 }
@@ -196,8 +200,8 @@ describe('add-task-set route', () => {
     mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
     // Existing tasks with delivery numbers
     mocks.mockClient.queryDatabase.mockResolvedValue([
-      { properties: { 'Task Name': { title: [{ text: { content: 'Data Delivery #1 — Review' } }] } } },
-      { properties: { 'Task Name': { title: [{ text: { content: 'Data Delivery #2 — Review' } }] } } },
+      { properties: { [ST.TASK_NAME.name]: { id: ST.TASK_NAME.id, type: 'title', title: [{ text: { content: 'Data Delivery #1 — Review' } }] } } },
+      { properties: { [ST.TASK_NAME.name]: { id: ST.TASK_NAME.id, type: 'title', title: [{ text: { content: 'Data Delivery #2 — Review' } }] } } },
     ]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
     const filteredTask = { _templateId: 'bp-1', _taskName: 'Data Delivery #1', _templateBlockedBy: [] };
@@ -230,8 +234,8 @@ describe('add-task-set route', () => {
   it('happy path: creates tasks, wires relations, fires copy-blocks', async () => {
     mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
     mocks.fetchBlueprint.mockResolvedValue([
-      { id: 'bp-1', properties: { 'Task Name': { title: [{ text: { content: 'Parent Task' } }] } } },
-      { id: 'bp-2', properties: { 'Task Name': { title: [{ text: { content: 'Child Task' } }] } } },
+      { id: 'bp-1', properties: { [ST.TASK_NAME.name]: { id: ST.TASK_NAME.id, type: 'title', title: [{ text: { content: 'Parent Task' } }] } } },
+      { id: 'bp-2', properties: { [ST.TASK_NAME.name]: { id: ST.TASK_NAME.id, type: 'title', title: [{ text: { content: 'Child Task' } }] } } },
     ]);
     mocks.filterBlueprintSubtree.mockReturnValue([
       { level: 0, tasks: [{ _templateId: 'bp-1', _taskName: 'Parent Task' }], isLastLevel: false },
@@ -322,7 +326,7 @@ describe('add-task-set route', () => {
 
     // At least: enable Import Mode + disable in finally
     const importModeDisableCalls = patchCalls.filter(([, , body]) =>
-      body?.properties?.['Import Mode']?.checkbox === false,
+      body?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     expect(importModeDisableCalls.length).toBeGreaterThanOrEqual(1);
 
@@ -371,8 +375,8 @@ describe('add-task-set route', () => {
         {
           id: 'existing-tlf-1',
           properties: {
-            'Task Name': { title: [{ text: { content: 'TLF' } }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'TLF' } }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-tlf' }] },
           },
         },
       ]);
@@ -409,7 +413,7 @@ describe('add-task-set route', () => {
         [expect.objectContaining({
           taskId: 'prod-tlf-2',
           properties: {
-            'Task Name': { title: [{ type: 'text', text: { content: 'TLF #2' } }] },
+            [ST.TASK_NAME.id]: { title: [{ type: 'text', text: { content: 'TLF #2' } }] },
           },
         })],
         expect.any(Object),
@@ -449,7 +453,7 @@ describe('add-task-set route', () => {
         [expect.objectContaining({
           taskId: 'prod-tlf-1',
           properties: {
-            'Task Name': { title: [{ type: 'text', text: { content: 'TLF #1' } }] },
+            [ST.TASK_NAME.id]: { title: [{ type: 'text', text: { content: 'TLF #1' } }] },
           },
         })],
         expect.any(Object),
@@ -463,22 +467,22 @@ describe('add-task-set route', () => {
         {
           id: 'existing-tlf-1',
           properties: {
-            'Task Name': { title: [{ text: { content: 'TLF' } }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'TLF' } }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-tlf' }] },
           },
         },
         {
           id: 'existing-tlf-2',
           properties: {
-            'Task Name': { title: [{ text: { content: 'TLF #2' } }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'TLF #2' } }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-tlf' }] },
           },
         },
         {
           id: 'existing-csr-1',
           properties: {
-            'Task Name': { title: [{ text: { content: 'CSR' } }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-csr' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'CSR' } }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-csr' }] },
           },
         },
       ]);
@@ -519,13 +523,13 @@ describe('add-task-set route', () => {
           expect.objectContaining({
             taskId: 'prod-tlf-3',
             properties: {
-              'Task Name': { title: [{ type: 'text', text: { content: 'TLF #3' } }] },
+              [ST.TASK_NAME.id]: { title: [{ type: 'text', text: { content: 'TLF #3' } }] },
             },
           }),
           expect.objectContaining({
             taskId: 'prod-csr-2',
             properties: {
-              'Task Name': { title: [{ type: 'text', text: { content: 'CSR #2' } }] },
+              [ST.TASK_NAME.id]: { title: [{ type: 'text', text: { content: 'CSR #2' } }] },
             },
           }),
         ]),
@@ -540,8 +544,8 @@ describe('add-task-set route', () => {
         {
           id: 'existing-tlf-1',
           properties: {
-            'Task Name': { title: [{ text: { content: 'TLF' } }] },
-            'Template Source ID': { rich_text: [{ text: { content: 'bp-tlf' } }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'TLF' } }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ text: { content: 'bp-tlf' } }] },
           },
         },
       ]);
@@ -577,7 +581,7 @@ describe('add-task-set route', () => {
         [expect.objectContaining({
           taskId: 'prod-tlf-2',
           properties: {
-            'Task Name': { title: [{ type: 'text', text: { content: 'TLF #2' } }] },
+            [ST.TASK_NAME.id]: { title: [{ type: 'text', text: { content: 'TLF #2' } }] },
           },
         })],
         expect.any(Object),
@@ -618,7 +622,7 @@ describe('add-task-set route', () => {
     it('does not call patchPages for repeat-delivery buttons', async () => {
       mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
       mocks.mockClient.queryDatabase.mockResolvedValue([
-        { properties: { 'Task Name': { title: [{ text: { content: 'Data Delivery #1 — Review' } }] } } },
+        { properties: { [ST.TASK_NAME.name]: { id: ST.TASK_NAME.id, type: 'title', title: [{ text: { content: 'Data Delivery #1 — Review' } }] } } },
       ]);
       mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-dd' }]);
       const filteredTask = { _templateId: 'bp-dd', _taskName: 'Data Delivery #1', _templateBlockedBy: [] };
@@ -677,9 +681,9 @@ describe('add-task-set route', () => {
         {
           id: parentId,
           properties: {
-            'Task Name': { title: [{ text: { content: 'Data Delivery #2 Activities' }, plain_text: 'Data Delivery #2 Activities' }] },
-            'Dates': { date: { start: SHIFTED_PARENT_START, end: SHIFTED_PARENT_END } },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-dd2-parent' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'Data Delivery #2 Activities' }, plain_text: 'Data Delivery #2 Activities' }] },
+            [ST.DATES.name]:              { id: ST.DATES.id,              type: 'date',      date: { start: SHIFTED_PARENT_START, end: SHIFTED_PARENT_END } },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-dd2-parent' }] },
           },
         },
         // Delivery task — name contains "#2", this is the task that gets
@@ -687,20 +691,20 @@ describe('add-task-set route', () => {
         {
           id: 'dd2-delivery-id',
           properties: {
-            'Task Name': { title: [{ text: { content: 'Data Delivery #2' }, plain_text: 'Data Delivery #2' }] },
-            'Dates': { date: { start: SHIFTED_DELIVERY_START, end: SHIFTED_DELIVERY_END } },
-            'Parent Task': { relation: [{ id: parentId }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-delivery' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'Data Delivery #2' }, plain_text: 'Data Delivery #2' }] },
+            [ST.DATES.name]:              { id: ST.DATES.id,              type: 'date',      date: { start: SHIFTED_DELIVERY_START, end: SHIFTED_DELIVERY_END } },
+            [ST.PARENT_TASK.name]:        { id: ST.PARENT_TASK.id,        type: 'relation',  relation: [{ id: parentId }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-delivery' }] },
           },
         },
         // Repeat QC — no "#N" in the name, lookup already worked pre-fix.
         {
           id: 'dd2-qc-id',
           properties: {
-            'Task Name': { title: [{ text: { content: 'Repeat QC' }, plain_text: 'Repeat QC' }] },
-            'Dates': { date: { start: SHIFTED_QC_START, end: SHIFTED_QC_END } },
-            'Parent Task': { relation: [{ id: parentId }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-qc' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ text: { content: 'Repeat QC' }, plain_text: 'Repeat QC' }] },
+            [ST.DATES.name]:              { id: ST.DATES.id,              type: 'date',      date: { start: SHIFTED_QC_START, end: SHIFTED_QC_END } },
+            [ST.PARENT_TASK.name]:        { id: ST.PARENT_TASK.id,        type: 'relation',  relation: [{ id: parentId }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-qc' }] },
           },
         },
       ];
@@ -900,7 +904,7 @@ describe('add-task-set route', () => {
     const disableCalls = mocks.mockClient.request.mock.calls.filter(
       (call) => call[0] === 'PATCH'
         && call[1] === '/pages/study-1'
-        && call[2]?.properties?.['Import Mode']?.checkbox === false,
+        && call[2]?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     expect(disableCalls.length).toBeGreaterThanOrEqual(1);
   });
@@ -1036,8 +1040,8 @@ describe('add-task-set route', () => {
         {
           id: 'existing-leaf',
           properties: {
-            'Task Name': { title: [{ plain_text: 'Final Delivery Retrieval Wrap-Up Window' }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-leaf' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ plain_text: 'Final Delivery Retrieval Wrap-Up Window' }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-leaf' }] },
           },
         },
       ]);
@@ -1086,7 +1090,7 @@ describe('add-task-set route', () => {
       const disableCalls = mocks.mockClient.request.mock.calls.filter(
         (call) => call[0] === 'PATCH'
           && call[1] === '/pages/study-1'
-          && call[2]?.properties?.['Import Mode']?.checkbox === false,
+          && call[2]?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
       );
       expect(disableCalls.length).toBeGreaterThanOrEqual(1);
     });
@@ -1133,8 +1137,8 @@ describe('add-task-set route', () => {
         {
           id: 'existing-dd1',
           properties: {
-            'Task Name': { title: [{ plain_text: 'Data Delivery #1 — Review' }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-dd' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ plain_text: 'Data Delivery #1 — Review' }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-dd' }] },
           },
         },
       ]);
@@ -1174,8 +1178,8 @@ describe('add-task-set route', () => {
         {
           id: 'existing-tlf-1',
           properties: {
-            'Task Name': { title: [{ plain_text: 'TLF' }] },
-            'Template Source ID': { rich_text: [{ plain_text: 'bp-tlf' }] },
+            [ST.TASK_NAME.name]:          { id: ST.TASK_NAME.id,          type: 'title',     title: [{ plain_text: 'TLF' }] },
+            [ST.TEMPLATE_SOURCE_ID.name]: { id: ST.TEMPLATE_SOURCE_ID.id, type: 'rich_text', rich_text: [{ plain_text: 'bp-tlf' }] },
           },
         },
       ]);

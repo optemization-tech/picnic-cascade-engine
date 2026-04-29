@@ -51,6 +51,10 @@ vi.mock('../../src/services/activity-log.js', () => ({
 }));
 
 import { handleStatusRollup } from '../../src/routes/status-rollup.js';
+import {
+  STUDY_TASKS_PROPS as ST,
+  STUDIES_PROPS as S,
+} from '../../src/notion/property-names.js';
 
 // Helpers to flush the fire-and-forget async chain (handler returns 200
 // synchronously; processStatusRollup runs via flightTracker). We need enough
@@ -77,15 +81,15 @@ describe('status-rollup route', () => {
       .mockResolvedValueOnce({
         id: 'task-1',
         properties: {
-          'Parent Task': { relation: [{ id: 'parent-1' }] },
-          Study: { relation: [{ id: 'study-1' }] },
-          'Subtask(s)': { relation: [] },
-          'Task Name': { title: [{ plain_text: 'Task One' }] },
+          [ST.PARENT_TASK.name]: { id: ST.PARENT_TASK.id, type: 'relation', relation: [{ id: 'parent-1' }] },
+          [ST.STUDY.name]:       { id: ST.STUDY.id,       type: 'relation', relation: [{ id: 'study-1' }] },
+          [ST.SUBTASKS.name]:    { id: ST.SUBTASKS.id,    type: 'relation', relation: [] },
+          [ST.TASK_NAME.name]:   { id: ST.TASK_NAME.id,   type: 'title',    title: [{ plain_text: 'Task One' }] },
         },
       })
       .mockResolvedValueOnce({
         id: 'study-1',
-        properties: { 'Import Mode': { checkbox: true } },
+        properties: { [S.IMPORT_MODE.name]: { id: S.IMPORT_MODE.id, type: 'checkbox', checkbox: true } },
       });
     mocks.normalizeTask.mockReturnValue({
       id: 'task-1',
@@ -161,15 +165,15 @@ describe('status-rollup parent-direct snap-back', () => {
       .mockResolvedValueOnce({
         id: 'parent-1',
         properties: {
-          Study: { relation: [{ id: 'study-1' }] },
-          'Subtask(s)': { relation: [{ id: 'child-1' }, { id: 'child-2' }] },
-          'Status': { status: { name: parentStatus } },
-          'Task Name': { title: [{ plain_text: 'Sites Planning' }] },
+          [ST.STUDY.name]:     { id: ST.STUDY.id,     type: 'relation', relation: [{ id: 'study-1' }] },
+          [ST.SUBTASKS.name]:  { id: ST.SUBTASKS.id,  type: 'relation', relation: [{ id: 'child-1' }, { id: 'child-2' }] },
+          [ST.STATUS.name]:    { id: ST.STATUS.id,    type: 'status',   status: { name: parentStatus } },
+          [ST.TASK_NAME.name]: { id: ST.TASK_NAME.id, type: 'title',    title: [{ plain_text: 'Sites Planning' }] },
         },
       })
       .mockResolvedValueOnce({
         id: 'study-1',
-        properties: { 'Import Mode': { checkbox: importMode } },
+        properties: { [S.IMPORT_MODE.name]: { id: S.IMPORT_MODE.id, type: 'checkbox', checkbox: importMode } },
       });
     mocks.normalizeTask.mockImplementation((page) => {
       if (!page) return {};
@@ -198,11 +202,11 @@ describe('status-rollup parent-direct snap-back', () => {
 
     expect(mocks.mockClient.queryDatabase).toHaveBeenCalledWith(
       'db-study-tasks',
-      { property: 'Parent Task', relation: { contains: 'parent-1' } },
+      { property: ST.PARENT_TASK.id, relation: { contains: 'parent-1' } },
       100,
     );
     expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('parent-1', {
-      'Status': { status: { name: 'In Progress' } },
+      [ST.STATUS.id]: { status: { name: 'In Progress' } },
     });
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -235,7 +239,7 @@ describe('status-rollup parent-direct snap-back', () => {
     await flushAsync();
 
     expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('parent-1', {
-      'Status': { status: { name: 'Done' } },
+      [ST.STATUS.id]: { status: { name: 'Done' } },
     });
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -319,16 +323,16 @@ describe('status-rollup parent-direct snap-back', () => {
       .mockResolvedValueOnce({
         id: 'middle-parent',
         properties: {
-          Study: { relation: [{ id: 'study-1' }] },
-          'Parent Task': { relation: [{ id: 'grandparent' }] },
-          'Subtask(s)': { relation: [{ id: 'child-1' }] },
-          'Status': { status: { name: 'Done' } },
-          'Task Name': { title: [{ plain_text: 'Middle Parent' }] },
+          [ST.STUDY.name]:       { id: ST.STUDY.id,       type: 'relation', relation: [{ id: 'study-1' }] },
+          [ST.PARENT_TASK.name]: { id: ST.PARENT_TASK.id, type: 'relation', relation: [{ id: 'grandparent' }] },
+          [ST.SUBTASKS.name]:    { id: ST.SUBTASKS.id,    type: 'relation', relation: [{ id: 'child-1' }] },
+          [ST.STATUS.name]:      { id: ST.STATUS.id,      type: 'status',   status: { name: 'Done' } },
+          [ST.TASK_NAME.name]:   { id: ST.TASK_NAME.id,   type: 'title',    title: [{ plain_text: 'Middle Parent' }] },
         },
       })
       .mockResolvedValueOnce({
         id: 'study-1',
-        properties: { 'Import Mode': { checkbox: false } },
+        properties: { [S.IMPORT_MODE.name]: { id: S.IMPORT_MODE.id, type: 'checkbox', checkbox: false } },
       });
     mocks.normalizeTask.mockImplementation((page) => {
       if (!page) return {};
@@ -354,7 +358,7 @@ describe('status-rollup parent-direct snap-back', () => {
 
     // The middle parent gets patched from Done -> In Progress
     expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('middle-parent', {
-      'Status': { status: { name: 'In Progress' } },
+      [ST.STATUS.id]: { status: { name: 'In Progress' } },
     });
     // The grandparent is NOT patched (scope boundary -- documented limitation)
     expect(mocks.mockClient.patchPage).not.toHaveBeenCalledWith('grandparent', expect.anything());
@@ -402,21 +406,21 @@ describe('status-rollup leaf subtask -> parent rollup (existing behavior)', () =
       .mockResolvedValueOnce({
         id: 'task-1',
         properties: {
-          'Parent Task': { relation: [{ id: 'parent-1' }] },
-          Study: { relation: [{ id: 'study-1' }] },
-          'Subtask(s)': { relation: [] },
-          'Task Name': { title: [{ plain_text: 'Task One' }] },
+          [ST.PARENT_TASK.name]: { id: ST.PARENT_TASK.id, type: 'relation', relation: [{ id: 'parent-1' }] },
+          [ST.STUDY.name]:       { id: ST.STUDY.id,       type: 'relation', relation: [{ id: 'study-1' }] },
+          [ST.SUBTASKS.name]:    { id: ST.SUBTASKS.id,    type: 'relation', relation: [] },
+          [ST.TASK_NAME.name]:   { id: ST.TASK_NAME.id,   type: 'title',    title: [{ plain_text: 'Task One' }] },
         },
       })
       .mockResolvedValueOnce({
         id: 'study-1',
-        properties: { 'Import Mode': { checkbox: false } },
+        properties: { [S.IMPORT_MODE.name]: { id: S.IMPORT_MODE.id, type: 'checkbox', checkbox: false } },
       })
       .mockResolvedValueOnce({
         id: 'parent-1',
         properties: {
-          'Status': { status: { name: 'Not started' } },
-          'Task Name': { title: [{ plain_text: 'Parent One' }] },
+          [ST.STATUS.name]:    { id: ST.STATUS.id,    type: 'status', status: { name: 'Not started' } },
+          [ST.TASK_NAME.name]: { id: ST.TASK_NAME.id, type: 'title',  title: [{ plain_text: 'Parent One' }] },
         },
       });
     mocks.normalizeTask.mockImplementation((page) => {
@@ -440,7 +444,7 @@ describe('status-rollup leaf subtask -> parent rollup (existing behavior)', () =
     await flushAsync();
 
     expect(mocks.mockClient.patchPage).toHaveBeenCalledWith('parent-1', {
-      'Status': { status: { name: 'Done' } },
+      [ST.STATUS.id]: { status: { name: 'Done' } },
     });
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -466,13 +470,13 @@ describe('status-rollup leaf subtask -> parent rollup (existing behavior)', () =
       .mockResolvedValueOnce({
         id: 'task-1',
         properties: {
-          Study: { relation: [{ id: 'study-1' }] },
-          'Subtask(s)': { relation: [] },
+          [ST.STUDY.name]:    { id: ST.STUDY.id,    type: 'relation', relation: [{ id: 'study-1' }] },
+          [ST.SUBTASKS.name]: { id: ST.SUBTASKS.id, type: 'relation', relation: [] },
         },
       })
       .mockResolvedValueOnce({
         id: 'study-1',
-        properties: { 'Import Mode': { checkbox: false } },
+        properties: { [S.IMPORT_MODE.name]: { id: S.IMPORT_MODE.id, type: 'checkbox', checkbox: false } },
       });
     mocks.normalizeTask.mockReturnValue({
       id: 'task-1',

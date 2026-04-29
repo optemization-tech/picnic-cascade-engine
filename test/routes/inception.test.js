@@ -72,6 +72,11 @@ vi.mock('../../src/provisioning/copy-blocks.js', () => ({
 
 import { handleInception } from '../../src/routes/inception.js';
 import { _resetStudyLocks } from '../../src/services/study-lock.js';
+import {
+  STUDY_TASKS_PROPS as ST,
+  STUDIES_PROPS as S,
+  BLUEPRINT_PROPS as BP,
+} from '../../src/notion/property-names.js';
 
 function makeReqRes(body = {}) {
   const req = { body };
@@ -149,7 +154,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('extracts studyPageId from body.data.id (Notion automation format)', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
@@ -168,7 +173,7 @@ describe('inception route', () => {
       'PATCH',
       '/pages/study-from-data',
       expect.objectContaining({
-        properties: { 'Import Mode': { checkbox: true } },
+        properties: { [S.IMPORT_MODE.id]: { checkbox: true } },
       }),
       expect.any(Object),
     );
@@ -179,7 +184,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('reports error and returns when study already has tasks (double-inception guard)', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
 
@@ -209,7 +214,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('reports error when blueprint is empty', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([]);
@@ -247,7 +252,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('enables Import Mode at start and disables it at end', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
@@ -267,7 +272,7 @@ describe('inception route', () => {
     expect(requestCalls[0]).toEqual([
       'PATCH',
       '/pages/study-1',
-      { properties: { 'Import Mode': { checkbox: true } } },
+      { properties: { [S.IMPORT_MODE.id]: { checkbox: true } } },
       expect.any(Object),
     ]);
 
@@ -275,7 +280,7 @@ describe('inception route', () => {
     const disableCalls = requestCalls.filter(
       (call) => call[0] === 'PATCH'
         && call[1] === '/pages/study-1'
-        && call[2]?.properties?.['Import Mode']?.checkbox === false,
+        && call[2]?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     // At least one disable call (in-flow + finally)
     expect(disableCalls.length).toBeGreaterThanOrEqual(1);
@@ -286,7 +291,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('disables Import Mode in finally even when processing throws', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockRejectedValue(new Error('Notion API down'));
@@ -301,7 +306,7 @@ describe('inception route', () => {
     const disableCalls = requestCalls.filter(
       (call) => call[0] === 'PATCH'
         && call[1] === '/pages/study-1'
-        && call[2]?.properties?.['Import Mode']?.checkbox === false,
+        && call[2]?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     expect(disableCalls.length).toBeGreaterThanOrEqual(1);
 
@@ -320,14 +325,14 @@ describe('inception route', () => {
   it('runs the full inception pipeline on happy path', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
       properties: {
-        'Contract Sign Date': { date: { start: '2026-03-01' } },
-        'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+        [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',  date: { start: '2026-03-01' } },
+        [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title', title: [{ text: { content: 'Test Study' } }] },
       },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([
-      { id: 'bp-1', properties: { 'Task Name': { title: [{ text: { content: 'Task A' } }] } } },
-      { id: 'bp-2', properties: { 'Task Name': { title: [{ text: { content: 'Task B' } }] } } },
+      { id: 'bp-1', properties: { [BP.TASK_NAME.name]: { id: BP.TASK_NAME.id, type: 'title', title: [{ text: { content: 'Task A' } }] } } },
+      { id: 'bp-2', properties: { [BP.TASK_NAME.name]: { id: BP.TASK_NAME.id, type: 'title', title: [{ text: { content: 'Task B' } }] } } },
     ]);
     mocks.buildTaskTree.mockReturnValue([
       { level: 0, tasks: [{ _templateId: 'bp-1' }], isLastLevel: false },
@@ -405,8 +410,8 @@ describe('inception route', () => {
   it('prefetches and copies blocks after successful inception', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
       properties: {
-        'Contract Sign Date': { date: { start: '2026-03-01' } },
-        'Study Name (Internal)': { title: [{ text: { content: 'Acme Study' } }] },
+        [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',  date: { start: '2026-03-01' } },
+        [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title', title: [{ text: { content: 'Acme Study' } }] },
       },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
@@ -452,7 +457,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('logs to activity log with workflow "Inception"', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
@@ -483,7 +488,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('logs error to activity log when pipeline throws', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
@@ -531,8 +536,8 @@ describe('inception route', () => {
   it('does not post study comment on successful inception (comments are errors-only)', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
       properties: {
-        'Contract Sign Date': { date: { start: '2026-03-01' } },
-        'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+        [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',  date: { start: '2026-03-01' } },
+        [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title', title: [{ text: { content: 'Test Study' } }] },
       },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
@@ -558,7 +563,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('posts study comment when double-inception blocked', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
 
@@ -582,7 +587,7 @@ describe('inception route', () => {
     mocks.studyCommentService.postComment.mockRejectedValue(new Error('Comment API down'));
 
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([{ id: 'existing-task' }]);
 
@@ -606,7 +611,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   it('passes extraTags=[] to createStudyTasks (inception does not tag original subtree)', async () => {
     mocks.mockClient.getPage.mockResolvedValue({
-      properties: { 'Contract Sign Date': { date: { start: '2026-01-15' } } },
+      properties: { [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } } },
     });
     mocks.mockClient.queryDatabase.mockResolvedValue([]);
     mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
@@ -678,7 +683,7 @@ describe('inception route', () => {
     const disableCalls = mocks.mockClient.request.mock.calls.filter(
       (call) => call[0] === 'PATCH'
         && call[1] === '/pages/study-1'
-        && call[2]?.properties?.['Import Mode']?.checkbox === false,
+        && call[2]?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
     );
     expect(disableCalls.length).toBeGreaterThanOrEqual(1);
   });
@@ -705,8 +710,8 @@ describe('inception route', () => {
           order.push('call-1-end');
           return {
             properties: {
-              'Contract Sign Date': { date: { start: '2026-01-15' } },
-              'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+              [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',  date: { start: '2026-01-15' } },
+              [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title', title: [{ text: { content: 'Test Study' } }] },
             },
           };
         })
@@ -714,8 +719,8 @@ describe('inception route', () => {
           order.push('call-2-start');
           return {
             properties: {
-              'Contract Sign Date': { date: { start: '2026-01-15' } },
-              'Study Name (Internal)': { title: [{ text: { content: 'Test Study' } }] },
+              [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',  date: { start: '2026-01-15' } },
+              [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title', title: [{ text: { content: 'Test Study' } }] },
             },
           };
         });
@@ -774,8 +779,8 @@ describe('inception route', () => {
           order.push('study-A-end');
           return {
             properties: {
-              'Contract Sign Date': { date: { start: '2026-01-15' } },
-              'Study Name (Internal)': { title: [{ text: { content: 'Study A' } }] },
+              [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',  date: { start: '2026-01-15' } },
+              [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title', title: [{ text: { content: 'Study A' } }] },
             },
           };
         })
@@ -783,8 +788,8 @@ describe('inception route', () => {
           order.push('study-B-start');
           return {
             properties: {
-              'Contract Sign Date': { date: { start: '2026-01-15' } },
-              'Study Name (Internal)': { title: [{ text: { content: 'Study B' } }] },
+              [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date',  date: { start: '2026-01-15' } },
+              [S.STUDY_NAME.name]:         { id: S.STUDY_NAME.id,         type: 'title', title: [{ text: { content: 'Study B' } }] },
             },
           };
         });
