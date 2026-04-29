@@ -5,6 +5,7 @@ import { cascadeClient as notionClient, commentClient } from '../notion/clients.
 import { normalizeTask } from '../notion/properties.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { flightTracker } from '../services/flight-tracker.js';
+import { STUDIES_PROPS, STUDY_TASKS_PROPS, findById } from '../notion/property-names.js';
 // No StudyCommentService — status-rollup is a background child-triggered event, not user-facing.
 const activityLogService = new ActivityLogService({
   notionClient: commentClient,
@@ -31,11 +32,18 @@ async function processStatusRollup(payload) {
   if (!changedTask.studyId) return;
 
   // Import Mode skip applies to both the parent-direct branch and the
-  // subtask-triggered branch below.
+  // subtask-triggered branch below. Studies DB stores it as a checkbox.
   const studyPage = study || await notionClient.getPage(changedTask.studyId);
-  if (studyPage?.properties?.['Import Mode']?.checkbox === true) return;
+  if (findById(studyPage, STUDIES_PROPS.IMPORT_MODE)?.checkbox === true) return;
 
-  const hasSubtasks = (changedTaskPage?.properties?.['Subtask(s)']?.relation || []).length > 0;
+  // Hot-loop reshape (per plan U2): the changed task page is read for
+  // 2 properties below; reshape once.
+  const changedById = Object.create(null);
+  for (const value of Object.values(changedTaskPage?.properties || {})) {
+    if (value && value.id) changedById[value.id] = value;
+  }
+
+  const hasSubtasks = (changedById[STUDY_TASKS_PROPS.SUBTASKS.id]?.relation || []).length > 0;
 
   // Branch 1: parent-direct status edit. When the edited task has its own
   // subtasks, compute its status from those children and snap back if the
@@ -50,7 +58,7 @@ async function processStatusRollup(payload) {
     // Fetch the edited task's own children.
     const childrenPages = await notionClient.queryDatabase(
       config.notion.studyTasksDbId,
-      { property: 'Parent Task', relation: { contains: changedTask.id } },
+      { property: STUDY_TASKS_PROPS.PARENT_TASK.id, relation: { contains: changedTask.id } },
       100,
     );
 
@@ -69,12 +77,12 @@ async function processStatusRollup(payload) {
 
     const children = childrenPages.map(normalizeTask);
     const desiredStatus = mapRollupStatusToNotion(computeStatusRollup(children));
-    const currentStatus = changedTaskPage?.properties?.['Status']?.status?.name || 'Not started';
+    const currentStatus = changedById[STUDY_TASKS_PROPS.STATUS.id]?.status?.name || 'Not started';
 
     if (desiredStatus === currentStatus) return;
 
     await notionClient.patchPage(changedTask.id, {
-      'Status': { status: { name: desiredStatus } },
+      [STUDY_TASKS_PROPS.STATUS.id]: { status: { name: desiredStatus } },
     });
 
     await activityLogService.logTerminalEvent({
@@ -106,18 +114,24 @@ async function processStatusRollup(payload) {
   // Branch 2: leaf subtask -> parent rollup (existing behavior).
   if (!changedTask.parentId) return;
 
+  // Hot-loop reshape: parent-collection sweep reads 2 properties from `parent`.
   const [parent, siblingPages] = await Promise.all([
     notionClient.getPage(changedTask.parentId),
     notionClient.queryDatabase(
       config.notion.studyTasksDbId,
-      { property: 'Parent Task', relation: { contains: changedTask.parentId } },
+      { property: STUDY_TASKS_PROPS.PARENT_TASK.id, relation: { contains: changedTask.parentId } },
       100,
     ),
   ]);
 
-  const parentStatus = parent?.properties?.['Status']?.status?.name || 'Not started';
-  const parentName = parent?.properties?.['Task Name']?.title?.[0]?.text?.content
-    || parent?.properties?.['Task Name']?.title?.[0]?.plain_text
+  const parentById = Object.create(null);
+  for (const value of Object.values(parent?.properties || {})) {
+    if (value && value.id) parentById[value.id] = value;
+  }
+  const parentStatus = parentById[STUDY_TASKS_PROPS.STATUS.id]?.status?.name || 'Not started';
+  const parentTitleArr = parentById[STUDY_TASKS_PROPS.TASK_NAME.id]?.title || [];
+  const parentName = parentTitleArr[0]?.text?.content
+    || parentTitleArr[0]?.plain_text
     || changedTask.parentId.substring(0, 8);
 
   const siblings = siblingPages.map(normalizeTask);
@@ -126,7 +140,7 @@ async function processStatusRollup(payload) {
   if (desiredStatus === parentStatus) return;
 
   await notionClient.patchPage(changedTask.parentId, {
-    'Status': { status: { name: desiredStatus } },
+    [STUDY_TASKS_PROPS.STATUS.id]: { status: { name: desiredStatus } },
   });
 
   await activityLogService.logTerminalEvent({

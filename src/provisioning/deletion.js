@@ -10,8 +10,11 @@
  * changes between paginated requests.
  */
 
+import { STUDY_TASKS_PROPS } from '../notion/property-names.js';
+
 export async function deleteStudyTasks(client, { studyTasksDbId, studyId, tracer }) {
-  const filter = { property: 'Study', relation: { contains: studyId } };
+  // Filter clause uses property `.id` (D2b) — rename-immune.
+  const filter = { property: STUDY_TASKS_PROPS.STUDY.id, relation: { contains: studyId } };
   let totalArchived = 0;
 
   while (true) {

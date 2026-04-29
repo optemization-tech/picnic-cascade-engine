@@ -9,6 +9,7 @@
  */
 
 import { addBusinessDays, formatDate, parseDate } from '../utils/business-days.js';
+import { BLUEPRINT_PROPS, STUDY_TASKS_PROPS } from '../notion/property-names.js';
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -25,9 +26,22 @@ function timestamp() {
  *
  * Returns null if the task should be skipped (null offsets).
  * Also returns relation-tracking metadata used for the later patch phase.
+ *
+ * Hot-loop reshape (per plan U2): the Blueprint task is read for ~9 properties.
+ * Reshape `task.properties` into an id-keyed map once at function entry.
+ *
+ * Owner asymmetry: BLUEPRINT_PROPS.OWNER is the renamed `[Do Not Edit] Owner`;
+ * STUDY_TASKS_PROPS.OWNER is the un-renamed `Owner`. Per-DB grouping in the
+ * constants module makes the asymmetry obvious by construction — reads use
+ * BLUEPRINT_PROPS, writes use STUDY_TASKS_PROPS.
  */
 function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMapping, extraTags = [] }) {
   const props = task.properties || {};
+  const byId = Object.create(null);
+  for (const value of Object.values(props)) {
+    if (value && value.id) byId[value.id] = value;
+  }
+
   const templateId = task._templateId;
   const taskName = task._taskName;
 
@@ -39,8 +53,8 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
     startDateStr = task._overrideStartDate;
     endDateStr = task._overrideEndDate || task._overrideStartDate;
   } else {
-    const sDateOffset = props['SDate Offset']?.number;
-    const eDateOffset = props['EDate Offset']?.number;
+    const sDateOffset = byId[BLUEPRINT_PROPS.SDATE_OFFSET.id]?.number;
+    const eDateOffset = byId[BLUEPRINT_PROPS.EDATE_OFFSET.id]?.number;
 
     if (sDateOffset == null || eDateOffset == null) {
       return null; // skip — missing offset
@@ -73,57 +87,71 @@ function buildTaskBody(task, { anchorDate, studyPageId, studyTasksDbId, idMappin
   const templateParentId = task._templateParentId;
   const resolvedParentId = templateParentId ? (idMapping[templateParentId] || null) : null;
 
-  // ── Optional property extraction ────────────────────────────────────────
-  const assigneePeople = props['Owner']?.people || [];
+  // ── Optional property extraction (Blueprint reads) ──────────────────────
+  // Owner read uses BLUEPRINT_PROPS.OWNER (renamed) but write below uses
+  // STUDY_TASKS_PROPS.OWNER (NOT renamed). Per-DB asymmetry — guarded by
+  // construction via the per-DB constants groups.
+  const assigneePeople = byId[BLUEPRINT_PROPS.OWNER.id]?.people || [];
   const ownerValue = assigneePeople.length > 0
     ? assigneePeople.map((p) => ({ object: 'user', id: p.id }))
     : [];
+  // Task Instructions is intentionally out of the constants surface (per
+  // plan scope: only renamed + engine-touched system fields). Kept name-keyed
+  // here on both read and write because we don't depend on its rename
+  // stability today; if it ever joins the constants surface, flip both.
   const taskInstructionsRelation = props['Task Instructions']?.relation || [];
-  const tags = props['Tags']?.multi_select || [];
-  const milestone = props['Milestone']?.multi_select || [];
-  const assigneeRole = props['Owner Role']?.select;
-  const externalVisibility = props['External Visibility']?.select;
-  const status = props['Status']?.status;
+  const tags = byId[BLUEPRINT_PROPS.TAGS.id]?.multi_select || [];
+  const milestone = byId[BLUEPRINT_PROPS.MILESTONE.id]?.multi_select || [];
+  const assigneeRole = byId[BLUEPRINT_PROPS.OWNER_ROLE.id]?.select;
+  const externalVisibility = byId[BLUEPRINT_PROPS.EXTERNAL_VISIBILITY.id]?.select;
+  // Status is not in BLUEPRINT_PROPS (Blueprint has no Status property), but
+  // a task may carry one through some upstream merge. Defensively read from
+  // the byId map using the STUDY_TASKS_PROPS.STATUS.id, which is the
+  // identifier the reshape would use if Status appears in the source object.
+  const status = byId[STUDY_TASKS_PROPS.STATUS.id]?.status;
 
   // ── Log entry ───────────────────────────────────────────────────────────
-  const logEntry = `[${timestamp()}] Inception v4: created from Blueprint ${templateId.substring(0, 8)}, dates ${startDateStr}\u2192${endDateStr}`;
+  const logEntry = `[${timestamp()}] Inception v4: created from Blueprint ${templateId.substring(0, 8)}, dates ${startDateStr}→${endDateStr}`;
 
-  // ── Page body (with null stripping) ─────────────────────────────────────
+  // ── Page body (with null stripping) — Study Tasks writes by .id ─────────
+  // Writes are id-keyed against STUDY_TASKS_PROPS (the destination DB).
   const pageBody = {
     parent: { database_id: studyTasksDbId },
     properties: {
-      'Task Name': { title: [{ type: 'text', text: { content: taskName } }] },
-      'Dates': { date: { start: startDateStr, end: endDateStr } },
-      'Reference Start Date': { date: { start: startDateStr } },
-      'Reference End Date': { date: { start: endDateStr } },
-      'Study': { relation: [{ id: studyPageId }] },
-      'Template Source ID': { rich_text: [{ type: 'text', text: { content: templateId } }] },
-      'Automation Reporting': { rich_text: [{ type: 'text', text: { content: logEntry } }] },
+      [STUDY_TASKS_PROPS.TASK_NAME.id]: { title: [{ type: 'text', text: { content: taskName } }] },
+      [STUDY_TASKS_PROPS.DATES.id]: { date: { start: startDateStr, end: endDateStr } },
+      [STUDY_TASKS_PROPS.REF_START.id]: { date: { start: startDateStr } },
+      [STUDY_TASKS_PROPS.REF_END.id]: { date: { start: endDateStr } },
+      [STUDY_TASKS_PROPS.STUDY.id]: { relation: [{ id: studyPageId }] },
+      [STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID.id]: { rich_text: [{ type: 'text', text: { content: templateId } }] },
+      [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: { rich_text: [{ type: 'text', text: { content: logEntry } }] },
     },
   };
 
   // Conditional properties — only include if value exists (null stripping)
-  if (status) { pageBody.properties['Status'] = { status: { name: status.name } }; }
-  if (ownerValue.length > 0) { pageBody.properties['Owner'] = { people: ownerValue }; }
+  if (status) { pageBody.properties[STUDY_TASKS_PROPS.STATUS.id] = { status: { name: status.name } }; }
+  if (ownerValue.length > 0) { pageBody.properties[STUDY_TASKS_PROPS.OWNER.id] = { people: ownerValue }; }
   // Merge blueprint tags with caller-supplied extraTags (e.g., "Manual
   // Workstream / Item" on Additional TLF buttons). Dedup by name so a
   // blueprint tag coinciding with extraTags emits exactly once. No
   // post-create PATCH loop — merging happens at body-build time.
   const mergedTagNames = [...new Set([...tags.map((t) => t.name), ...extraTags])];
   if (mergedTagNames.length > 0) {
-    pageBody.properties['Tags'] = { multi_select: mergedTagNames.map((name) => ({ name })) };
+    pageBody.properties[STUDY_TASKS_PROPS.TAGS.id] = { multi_select: mergedTagNames.map((name) => ({ name })) };
   }
-  if (milestone.length > 0) { pageBody.properties['Milestone'] = { multi_select: milestone.map((m) => ({ name: m.name })) }; }
-  if (assigneeRole) { pageBody.properties['Owner Role'] = { select: { name: assigneeRole.name } }; }
-  if (externalVisibility) { pageBody.properties['External Visibility'] = { select: { name: externalVisibility.name } }; }
+  if (milestone.length > 0) { pageBody.properties[STUDY_TASKS_PROPS.MILESTONE.id] = { multi_select: milestone.map((m) => ({ name: m.name })) }; }
+  if (assigneeRole) { pageBody.properties[STUDY_TASKS_PROPS.OWNER_ROLE.id] = { select: { name: assigneeRole.name } }; }
+  if (externalVisibility) { pageBody.properties[STUDY_TASKS_PROPS.EXTERNAL_VISIBILITY.id] = { select: { name: externalVisibility.name } }; }
   if (taskInstructionsRelation.length > 0) {
+    // Task Instructions is not in the constants surface (see read note above).
+    // Kept name-keyed until promoted to STUDY_TASKS_PROPS.
     pageBody.properties['Task Instructions'] = { relation: taskInstructionsRelation.map((r) => ({ id: r.id })) };
   }
   if (resolvedBlockedByIds.length > 0) {
-    pageBody.properties['Blocked by'] = { relation: resolvedBlockedByIds.map((id) => ({ id })) };
+    pageBody.properties[STUDY_TASKS_PROPS.BLOCKED_BY.id] = { relation: resolvedBlockedByIds.map((id) => ({ id })) };
   }
   if (resolvedParentId) {
-    pageBody.properties['Parent Task'] = { relation: [{ id: resolvedParentId }] };
+    pageBody.properties[STUDY_TASKS_PROPS.PARENT_TASK.id] = { relation: [{ id: resolvedParentId }] };
   }
 
   // Icon (top-level, not inside properties)
@@ -172,8 +200,13 @@ function accumulateIdMappings(createdPages, entries, idMapping, depTracking, par
     const newId = created.id;
     let templateId = null;
 
-    // Content-based join: extract Template Source ID from the created page
-    const tsid = created.properties?.['Template Source ID'];
+    // Content-based join: extract Template Source ID from the created page.
+    // Reshape into id-keyed map so the lookup is rename-immune.
+    const createdById = Object.create(null);
+    for (const value of Object.values(created.properties || {})) {
+      if (value && value.id) createdById[value.id] = value;
+    }
+    const tsid = createdById[STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID.id];
     if (tsid?.rich_text?.[0]?.text?.content) {
       templateId = tsid.rich_text[0].text.content;
     } else if (tsid?.rich_text?.[0]?.plain_text) {

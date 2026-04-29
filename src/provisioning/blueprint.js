@@ -5,7 +5,7 @@
  * Ported from n8n Code nodes in PH1 Inception WF-1: Create & Wire.
  */
 
-const PARENT_RELATION_PROPERTY = 'Parent Task';
+import { BLUEPRINT_PROPS, findById } from '../notion/property-names.js';
 
 /**
  * Fetch all Blueprint tasks from the Notion database (paginated).
@@ -26,14 +26,14 @@ export async function fetchBlueprint(client, blueprintDbId, { tracer } = {}) {
  * Parse a single Notion blueprint page into internal task fields.
  */
 function parseTask(page) {
-  const props = page.properties || {};
-  const parentRelation = props[PARENT_RELATION_PROPERTY]?.relation || [];
+  const parentRelation = findById(page, BLUEPRINT_PROPS.PARENT_TASK)?.relation || [];
   const parentId = parentRelation.length > 0 ? parentRelation[0].id : null;
-  const blockedByRelation = props['Blocked by']?.relation || [];
+  const blockedByRelation = findById(page, BLUEPRINT_PROPS.BLOCKED_BY)?.relation || [];
   const blockedByIds = blockedByRelation.map((r) => r.id);
+  const taskNameProp = findById(page, BLUEPRINT_PROPS.TASK_NAME);
   const taskName =
-    props['Task Name']?.title?.[0]?.text?.content ||
-    props['Task Name']?.title?.[0]?.plain_text ||
+    taskNameProp?.title?.[0]?.text?.content ||
+    taskNameProp?.title?.[0]?.plain_text ||
     'Untitled';
 
   return {
