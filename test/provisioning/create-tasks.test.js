@@ -41,8 +41,8 @@ function taskEntry(id, name, {
       [BP.SDATE_OFFSET.name]:        { id: BP.SDATE_OFFSET.id,        type: 'number',       number: sDateOffset },
       [BP.EDATE_OFFSET.name]:        { id: BP.EDATE_OFFSET.id,        type: 'number',       number: eDateOffset },
       // Note: 'Status' is on Study Tasks, but Blueprint pages can carry one too;
-      // production's blueprint-read uses these names — they're the same string in both DBs.
-      'Status':                      status ? { status: { name: status } } : { status: null },
+      // production reads via STUDY_TASKS_PROPS.STATUS.id (id-keyed reshape), so embed `.id`.
+      [ST.STATUS.name]:              status ? { id: ST.STATUS.id, type: 'status', status: { name: status } } : { id: ST.STATUS.id, type: 'status', status: null },
       [BP.OWNER.name]:               { id: BP.OWNER.id,               type: 'people',       people: owner },
       [BP.TAGS.name]:                { id: BP.TAGS.id,                type: 'multi_select', multi_select: tags.map((t) => ({ name: t })) },
       [BP.MILESTONE.name]:           { id: BP.MILESTONE.id,           type: 'multi_select', multi_select: milestone.map((m) => ({ name: m })) },
@@ -183,8 +183,8 @@ describe('createStudyTasks — null stripping', () => {
     expect(body.properties[ST.DATES.id]).toBeDefined();
     expect(body.properties[ST.STUDY.id]).toBeDefined();
     expect(body.properties[ST.TEMPLATE_SOURCE_ID.id]).toBeDefined();
-    // Automation Reporting is the documented D2b carve-out — written by name.
-    expect(body.properties['Automation Reporting']).toBeDefined();
+    // Automation Reporting is written id-keyed in create-tasks (only client.reportStatus is the by-name carve-out).
+    expect(body.properties[ST.AUTOMATION_REPORTING.id]).toBeDefined();
 
     // Optional properties should NOT be present when empty
     expect(body.properties[ST.STATUS.id]).toBeUndefined();
@@ -565,8 +565,8 @@ describe('createStudyTasks — property mapping', () => {
     await createStudyTasks(client, levels, baseOptions);
 
     const body = client.postCalls[0];
-    // Automation Reporting is the D2b carve-out — production writes by name.
-    const reportingText = body.properties['Automation Reporting'].rich_text[0].text.content;
+    // Automation Reporting is written id-keyed in create-tasks (the by-name carve-out is client.reportStatus).
+    const reportingText = body.properties[ST.AUTOMATION_REPORTING.id].rich_text[0].text.content;
     expect(reportingText).toContain('Inception v4');
     expect(reportingText).toContain('abcdef12'); // first 8 chars of template ID
     expect(reportingText).toContain('2026-03-30');

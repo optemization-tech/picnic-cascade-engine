@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { wireRemainingRelations } from '../../src/provisioning/wire-relations.js';
+import { STUDY_TASKS_PROPS as ST } from '../../src/notion/property-names.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -47,7 +48,7 @@ describe('wireRemainingRelations — parent patching', () => {
     expect(updates).toHaveLength(1);
     expect(updates[0].taskId).toBe('prod-child');
     expect(updates[0].properties).toEqual({
-      'Parent Task': { relation: [{ id: 'prod-parent' }] },
+      [ST.PARENT_TASK.id]: { relation: [{ id: 'prod-parent' }] },
     });
   });
 
@@ -105,7 +106,7 @@ describe('wireRemainingRelations — dependency patching', () => {
     expect(updates).toHaveLength(1);
     expect(updates[0].taskId).toBe('prod-task');
     expect(updates[0].properties).toEqual({
-      'Blocked by': {
+      [ST.BLOCKED_BY.id]: {
         relation: [{ id: 'prod-blocker-a' }, { id: 'prod-blocker-b' }],
       },
     });
@@ -134,7 +135,7 @@ describe('wireRemainingRelations — dependency patching', () => {
     });
 
     expect(result.depsPatchedCount).toBe(1);
-    const relation = client.allUpdates[0].properties['Blocked by'].relation;
+    const relation = client.allUpdates[0].properties[ST.BLOCKED_BY.id].relation;
     expect(relation).toHaveLength(3);
     expect(relation).toEqual([
       { id: 'prod-b1' },
@@ -178,8 +179,8 @@ describe('wireRemainingRelations — mixed patches', () => {
     expect(client.allUpdates).toHaveLength(2);
 
     // Parent patch first, then dep patch
-    expect(client.allUpdates[0].properties['Parent Task']).toBeDefined();
-    expect(client.allUpdates[1].properties['Blocked by']).toBeDefined();
+    expect(client.allUpdates[0].properties[ST.PARENT_TASK.id]).toBeDefined();
+    expect(client.allUpdates[1].properties[ST.BLOCKED_BY.id]).toBeDefined();
   });
 });
 
@@ -337,7 +338,7 @@ describe('wireRemainingRelations — missing mappings', () => {
     });
 
     expect(result.depsPatchedCount).toBe(1);
-    const relation = client.allUpdates[0].properties['Blocked by'].relation;
+    const relation = client.allUpdates[0].properties[ST.BLOCKED_BY.id].relation;
     expect(relation).toEqual([{ id: 'prod-b1' }]);
   });
 });
@@ -368,7 +369,7 @@ describe('wireRemainingRelations — deduplication', () => {
     });
 
     expect(result.depsPatchedCount).toBe(1);
-    const relation = client.allUpdates[0].properties['Blocked by'].relation;
+    const relation = client.allUpdates[0].properties[ST.BLOCKED_BY.id].relation;
     // Should appear only once despite being in both arrays
     expect(relation).toEqual([{ id: 'prod-blocker' }]);
   });
@@ -395,7 +396,7 @@ describe('wireRemainingRelations — deduplication', () => {
     });
 
     expect(result.depsPatchedCount).toBe(1);
-    const relation = client.allUpdates[0].properties['Blocked by'].relation;
+    const relation = client.allUpdates[0].properties[ST.BLOCKED_BY.id].relation;
     const ids = relation.map((r) => r.id);
     // prod-b2 should appear only once
     expect(ids).toEqual(['prod-b1', 'prod-b2', 'prod-b3']);
