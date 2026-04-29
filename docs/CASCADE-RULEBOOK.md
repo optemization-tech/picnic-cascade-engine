@@ -71,8 +71,8 @@ date-cascade.js lines 147-149. If `startDelta === 0 && endDelta === 0`, the rout
 `isImportMode()` (guards.js line 94-96) checks `task.importMode === true`.
 
 Import Mode is extracted from the webhook payload (guards.js lines 47-51) from either:
-- A rollup (array or boolean type) on the `Import Mode` property
-- A direct checkbox on the `Import Mode` property
+- A rollup (array or boolean type) on the `[Do Not Edit] Import Mode` property (Study Tasks DB — rolls up from the parent study)
+- A direct checkbox on the `[Do Not Edit] Import Mode` property (Studies DB)
 
 When Import Mode is active, the route skips silently (date-cascade.js lines 151-154). No activity log entry.
 
@@ -226,7 +226,7 @@ The distinction from drag-left is the direction of the shared translation.
 
 **Notion automation filters** (defense in depth alongside the engine guards):
 - `Last edited by ≠ <bot integration users>` — prevents engine-write echo loops
-- `Reference Start Date is not empty` — prevents `delta = 0` silent no-ops on un-bootstrapped manual tasks (matches the `Fill Refs` precedent at ENGINE-BEHAVIOR-REFERENCE §11)
+- `[Do Not Edit] Reference Start Date is not empty` — prevents `delta = 0` silent no-ops on un-bootstrapped manual tasks (matches the `Fill Refs` precedent at ENGINE-BEHAVIOR-REFERENCE §11)
 - `Subtask(s) is empty` — parent-task exclusion (BL-H5g; see §4.2)
 - Watches `Blocked by` only, NOT `Blocking` — avoids Notion dual-sync double-fire on a single user edit
 
@@ -431,6 +431,6 @@ date-cascade.js lines 380-401: Errors are caught, reported to the study page (`r
 | **Blocking** | Downstream dependency edge. Inverse of Blocked by. |
 | **Seed** | Task(s) whose changes initiate a cascade pass. |
 | **Roll-up** | Parent dates derived from `min(child starts)` / `max(child ends)`. |
-| **Reference dates** | Stored `Reference Start Date` / `Reference End Date` -- the "before" snapshot for delta computation. |
-| **Import Mode** | Study-level flag that suppresses cascading during bulk date imports. |
-| **LMBS** | "Last Modified By System" -- debounce/echo detection in the cascade queue. |
+| **Reference dates** | Stored `[Do Not Edit] Reference Start Date` / `[Do Not Edit] Reference End Date` -- the "before" snapshot for delta computation. |
+| **Import Mode** | Study-level flag (`[Do Not Edit] Import Mode`) that suppresses cascading during bulk date imports. |
+| **LMBS** | `[Do Not Edit] Last Modified By System` -- debounce/echo detection in the cascade queue. |
