@@ -1,0 +1,28 @@
+/**
+ * PicnicHealth migration inputs — database IDs from docs/notion/DATABASE-SCHEMA.md
+ * and prompts/00-shared-csv-and-matching.md §9.
+ */
+export const MIGRATED_TASKS_DB_ID = process.env.MIGRATED_TASKS_DB_ID || 'aaa4397d-cd59-4441-a91c-e01885f9b59f';
+
+export const MIGRATED_STUDIES_DB_ID = process.env.MIGRATED_STUDIES_DB_ID || 'a75fd9ee-f39e-442c-b55c-3d1175fba7cb';
+
+/** Name-keyed writes for Migrated Tasks DB (schema not in property-names.js). */
+export const MIGRATED_TASK_PROP = {
+  NAME: 'Name',
+  STUDY: 'Study',
+  TASK_TYPE_TAGS: 'Task Type Tags',
+  MILESTONE: 'Milestone',
+  COMPLETED: 'Completed',
+  START_DATE: 'Start Date',
+  DUE_DATE: 'Due Date',
+  DATE_COMPLETED: 'Date Completed',
+  WORKSTREAM: 'Workstream',
+  ASSIGNEE: 'Assignee',
+  PRODUCTION_TASK: 'Production Task',
+};
+
+/** Migrated Studies DB property names (name-keyed). */
+export const MIGRATED_STUDIES_PROP = {
+  PRODUCTION_STUDY: 'Production Study',
+  MIGRATED_TASKS: 'Migrated Tasks',
+};

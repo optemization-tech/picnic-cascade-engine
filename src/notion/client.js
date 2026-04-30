@@ -205,6 +205,27 @@ export class NotionClient {
     return this.request('GET', `/pages/${pageId}`);
   }
 
+  async retrieveDatabase(databaseId) {
+    return this.request('GET', `/databases/${databaseId}`);
+  }
+
+  /**
+   * Paginate workspace users (people). Requires integration capability for user reads.
+   */
+  async listAllUsers({ tracer } = {}) {
+    const results = [];
+    let cursor;
+    for (;;) {
+      const qs = new URLSearchParams({ page_size: '100' });
+      if (cursor) qs.set('start_cursor', cursor);
+      const data = await this.request('GET', `/users?${qs}`, undefined, { tracer });
+      results.push(...(data.results || []));
+      if (!data.has_more) break;
+      cursor = data.next_cursor;
+    }
+    return results.filter((u) => u.type === 'person');
+  }
+
   async patchPage(pageId, properties, { tracer } = {}) {
     return this.request('PATCH', `/pages/${pageId}`, { properties }, { tracer });
   }

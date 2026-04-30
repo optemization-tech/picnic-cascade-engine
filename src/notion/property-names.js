@@ -139,7 +139,12 @@ export const STUDIES_PROPS = deepFreeze({
   TOTAL_ARR:            { name: 'Total ARR',                                id: 'WIfE' },
   TCV:                  { name: 'TCV (incl. pass-through)',                 id: 'xcW%5E' },
   CURRENT_CONTRACT_TERM:{ name: 'Current Contract Term (Months)',           id: '%5Bp~r' },
-  MIGRATED_STUDY:       { name: 'Migrated Study',                           id: 'rNDd' },
+  // PM-facing display name. The Studies DB property was renamed from
+  // `Migrated Study` → `Exported Study` while shipping the migrate-study
+  // webhook (the button lives on the Exported Studies DB row). Internal
+  // constant key stays MIGRATED_STUDY to minimize the rename blast radius;
+  // reads are id-keyed via findById, so display rename is rename-immune.
+  MIGRATED_STUDY:       { name: 'Exported Study',                            id: 'rNDd' },
   CREATED_TIME:         { name: 'Created time',                             id: 'vr%5Eh' },
 
   // Buttons (engine doesn't write these but they're part of the surface)
