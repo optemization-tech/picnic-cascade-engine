@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildMigrationPlan,
+  MigrateStudyGateError,
   runMigrateStudyPipeline,
 } from '../../src/migration/migrate-study-service.js';
 import { STUDIES_PROPS as S } from '../../src/notion/property-names.js';
@@ -58,6 +59,29 @@ describe('migrate-study-service', () => {
     vi.unstubAllEnvs();
   });
 
+  describe('MigrateStudyGateError', () => {
+    it('exposes studyPageId when constructed with one', () => {
+      const err = new MigrateStudyGateError('boom', { code: 'test' }, 'study-42');
+      expect(err.name).toBe('MigrateStudyGateError');
+      expect(err.message).toBe('boom');
+      expect(err.details).toEqual({ code: 'test' });
+      expect(err.studyPageId).toBe('study-42');
+    });
+
+    it('leaves studyPageId undefined for pre-resolution gates (two-arg signature)', () => {
+      // The pre-resolution `production_study_relation` gate uses this shape
+      // intentionally — Production Study isn't resolvable yet, so the catch
+      // falls back to the Exported Studies row.
+      const err = new MigrateStudyGateError('boom', { code: 'test' });
+      expect(err.studyPageId).toBeUndefined();
+    });
+
+    it('leaves studyPageId undefined when explicitly passed undefined', () => {
+      const err = new MigrateStudyGateError('boom', { code: 'test' }, undefined);
+      expect(err.studyPageId).toBeUndefined();
+    });
+  });
+
   describe('buildMigrationPlan', () => {
     const notionClient = {
       getPage: vi.fn(),
@@ -94,6 +118,27 @@ describe('migrate-study-service', () => {
       await expect(buildMigrationPlan(notionClient, 'exported-1', {})).rejects.toMatchObject({
         name: 'MigrateStudyGateError',
         details: { code: 'import_mode_on' },
+        studyPageId: 'study-1',
+      });
+    });
+
+    it('throws when Contract Sign Date is empty on the Production Study', async () => {
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') {
+          const page = studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+          page.properties[S.CONTRACT_SIGN_DATE.name] = prop('date', S.CONTRACT_SIGN_DATE.id, {
+            date: null,
+          });
+          return page;
+        }
+        return { properties: {} };
+      });
+
+      await expect(buildMigrationPlan(notionClient, 'exported-1', {})).rejects.toMatchObject({
+        name: 'MigrateStudyGateError',
+        details: { code: 'contract_sign_empty' },
+        studyPageId: 'study-1',
       });
     });
 
@@ -109,6 +154,30 @@ describe('migrate-study-service', () => {
       await expect(buildMigrationPlan(notionClient, 'exported-1', {})).rejects.toMatchObject({
         name: 'MigrateStudyGateError',
         details: { code: 'exported_study_relation_mismatch' },
+        studyPageId: 'study-1',
+      });
+    });
+
+    it('throws with studyPageId when Migrated Tasks relation is empty', async () => {
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') {
+          return exportedStudyFixture({ studyId: 'study-1', migratedTaskIds: [] });
+        }
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+        },
+      });
+      notionClient.queryDatabase.mockResolvedValue([]);
+
+      await expect(buildMigrationPlan(notionClient, 'exported-1', {})).rejects.toMatchObject({
+        name: 'MigrateStudyGateError',
+        details: { code: 'migrated_tasks_empty' },
+        studyPageId: 'study-1',
       });
     });
 
@@ -407,6 +476,155 @@ describe('migrate-study-service', () => {
 
       const reportTargets = notionClient.reportStatus.mock.calls.map((c) => c[0]);
       expect(reportTargets).toContain('exported-1');
+    });
+
+    it('routes post-resolution gate failure (study_tasks_low) to the Production Study — the gate observed in production', async () => {
+      // The study_tasks_low gate is what fired at 2026-04-30T14:58:24Z when the
+      // bug surfaced (Production Study had 0 Study Tasks; Inception not run).
+      // Override queryDatabase: first call returns Migrated Tasks (carryover OK),
+      // second call returns empty Study Tasks → study_tasks_low throws.
+      let queryCount = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        queryCount += 1;
+        if (queryCount === 1) {
+          return [
+            {
+              id: 'mt-1',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'T', text: { content: 'T' } }] },
+                'Production Task': { relation: [] },
+                Completed: { checkbox: false },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+          ];
+        }
+        return [];
+      });
+
+      await expect(
+        runMigrateStudyPipeline(
+          { data: { id: 'exported-1' } },
+          notionClient,
+          {
+            tracer: { set: vi.fn() },
+            studyCommentService,
+            triggeredByUserId: null,
+            editedByBot: false,
+            studyNameFallback: null,
+          },
+        ),
+      ).rejects.toMatchObject({ details: { code: 'study_tasks_low' }, studyPageId: 'study-1' });
+
+      const reportTargets = notionClient.reportStatus.mock.calls.map((c) => c[0]);
+      expect(reportTargets).toContain('study-1');
+      expect(reportTargets).not.toContain('exported-1');
+
+      const commentTargets = studyCommentService.postComment.mock.calls.map((c) => c[0]?.studyId);
+      expect(commentTargets).toContain('study-1');
+      expect(commentTargets).not.toContain('exported-1');
+    });
+
+    it('routes post-resolution gate failure (import_mode_on) to the Production Study', async () => {
+      // Override: Production Study has Import Mode already on.
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: true, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+
+      await expect(
+        runMigrateStudyPipeline(
+          { data: { id: 'exported-1' } },
+          notionClient,
+          {
+            tracer: { set: vi.fn() },
+            studyCommentService,
+            triggeredByUserId: null,
+            editedByBot: false,
+            studyNameFallback: null,
+          },
+        ),
+      ).rejects.toMatchObject({ details: { code: 'import_mode_on' }, studyPageId: 'study-1' });
+
+      const reportTargets = notionClient.reportStatus.mock.calls.map((c) => c[0]);
+      expect(reportTargets).toContain('study-1');
+      expect(reportTargets).not.toContain('exported-1');
+
+      const commentTargets = studyCommentService.postComment.mock.calls.map((c) => c[0]?.studyId);
+      expect(commentTargets).toContain('study-1');
+      expect(commentTargets).not.toContain('exported-1');
+    });
+
+    it('warns and continues when reportStatus rejects mid-catch (gate error still surfaces)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: true, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.reportStatus.mockRejectedValueOnce(new Error('Notion 400: property missing'));
+
+      await expect(
+        runMigrateStudyPipeline(
+          { data: { id: 'exported-1' } },
+          notionClient,
+          {
+            tracer: { set: vi.fn() },
+            studyCommentService,
+            triggeredByUserId: null,
+            editedByBot: false,
+            studyNameFallback: null,
+          },
+        ),
+      ).rejects.toMatchObject({ details: { code: 'import_mode_on' } });
+
+      // The swallow-warn is the load-bearing assertion: no longer a silent .catch(() => {}).
+      const warnCall = warnSpy.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('[migrate-study]') && call[0].includes('reportStatus'),
+      );
+      expect(warnCall).toBeTruthy();
+      expect(warnCall.join(' ')).toContain('study-1');
+      expect(warnCall.join(' ')).toContain('import_mode_on');
+
+      // postComment still fires even when reportStatus rejected.
+      expect(studyCommentService.postComment).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+
+    it('warns and continues when postComment rejects mid-catch (gate error still surfaces)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: true, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      studyCommentService.postComment.mockRejectedValueOnce(new Error('study-comment failed'));
+
+      await expect(
+        runMigrateStudyPipeline(
+          { data: { id: 'exported-1' } },
+          notionClient,
+          {
+            tracer: { set: vi.fn() },
+            studyCommentService,
+            triggeredByUserId: null,
+            editedByBot: false,
+            studyNameFallback: null,
+          },
+        ),
+      ).rejects.toMatchObject({ details: { code: 'import_mode_on' } });
+
+      const warnCall = warnSpy.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('[migrate-study]') && call[0].includes('postComment'),
+      );
+      expect(warnCall).toBeTruthy();
+      expect(warnCall.join(' ')).toContain('study-1');
+
+      warnSpy.mockRestore();
     });
   });
 });

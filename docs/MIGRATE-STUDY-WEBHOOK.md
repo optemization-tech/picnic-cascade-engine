@@ -88,6 +88,8 @@ Configurable thresholds (defaults in `src/migration/thresholds.js`; override via
 
 If any gate fails: **Automation Reporting** on the Study shows an error and a Study comment is posted with the failure summary.
 
+**Reporting target by gate:** Every post-resolution gate (Import Mode, Contract Sign Date, round-trip relation, schema, Migrated Tasks counts, Study Tasks count, carryover, unmatched ratio, low-tier cap) reports on the **Production Study** page — the gate error carries the resolved Production Study id so the catch routes correctly. Only `production_study_relation` reports on the **Exported Studies** row, because that gate fires before the Production Study is known. If the report PATCH itself fails (e.g., property missing on the target page), the failure is now logged as `[migrate-study] reportStatus failed on …` / `[migrate-study] postComment failed on …` rather than swallowed silently.
+
 ## Success path
 
 1. Gate passes (planned PATCH counts computed in memory).
@@ -104,6 +106,6 @@ Operations are designed to be **idempotent**: relation targets and completion ov
 
 **What the button does:** After carryover + inception, wires **Production Task** relations, applies completion overlay (max **Date Completed** across contributors per cascade task, skipping **Manual Workstream / Item** where applicable), assigns owners when assignee text resolves to a workspace user, sets **Migration Status**, and marks remaining unmatched cascade tasks **Blueprint-default**.
 
-**What errors mean:** Red banner in **Automation Reporting** + a comment on the Study page → gate failed or unexpected exception. **No live writes** occurred unless Import Mode was armed (if armed, `finally` attempts to clear Import Mode).
+**What errors mean:** Red banner in **Automation Reporting** on the **Production Study** page + a comment on the Study page → gate failed or unexpected exception. (The single exception is `production_study_relation`, which surfaces on the **Exported Studies** row because the Production Study is not yet resolvable.) **No live writes** occurred unless Import Mode was armed (if armed, `finally` attempts to clear Import Mode).
 
 **Who to ask:** Meg/Tem for threshold tuning (`MIGRATE_*` env vars on Railway).

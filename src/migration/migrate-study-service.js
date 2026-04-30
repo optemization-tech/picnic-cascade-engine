@@ -21,10 +21,18 @@ import {
 import { normalizeAssigneeForOwner } from './normalize.js';
 
 export class MigrateStudyGateError extends Error {
-  constructor(message, details = {}) {
+  /**
+   * @param {string} message
+   * @param {object} [details] Gate-specific metadata (must include `code`).
+   * @param {string} [studyPageId] Production Study page id when known. Pre-resolution
+   *   gates (e.g., `production_study_relation`) leave it undefined; the catch in
+   *   `runMigrateStudyPipeline` then falls back to the Exported Studies row.
+   */
+  constructor(message, details = {}, studyPageId) {
     super(message);
     this.name = 'MigrateStudyGateError';
     this.details = details;
+    this.studyPageId = studyPageId;
   }
 }
 
@@ -92,16 +100,20 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
 
   const importOn = findById(studyPage, STUDIES_PROPS.IMPORT_MODE)?.checkbox === true;
   if (importOn) {
-    throw new MigrateStudyGateError('[Do Not Edit] Import Mode is already ON — resolve before migrating.', {
-      code: 'import_mode_on',
-    });
+    throw new MigrateStudyGateError(
+      '[Do Not Edit] Import Mode is already ON — resolve before migrating.',
+      { code: 'import_mode_on' },
+      studyPageId,
+    );
   }
 
   const contractSignDate = findById(studyPage, STUDIES_PROPS.CONTRACT_SIGN_DATE)?.date?.start || null;
   if (!contractSignDate) {
-    throw new MigrateStudyGateError('Contract Sign Date is empty on the Study page.', {
-      code: 'contract_sign_empty',
-    });
+    throw new MigrateStudyGateError(
+      'Contract Sign Date is empty on the Study page.',
+      { code: 'contract_sign_empty' },
+      studyPageId,
+    );
   }
 
   // Round-trip safety: the Production Study's `Exported Study` relation must
@@ -112,12 +124,14 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     throw new MigrateStudyGateError(
       'Production Study `Exported Study` relation does not point back to this Exported Studies row — wrong-study guard failed.',
       { code: 'exported_study_relation_mismatch' },
+      studyPageId,
     );
   }
   if (exportedStudyIdsOnStudy.length !== 1) {
     throw new MigrateStudyGateError(
       `Production Study must have exactly one Exported Study relation (found ${exportedStudyIdsOnStudy.length}).`,
       { code: 'exported_study_relation_count' },
+      studyPageId,
     );
   }
   const migratedStudyPageId = exportedStudyPageId;
@@ -129,6 +143,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     throw new MigrateStudyGateError(
       'Could not resolve Migrated Tasks schema (Study / Production Task or Notion Task property ids).',
       { code: 'schema_migrated_tasks' },
+      studyPageId,
     );
   }
 
@@ -144,21 +159,25 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
   );
 
   if (migratedTasksRelCount === 0) {
-    throw new MigrateStudyGateError('Migrated Studies row has empty Migrated Tasks relation.', {
-      code: 'migrated_tasks_empty',
-    });
+    throw new MigrateStudyGateError(
+      'Migrated Studies row has empty Migrated Tasks relation.',
+      { code: 'migrated_tasks_empty' },
+      studyPageId,
+    );
   }
 
   if (migratedTaskPages.length < thresholds.minMigratedTasks) {
     throw new MigrateStudyGateError(
       `Migrated Tasks row count ${migratedTaskPages.length} < minimum ${thresholds.minMigratedTasks} (carryover or filter issue).`,
       { code: 'migrated_count_low' },
+      studyPageId,
     );
   }
   if (migratedTaskPages.length > thresholds.maxMigratedTasks) {
     throw new MigrateStudyGateError(
       `Migrated Tasks row count ${migratedTaskPages.length} > maximum ${thresholds.maxMigratedTasks}.`,
       { code: 'migrated_count_high' },
+      studyPageId,
     );
   }
 
@@ -169,6 +188,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     throw new MigrateStudyGateError(
       `Migrated Tasks query (${migratedTaskPages.length}) is fewer than Migrated Studies relation count (${migratedTasksRelCount}).`,
       { code: 'migrated_count_mismatch' },
+      studyPageId,
     );
   }
   if (migratedTaskPages.length > migratedTasksRelCount) {
@@ -191,17 +211,20 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
 
   if (studyTaskPages.length < thresholds.minStudyTasks) {
     throw new MigrateStudyGateError(
-      `Study Tasks count ${studyTaskPages.length} < minimum ${thresholds.minStudyTasks} (inception prerequisite).`,
+      `Study Tasks count ${studyTaskPages.length} < minimum ${thresholds.minStudyTasks} (run Inception on the Production Study first).`,
       { code: 'study_tasks_low' },
+      studyPageId,
     );
   }
 
   for (const mPage of migratedTaskPages) {
     const studyRel = relationIds(mPage.properties, MIGRATED_TASK_PROP.STUDY);
     if (!studyRel.includes(migratedStudyPageId)) {
-      throw new MigrateStudyGateError('carryover incomplete — a Migrated Task row is missing Study relation.', {
-        code: 'carryover_study_missing',
-      });
+      throw new MigrateStudyGateError(
+        'carryover incomplete — a Migrated Task row is missing Study relation.',
+        { code: 'carryover_study_missing' },
+        studyPageId,
+      );
     }
   }
 
@@ -249,6 +272,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
         unmatchedCompletedNonRepeat,
         completedNonRepeatDenom,
       },
+      studyPageId,
     );
   }
 
@@ -256,6 +280,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     throw new MigrateStudyGateError(
       `Low-confidence (Jaccard) matches ${lowTierCount} exceed max ${thresholds.maxLowTierMatches}.`,
       { code: 'low_tier_cap', lowTierCount },
+      studyPageId,
     );
   }
 
@@ -473,26 +498,40 @@ export async function runMigrateStudyPipeline(body, notionClient, {
     const summaryText = err instanceof MigrateStudyGateError
       ? String(err.message).slice(0, 200)
       : String(err.message || err).slice(0, 200);
+    const gateCode = err?.details?.code || 'unhandled';
 
-    // Report on the resolved Production Study when we have it; otherwise
-    // fall back to the Exported Studies row so the user who clicked sees
-    // *something* (Automation Reporting may not exist on Exported Studies,
-    // in which case the PATCH 400s and we swallow it via .catch).
-    const reportTarget = studyPageId || exportedStudyPageId;
+    // Three-tier fallback: prefer the Production Study id carried on the gate
+    // error (set after Production Study resolution inside buildMigrationPlan),
+    // then the outer `studyPageId` (set on success-path partial failures), then
+    // the Exported Studies row id (only the pre-resolution `production_study_relation`
+    // gate ends up here, since it fires before Production Study is known).
+    const reportTarget = err?.studyPageId || studyPageId || exportedStudyPageId;
 
     await Promise.all([
       notionClient
         .reportStatus(reportTarget, 'error', `Migrate Study aborted: ${summaryText}`, { tracer })
-        .catch(() => {}),
-      studyCommentService?.postComment?.({
-        workflow: 'Migrate Study',
-        status: 'failed',
-        studyId: reportTarget,
-        sourceTaskName: studyName,
-        triggeredByUserId,
-        editedByBot,
-        summary: `Migrate Study aborted: ${summaryText}`,
-      }).catch(() => {}),
+        .catch((reportErr) =>
+          console.warn(
+            `[migrate-study] reportStatus failed on ${reportTarget} (gate=${gateCode}):`,
+            reportErr?.message || reportErr,
+          ),
+        ),
+      studyCommentService
+        .postComment({
+          workflow: 'Migrate Study',
+          status: 'failed',
+          studyId: reportTarget,
+          sourceTaskName: studyName,
+          triggeredByUserId,
+          editedByBot,
+          summary: `Migrate Study aborted: ${summaryText}`,
+        })
+        .catch((commentErr) =>
+          console.warn(
+            `[migrate-study] postComment failed on ${reportTarget} (gate=${gateCode}):`,
+            commentErr?.message || commentErr,
+          ),
+        ),
     ]);
 
     throw err;

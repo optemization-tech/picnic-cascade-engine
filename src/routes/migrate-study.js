@@ -38,15 +38,21 @@ async function processMigrateStudy(body) {
   tracer.set('workflow', 'Migrate Study');
   tracer.set('exported_study_id', exportedStudyPageId);
 
-  await runMigrateStudyPipeline(body, notionClient, {
-    tracer,
-    studyCommentService,
-    triggeredByUserId,
-    editedByBot,
-    studyNameFallback: null,
-  });
-
-  console.log(tracer.toConsoleLog());
+  try {
+    await runMigrateStudyPipeline(body, notionClient, {
+      tracer,
+      studyCommentService,
+      triggeredByUserId,
+      editedByBot,
+      studyNameFallback: null,
+    });
+  } finally {
+    // Emit on both success and failure so post-mortem debugging has the same
+    // diagnostic surface either way. CascadeTracer.toConsoleLog returns
+    // JSON.stringify of a fixed plain-object shape with no circular refs,
+    // so it cannot throw under the current tracer contract.
+    console.log(tracer.toConsoleLog());
+  }
 }
 
 export async function handleMigrateStudy(req, res) {
