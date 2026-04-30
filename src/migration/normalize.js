@@ -10,6 +10,44 @@ function stripLeadingMarkers(s) {
   return t;
 }
 
+/**
+ * Strip the study name from the leading position of a task title.
+ *
+ * Source data often wraps cascade-equivalent task names with the study identifier
+ * — e.g., `🔶 Alexion PNH PLEDGE External Kickoff`, `Alexion PNH: Submit IRB`.
+ * The leading study name suppresses the matcher's normalized-name and Jaccard
+ * tiers because tokens like "alexion" / "pnh" / "pledge" survive normalization
+ * and inflate the union without contributing to intersection.
+ *
+ * Implementation: tokenize the study name into a set, then iteratively eat the
+ * leading word from the title whenever it (case-insensitively) belongs to that
+ * set. Separators (`:`, `,`, `;`, `.`, `-`, whitespace) between matches are
+ * skipped. Stops the moment a non-study word appears, so internal occurrences
+ * of study tokens (e.g., a task body that legitimately mentions PNH) are
+ * preserved.
+ */
+export function stripStudyPrefix(name, studyName) {
+  if (!name || typeof name !== 'string') return name || '';
+  if (!studyName || typeof studyName !== 'string') return name;
+  const studyTokens = studyName.toLowerCase().split(/\s+/).filter(Boolean);
+  if (studyTokens.length === 0) return name;
+  const tokenSet = new Set(studyTokens);
+  let s = stripLeadingMarkers(name).trimStart();
+  let progress = true;
+  while (progress) {
+    progress = false;
+    s = s.replace(/^[\s:,.;\-]+/, '');
+    if (!s) break;
+    const head = s.match(/^([A-Za-z0-9]+)/);
+    if (!head) break;
+    if (tokenSet.has(head[1].toLowerCase())) {
+      s = s.slice(head[0].length);
+      progress = true;
+    }
+  }
+  return s.trim();
+}
+
 const MARKERS = /^\[(?:FYI|Milestone|Optional|Parent|Subtask)\]\s*/i;
 
 export function normalizeName(raw) {

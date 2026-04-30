@@ -13,6 +13,7 @@ import { parseMigrationThresholdsFromEnv } from './thresholds.js';
 import { propertySchemaId, propertySchemaIdFirst } from './property-resolve.js';
 import {
   buildStudyTaskNameIndex,
+  collectCascadeMilestoneOptions,
   resolveCascadeTwin,
   hasManualWorkstreamTag,
   contributorCompletionDate,
@@ -222,6 +223,8 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
   const userMaps = buildUserMaps(users);
 
   const nameIndex = buildStudyTaskNameIndex(studyTaskPages);
+  const cascadeMilestoneOptions = collectCascadeMilestoneOptions(studyTaskPages);
+  const resolvedStudyName = titlePlain(studyPage.properties, STUDIES_PROPS.STUDY_NAME.name);
 
   /** Resolved twin per migrated row — §4b uses strict milestone tag; §5a does not. */
   const resolutionByMigratedId = new Map();
@@ -236,6 +239,8 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
       nameIndex,
       requireMilestoneTagForFallback,
       jaccardMin: thresholds.jaccardMin,
+      studyName: resolvedStudyName,
+      cascadeMilestoneOptions,
     });
     resolutionByMigratedId.set(mPage.id, { twin, repeat, completed, props });
   }
@@ -389,7 +394,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     studyPageId,
     migratedStudyPageId,
     contractSignDate,
-    studyName: titlePlain(studyPage.properties, STUDIES_PROPS.STUDY_NAME.name),
+    studyName: resolvedStudyName,
     migratedPatches,
     cascadePatches,
     summary,
