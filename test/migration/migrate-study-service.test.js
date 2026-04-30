@@ -296,7 +296,9 @@ describe('migrate-study-service', () => {
       expect(plan.migratedPatches[0].taskId).toBe('mt-done');
     });
 
-    it('throws when Migrated Tasks query is below Exported Studies relation count', async () => {
+    it('warns (does not throw) when Migrated Tasks query is below Exported Studies relation count', async () => {
+      // Quality-threshold gates were removed in favor of "match what we can" —
+      // a query/relation count mismatch is now a warning, not a halt.
       notionClient.getPage.mockImplementation(async (id) => {
         if (id === 'exported-1') {
           return exportedStudyFixture({ studyId: 'study-1', migratedTaskIds: ['mt-1', 'mt-2'] });
@@ -344,10 +346,65 @@ describe('migrate-study-service', () => {
       });
       notionClient.listAllUsers.mockResolvedValue([]);
 
-      await expect(buildMigrationPlan(notionClient, 'exported-1', {})).rejects.toMatchObject({
-        name: 'MigrateStudyGateError',
-        details: { code: 'migrated_count_mismatch' },
+      const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
+      expect(plan.warnings.some((w) => w.category === 'migrated-tasks-relation-overfilled')).toBe(true);
+      expect(plan.summary.migratedRows).toBe(1);
+    });
+
+    it('does not throw on extreme unmatched-completed ratio — quality thresholds removed', async () => {
+      // The 25% unmatched-ratio gate was removed. Even 100% unmatched should not
+      // halt; PMs reconcile via the Migration Support callout.
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
       });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+        },
+      });
+      let q = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        q += 1;
+        if (q === 1) {
+          // One completed-non-repeat row whose name will not match any cascade task.
+          return [
+            {
+              id: 'mt-orphan',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'No Match Here', text: { content: 'No Match Here' } }] },
+                'Production Task': { relation: [] },
+                Completed: { checkbox: true },
+                Milestone: { select: { name: 'Some Other Milestone' } },
+                'Task Type Tags': { multi_select: [] },
+                Assignee: { rich_text: [] },
+                'Date Completed': { date: { start: '2026-01-01' } },
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 'cascade-1',
+            properties: {
+              'Task Name': { title: [{ plain_text: 'Different Task', text: { content: 'Different Task' } }] },
+              Study: { relation: [{ id: 'study-1' }] },
+              Milestone: { multi_select: [] },
+              Tags: { multi_select: [] },
+            },
+          },
+        ];
+      });
+      notionClient.listAllUsers.mockResolvedValue([]);
+
+      const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
+      expect(plan.summary.unmatchedRatio).toBe(1);
+      expect(plan.summary.unmatchedCompletedNonRepeat).toBe(1);
+      expect(plan.summary.completedNonRepeatDenom).toBe(1);
+      expect(plan.warnings.some((w) => w.category === 'unmatched-completed-row')).toBe(true);
     });
   });
 
