@@ -20,7 +20,7 @@ import {
   isRepeatDeliveryRow,
   isCompletedRow,
 } from './matcher.js';
-import { normalizeAssigneeForOwner } from './normalize.js';
+import { normalizeAssigneeForOwner, cleanTitleByStrippingStudyPrefix } from './normalize.js';
 
 export class MigrateStudyGateError extends Error {
   /**
@@ -296,7 +296,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
   const cascadePatches = new Map();
   const cascadeIdsMatched = new Set();
 
-  function queueProductionTask(migratedPageId, cascadeId, tier) {
+  function queueProductionTask(migratedPageId, cascadeId, tier, originalName) {
     const properties = {
       [productionTaskPropId]: { relation: [{ id: cascadeId }] },
     };
@@ -307,6 +307,18 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     const confidence = tierToMatchConfidence(tier);
     if (matchConfidencePropId && confidence) {
       properties[matchConfidencePropId] = { select: { name: confidence } };
+    }
+    // Title cleanup — drop the study-name prefix from the source title while
+    // preserving any leading emoji marker. Matched rows are audit-only at this
+    // point (the cascade twin owns the work surface), so a clean title makes
+    // the Migration Support callout's views more readable. Only PATCH when
+    // the cleaned title actually differs from the original — idempotent on
+    // re-runs that already cleaned the row.
+    if (originalName && resolvedStudyName) {
+      const cleaned = cleanTitleByStrippingStudyPrefix(originalName, resolvedStudyName);
+      if (cleaned && cleaned !== originalName) {
+        properties.title = [{ type: 'text', text: { content: cleaned } }];
+      }
     }
     migratedPatches.push({ taskId: migratedPageId, properties });
     cascadeIdsMatched.add(cascadeId);
@@ -344,7 +356,8 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
       && twinCascadePage
       && hasManualWorkstreamTag(twinCascadePage.properties);
     if (!skipProdLinkForManual) {
-      queueProductionTask(mPage.id, twin.cascadeId, twin.tier);
+      const originalName = titlePlain(props, MIGRATED_TASK_PROP.NAME);
+      queueProductionTask(mPage.id, twin.cascadeId, twin.tier, originalName);
     }
 
     const assignee = richTextPlain(props, MIGRATED_TASK_PROP.ASSIGNEE);

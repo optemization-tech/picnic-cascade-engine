@@ -322,6 +322,112 @@ describe('migrate-study-service', () => {
       expect(plan.migratedPatches[0].properties['sch-pt']).toEqual({ relation: [{ id: 'cascade-1' }] });
     });
 
+    it('queues a title PATCH that strips the study prefix on matched Migrated Tasks', async () => {
+      // Source row title is `🔶  Alexion PNH PLEDGE Twin Task`. Cascade has
+      // a task named `Twin Task`. The matcher's stripStudyPrefix carries the
+      // match; queueProductionTask should PATCH the title to `🔶 Twin Task`.
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+          'Match Confidence': { id: 'sch-mc' },
+        },
+      });
+      let q = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        q += 1;
+        if (q === 1) {
+          return [
+            {
+              id: 'mt-prefixed',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: '🔶  Test Study Twin Task', text: { content: '🔶  Test Study Twin Task' } }] },
+                'Production Task': { relation: [] },
+                Completed: { checkbox: false },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 'cascade-1',
+            properties: {
+              'Task Name': { title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }] },
+              Study: { relation: [{ id: 'study-1' }] },
+              Milestone: { multi_select: [] },
+              Tags: { multi_select: [] },
+            },
+          },
+        ];
+      });
+      notionClient.listAllUsers.mockResolvedValue([]);
+
+      const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
+      // Note: the studyPageFixture's STUDY_NAME title is "Test Study", so prefix
+      // strip drops "Test Study" tokens and preserves the leading 🔶.
+      expect(plan.migratedPatches[0].properties.title).toEqual([
+        { type: 'text', text: { content: '🔶 Twin Task' } },
+      ]);
+    });
+
+    it('does not queue a title PATCH when the cleaned title equals the original', async () => {
+      // Cascade has `Already Clean Task`; source row is also `Already Clean Task`
+      // (no study prefix). Title PATCH should be omitted to keep the run idempotent.
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+        },
+      });
+      let q = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        q += 1;
+        if (q === 1) {
+          return [
+            {
+              id: 'mt-clean',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'Already Clean Task', text: { content: 'Already Clean Task' } }] },
+                'Production Task': { relation: [] },
+                Completed: { checkbox: false },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 'cascade-1',
+            properties: {
+              'Task Name': { title: [{ plain_text: 'Already Clean Task', text: { content: 'Already Clean Task' } }] },
+              Study: { relation: [{ id: 'study-1' }] },
+              Milestone: { multi_select: [] },
+              Tags: { multi_select: [] },
+            },
+          },
+        ];
+      });
+      notionClient.listAllUsers.mockResolvedValue([]);
+
+      const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
+      expect(plan.migratedPatches[0].properties.title).toBeUndefined();
+    });
+
     it('skips Match Confidence write when the Migrated Tasks DB does not expose the column', async () => {
       // Best-effort: older Migrated Tasks DBs without the Match Confidence column
       // should still complete a migration; the cascade-side rollup just stays empty.

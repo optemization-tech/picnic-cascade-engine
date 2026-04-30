@@ -11,7 +11,7 @@ import {
   isCompletedRow,
   hasManualWorkstreamTag,
 } from '../../src/migration/matcher.js';
-import { stripStudyPrefix } from '../../src/migration/normalize.js';
+import { cleanTitleByStrippingStudyPrefix, stripStudyPrefix } from '../../src/migration/normalize.js';
 
 const TN = STUDY_TASKS_PROPS.TASK_NAME.name;
 
@@ -239,6 +239,46 @@ describe('migration/matcher', () => {
 
     it('eats the entire title when it is only the study name', () => {
       expect(stripStudyPrefix('Alexion PNH PLEDGE', 'Alexion PNH PLEDGE')).toBe('');
+    });
+  });
+
+  describe('cleanTitleByStrippingStudyPrefix', () => {
+    it('preserves the leading emoji marker and strips study tokens', () => {
+      expect(
+        cleanTitleByStrippingStudyPrefix('🔶  Alexion PNH PLEDGE Final SAP Delivery', 'Alexion PNH PLEDGE'),
+      ).toBe('🔶 Final SAP Delivery');
+    });
+
+    it('strips study tokens with no emoji marker', () => {
+      expect(
+        cleanTitleByStrippingStudyPrefix('Alexion PNH: Submit IRB', 'Alexion PNH PLEDGE'),
+      ).toBe('Submit IRB');
+    });
+
+    it('returns the input unchanged when title is already clean', () => {
+      expect(
+        cleanTitleByStrippingStudyPrefix('Final SAP Delivery', 'Alexion PNH PLEDGE'),
+      ).toBe('Final SAP Delivery');
+    });
+
+    it('returns the input unchanged when title is only the study name (no reduce-to-empty)', () => {
+      expect(
+        cleanTitleByStrippingStudyPrefix('Alexion PNH PLEDGE', 'Alexion PNH PLEDGE'),
+      ).toBe('Alexion PNH PLEDGE');
+    });
+
+    it('returns the input unchanged when studyName is missing', () => {
+      expect(cleanTitleByStrippingStudyPrefix('Some Task', null)).toBe('Some Task');
+      expect(cleanTitleByStrippingStudyPrefix('Some Task', '')).toBe('Some Task');
+    });
+
+    it('handles each recognized emoji marker', () => {
+      expect(
+        cleanTitleByStrippingStudyPrefix('✅ Alexion PNH PLEDGE Done Item', 'Alexion PNH PLEDGE'),
+      ).toBe('✅ Done Item');
+      expect(
+        cleanTitleByStrippingStudyPrefix('🔷 Alexion PNH PLEDGE Future', 'Alexion PNH PLEDGE'),
+      ).toBe('🔷 Future');
     });
   });
 
