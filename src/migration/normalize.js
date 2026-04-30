@@ -26,6 +26,37 @@ function stripLeadingMarkers(s) {
  * of study tokens (e.g., a task body that legitimately mentions PNH) are
  * preserved.
  */
+/** Title emoji markers we recognise as semantic prefixes (kept on rename). */
+const TITLE_EMOJI_PREFIXES = ['🔶', '✅', '🔷', '⚠️', '🚨'];
+
+/**
+ * Produce a clean Migrated-Task title by stripping the study-name prefix while
+ * preserving a leading emoji marker (the 🔶 etc. carry semantic intent — milestone-
+ * type rows in Asana — even though they aren't load-bearing for matching).
+ *
+ *   "🔶  Alexion PNH PLEDGE Final SAP Delivery" → "🔶 Final SAP Delivery"
+ *   "Alexion PNH: Submit IRB"                  → "Submit IRB"
+ *   "Final SAP Delivery"                       → "Final SAP Delivery" (unchanged)
+ *   "Alexion PNH PLEDGE" alone                 → "Alexion PNH PLEDGE" (don't reduce to empty)
+ */
+export function cleanTitleByStrippingStudyPrefix(name, studyName) {
+  if (!name || typeof name !== 'string') return name || '';
+  if (!studyName || typeof studyName !== 'string') return name;
+  let emoji = null;
+  let body = name;
+  for (const pre of TITLE_EMOJI_PREFIXES) {
+    if (body.startsWith(pre)) {
+      emoji = pre;
+      body = body.slice(pre.length);
+      break;
+    }
+  }
+  body = body.trimStart();
+  const stripped = stripStudyPrefix(body, studyName);
+  if (!stripped) return name;
+  return emoji ? `${emoji} ${stripped}` : stripped;
+}
+
 export function stripStudyPrefix(name, studyName) {
   if (!name || typeof name !== 'string') return name || '';
   if (!studyName || typeof studyName !== 'string') return name;
