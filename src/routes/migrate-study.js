@@ -48,13 +48,10 @@ async function processMigrateStudy(body) {
     });
   } finally {
     // Emit on both success and failure so post-mortem debugging has the same
-    // diagnostic surface either way. Never let trace serialization corrupt the
-    // failure signal — log a warn and continue if toConsoleLog itself throws.
-    try {
-      console.log(tracer.toConsoleLog());
-    } catch (traceErr) {
-      console.warn('[migrate-study] tracer log emit failed:', traceErr?.message || traceErr);
-    }
+    // diagnostic surface either way. CascadeTracer.toConsoleLog returns
+    // JSON.stringify of a fixed plain-object shape with no circular refs,
+    // so it cannot throw under the current tracer contract.
+    console.log(tracer.toConsoleLog());
   }
 }
 

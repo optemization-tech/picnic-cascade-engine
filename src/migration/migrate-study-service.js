@@ -516,8 +516,8 @@ export async function runMigrateStudyPipeline(body, notionClient, {
             reportErr?.message || reportErr,
           ),
         ),
-      Promise.resolve(
-        studyCommentService?.postComment?.({
+      studyCommentService
+        .postComment({
           workflow: 'Migrate Study',
           status: 'failed',
           studyId: reportTarget,
@@ -525,13 +525,13 @@ export async function runMigrateStudyPipeline(body, notionClient, {
           triggeredByUserId,
           editedByBot,
           summary: `Migrate Study aborted: ${summaryText}`,
-        }),
-      ).catch((commentErr) =>
-        console.warn(
-          `[migrate-study] postComment failed on ${reportTarget} (gate=${gateCode}):`,
-          commentErr?.message || commentErr,
+        })
+        .catch((commentErr) =>
+          console.warn(
+            `[migrate-study] postComment failed on ${reportTarget} (gate=${gateCode}):`,
+            commentErr?.message || commentErr,
+          ),
         ),
-      ),
     ]);
 
     throw err;
