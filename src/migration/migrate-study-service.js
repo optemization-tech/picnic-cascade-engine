@@ -275,8 +275,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
   const cascadeCompletionTargets = new Map();
   for (const [cascadeId, contributors] of collisionContributors.entries()) {
     const cascadePage = studyTaskPages.find((p) => p.id === cascadeId);
-    if (!cascadePage) continue;
-    if (hasManualWorkstreamTag(cascadePage.properties)) {
+    if (cascadePage && hasManualWorkstreamTag(cascadePage.properties)) {
       warnings.push({ category: 'manual-skipped', cascadeId });
       continue;
     }
@@ -302,7 +301,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     cascadeIdsMatched.add(cascadeId);
   }
 
-  for (const [cascadeId, { contributors, dateCompleted }] of cascadeCompletionTargets.entries()) {
+  for (const [cascadeId, { dateCompleted }] of cascadeCompletionTargets.entries()) {
     const cascadePage = studyTaskPages.find((p) => p.id === cascadeId);
     if (!cascadePage || hasManualWorkstreamTag(cascadePage.properties)) continue;
 
@@ -311,10 +310,6 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
       [STUDY_TASKS_PROPS.MIGRATION_STATUS.id]: { select: { name: 'Asana-matched' } },
       [STUDY_TASKS_PROPS.DATE_COMPLETED.id]: { date: dateCompleted ? { start: dateCompleted } : null },
     });
-
-    for (const { migratedPageId } of contributors) {
-      queueProductionTask(migratedPageId, cascadeId);
-    }
   }
 
   for (const mPage of migratedTaskPages) {
@@ -331,7 +326,13 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
       continue;
     }
 
-    if (!(completed && !repeat)) {
+    const twinCascadePage = studyTaskPages.find((p) => p.id === twin.cascadeId);
+    const skipProdLinkForManual =
+      completed
+      && !repeat
+      && twinCascadePage
+      && hasManualWorkstreamTag(twinCascadePage.properties);
+    if (!skipProdLinkForManual) {
       queueProductionTask(mPage.id, twin.cascadeId);
     }
 
