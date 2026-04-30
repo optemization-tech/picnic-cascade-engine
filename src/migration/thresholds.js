@@ -14,12 +14,17 @@ export const DEFAULT_MIGRATION_THRESHOLDS = {
   minStudyTasks: 100,
   /**
    * Minimum Jaccard token-set similarity for low-tier match (0–1).
-   * Matcher tuning, not a gate. Lowered from 0.6 → 0.45 once quality-threshold
-   * gates were removed: with PMs reconciling false positives via the Migration
-   * Support callout, "match what we can" benefits from a more lenient floor.
+   * Matcher tuning, not a gate. Lowered from the original 0.6 over two passes:
+   *   0.6 → 0.45 once quality gates were removed (PR #88) so PMs began
+   *   reconciling false positives via the Migration Support callout.
+   *   0.45 → 0.35 once name aliases (MILESTONE_VOCAB) flowed through Jaccard
+   *   tokenization (PR #92) so common phrasings ("External Kickoff Meeting"
+   *   ↔ "External Kickoff") already snap to the same canonical tokens; the
+   *   remaining floor is purely a precision/recall trade-off, and the user's
+   *   product principle is "match what we can, PMs reconcile the rest."
    * Studies whose data needs a stricter floor can override via env.
    */
-  jaccardMin: 0.45,
+  jaccardMin: 0.35,
 };
 
 export function parseMigrationThresholdsFromEnv() {
