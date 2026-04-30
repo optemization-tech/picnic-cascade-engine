@@ -8,6 +8,7 @@ import { handleAddTaskSet } from './routes/add-task-set.js';
 import { handleCopyBlocks } from './routes/copy-blocks.js';
 import { handleDeletion } from './routes/deletion.js';
 import { handleUndoCascade } from './routes/undo-cascade.js';
+import { handleMigrateStudy } from './routes/migrate-study.js';
 
 export function createServer() {
   const app = express();
@@ -40,6 +41,7 @@ export function createServer() {
 
   // Provisioning webhook endpoints (use provision token pool)
   app.post('/webhook/inception', handleInception);
+  app.post('/webhook/migrate-study', handleMigrateStudy);
   app.post('/webhook/add-task-set', handleAddTaskSet);
   app.post('/webhook/copy-blocks', handleCopyBlocks);
 
