@@ -177,6 +177,30 @@ export class ActivityLogService {
       const response = await this.notionClient.request('POST', '/pages', payload);
       return { logged: true, pageId: response?.id || null };
     } catch (error) {
+      // Defensive retry — upstream `editedByBot` classification can desync from
+      // `triggeredByUserId` in a few real cases (button webhook with `source.user_id`
+      // pointing at a bot integration; webhook payload missing `last_edited_by.type`;
+      // a Notion automation firing a button on the engine's behalf). When that
+      // happens the guard above lets a bot id through to the `people` field and
+      // Notion 400s with "Cannot mention bots". Strip `TESTED_BY` and retry once so
+      // we still capture the entry — a bot id has no value as a person tag anyway.
+      const testedByKey = ACTIVITY_LOG_PROPS.TESTED_BY.id;
+      const isBotMention400 = error?.status === 400 && /Cannot mention bots/i.test(error?.message || '');
+      if (isBotMention400 && payload.properties[testedByKey]) {
+        const { [testedByKey]: _stripped, ...retainedProps } = payload.properties;
+        const retryPayload = { ...payload, properties: retainedProps };
+        try {
+          const response = await this.notionClient.request('POST', '/pages', retryPayload);
+          this.logger.warn(
+            '[activity-log] retried without Tested-by after bot-mention 400; bot id was:',
+            String(event.triggeredByUserId),
+          );
+          return { logged: true, pageId: response?.id || null, strippedTestedBy: true };
+        } catch (retryError) {
+          this.logger.warn('[activity-log] retry without Tested-by also failed:', retryError.message);
+          return { logged: false, reason: 'notion-write-failed', error: retryError.message };
+        }
+      }
       this.logger.warn('[activity-log] failed to create entry:', error.message);
       return { logged: false, reason: 'notion-write-failed', error: error.message };
     }

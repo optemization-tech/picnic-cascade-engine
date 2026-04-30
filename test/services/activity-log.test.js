@@ -177,6 +177,125 @@ describe('ActivityLogService', () => {
     expect(bodyText).not.toContain('Narrow retry suppressed');
   });
 
+  // Defensive retry — upstream may set triggeredByUserId to a bot id while
+  // editedByBot stays false (e.g. webhook source.user_id is a bot integration,
+  // or last_edited_by.type is missing). When that slips through, Notion 400s
+  // on the `people` write. Catch and retry without TESTED_BY so we still
+  // capture the entry; the bot id has no value as a person tag.
+  it('retries without Tested-by when Notion 400s with "Cannot mention bots"', async () => {
+    const notionClient = {
+      request: vi.fn()
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Notion API 400 Bad Request: Cannot mention bots. Mentioned bot id: 33723867-60c2-8195-a70f-00277eb5f1d3.'), {
+            status: 400,
+          }),
+        )
+        .mockResolvedValueOnce({ id: 'page-after-retry' }),
+    };
+    const logger = { warn: vi.fn() };
+    const service = new ActivityLogService({
+      notionClient,
+      activityLogDbId: 'db-activity',
+      logger,
+    });
+
+    const result = await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'ok despite bot mention',
+      triggeredByUserId: 'bot-integration-id',
+      editedByBot: false, // upstream misclassified — that's the whole point of this test
+      details: {},
+    });
+
+    expect(result).toEqual({
+      logged: true,
+      pageId: 'page-after-retry',
+      strippedTestedBy: true,
+    });
+    expect(notionClient.request).toHaveBeenCalledTimes(2);
+
+    const firstPayload = notionClient.request.mock.calls[0][2];
+    const retryPayload = notionClient.request.mock.calls[1][2];
+    expect(firstPayload.properties[AL.TESTED_BY.id]).toEqual({ people: [{ id: 'bot-integration-id' }] });
+    expect(retryPayload.properties[AL.TESTED_BY.id]).toBeUndefined();
+    // Other properties (workflow, status, etc.) survive the retry.
+    expect(retryPayload.properties[AL.STATUS.id]).toEqual({ select: { name: 'Success' } });
+    expect(retryPayload.properties[AL.WORKFLOW.id]).toEqual({ select: { name: 'Date Cascade' } });
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[activity-log] retried without Tested-by after bot-mention 400; bot id was:',
+      'bot-integration-id',
+    );
+  });
+
+  it('does not retry when 400 is not the bot-mention error', async () => {
+    const notionClient = {
+      request: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Notion API 400 Bad Request: body.properties.foo is required.'), {
+          status: 400,
+        }),
+      ),
+    };
+    const logger = { warn: vi.fn() };
+    const service = new ActivityLogService({
+      notionClient,
+      activityLogDbId: 'db-activity',
+      logger,
+    });
+
+    const result = await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'unrelated 400',
+      triggeredByUserId: 'person-id',
+      editedByBot: false,
+      details: {},
+    });
+
+    expect(result).toEqual({
+      logged: false,
+      reason: 'notion-write-failed',
+      error: 'Notion API 400 Bad Request: body.properties.foo is required.',
+    });
+    expect(notionClient.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns notion-write-failed when the retry also fails', async () => {
+    const notionClient = {
+      request: vi.fn()
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Notion API 400 Bad Request: Cannot mention bots. Mentioned bot id: 33723867-60c2-8195-a70f-00277eb5f1d3.'), {
+            status: 400,
+          }),
+        )
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Notion API 502 Bad Gateway'), { status: 502 }),
+        ),
+    };
+    const logger = { warn: vi.fn() };
+    const service = new ActivityLogService({
+      notionClient,
+      activityLogDbId: 'db-activity',
+      logger,
+    });
+
+    const result = await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'retry also fails',
+      triggeredByUserId: 'bot-id',
+      editedByBot: false,
+      details: {},
+    });
+
+    expect(result).toEqual({
+      logged: false,
+      reason: 'notion-write-failed',
+      error: 'Notion API 502 Bad Gateway',
+    });
+    expect(notionClient.request).toHaveBeenCalledTimes(2);
+  });
+
   // Regression lock — narrow retry for non-idempotent writes (PR E1) surfaces
   // post-send 5xx errors from POST /pages instead of retrying. The activity
   // log is a graceful-degradation caller: it must catch the error and return
