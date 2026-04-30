@@ -21,7 +21,35 @@ export const MIGRATED_TASK_PROP = {
   PRODUCTION_TASK: 'Production Task',
   /** Live Picnic schema: relation to Study Tasks (replaces older "Production Task" label). */
   NOTION_TASK: 'Notion Task',
+  /** Select property; options: High | Medium | Low. The cascade-side `Match Confidence` is a rollup of this via `Notion Task` <-> `Asana Task`. */
+  MATCH_CONFIDENCE: 'Match Confidence',
 };
+
+/** Match Confidence select option labels — match the live Notion schema exactly. */
+export const MATCH_CONFIDENCE_LABEL = {
+  HIGH: 'High',
+  MEDIUM: 'Medium',
+  LOW: 'Low',
+};
+
+/**
+ * Map matcher tier → Match Confidence select label.
+ * `prefilled` rows had Production Task already linked (definitionally certain),
+ * so they map to High alongside the matcher's `high` tier.
+ */
+export function tierToMatchConfidence(tier) {
+  switch (tier) {
+    case 'prefilled':
+    case 'high':
+      return MATCH_CONFIDENCE_LABEL.HIGH;
+    case 'medium':
+      return MATCH_CONFIDENCE_LABEL.MEDIUM;
+    case 'low':
+      return MATCH_CONFIDENCE_LABEL.LOW;
+    default:
+      return null;
+  }
+}
 
 /** Order matters: legacy name first, then current Picnic label. */
 export const MIGRATED_TASK_PRODUCTION_RELATION_NAMES = [
