@@ -4,11 +4,12 @@ import {
   MIGRATED_STUDIES_PROP,
   MIGRATED_TASKS_DB_ID,
   MIGRATED_TASK_PROP,
+  MIGRATED_TASK_PRODUCTION_RELATION_NAMES,
 } from './constants.js';
 import { relationIds } from './extract.js';
 import { titlePlain, richTextPlain } from './extract.js';
 import { parseMigrationThresholdsFromEnv } from './thresholds.js';
-import { propertySchemaId } from './property-resolve.js';
+import { propertySchemaId, propertySchemaIdFirst } from './property-resolve.js';
 import {
   buildStudyTaskNameIndex,
   resolveCascadeTwin,
@@ -122,11 +123,12 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
 
   const mtDb = await notionClient.retrieveDatabase(MIGRATED_TASKS_DB_ID);
   const studyPropIdOnMigratedTasks = propertySchemaId(mtDb, MIGRATED_TASK_PROP.STUDY);
-  const productionTaskPropId = propertySchemaId(mtDb, MIGRATED_TASK_PROP.PRODUCTION_TASK);
+  const productionTaskPropId = propertySchemaIdFirst(mtDb, MIGRATED_TASK_PRODUCTION_RELATION_NAMES);
   if (!studyPropIdOnMigratedTasks || !productionTaskPropId) {
-    throw new MigrateStudyGateError('Could not resolve Migrated Tasks schema (Study / Production Task property ids).', {
-      code: 'schema_migrated_tasks',
-    });
+    throw new MigrateStudyGateError(
+      'Could not resolve Migrated Tasks schema (Study / Production Task or Notion Task property ids).',
+      { code: 'schema_migrated_tasks' },
+    );
   }
 
   const migratedTasksRelCount = relationIds(migratedStudyPage.properties, MIGRATED_STUDIES_PROP.MIGRATED_TASKS).length;

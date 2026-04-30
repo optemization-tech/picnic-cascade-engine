@@ -71,6 +71,21 @@ describe('migration/matcher', () => {
       expect(r).toEqual({ cascadeId: 'st1', source: 'pre-filled', tier: 'prefilled' });
     });
 
+    it('prefills from Notion Task relation when Production Task absent', () => {
+      const migratedProps = {
+        [MIGRATED_TASK_PROP.NAME]: titleValue('anything'),
+        [MIGRATED_TASK_PROP.NOTION_TASK]: { relation: [{ id: 'st1' }] },
+      };
+      const r = resolveCascadeTwin({
+        migratedProps,
+        studyTaskPages: studyPages,
+        nameIndex: index,
+        requireMilestoneTagForFallback: false,
+        jaccardMin,
+      });
+      expect(r).toEqual({ cascadeId: 'st1', source: 'pre-filled', tier: 'prefilled' });
+    });
+
     it('exact normalized name → high tier', () => {
       const migratedProps = {
         [MIGRATED_TASK_PROP.NAME]: titleValue('Unique Alpha Task'),
