@@ -32,18 +32,25 @@ function stripLeadingMarkers(s) {
 const TITLE_EMOJI_PREFIXES = ['🔶', '✅', '🔷', '⚠️', '🚨'];
 
 /**
- * Produce a clean Migrated-Task title by stripping the study-name prefix while
- * preserving a leading emoji marker (the 🔶 etc. carry semantic intent — milestone-
- * type rows in Asana — even though they aren't load-bearing for matching).
+ * Detach the leading recognized emoji marker (if any) and strip the study-name
+ * prefix into separate output fields. The emoji is what migrate-study writes as
+ * the page icon; the title is what gets written as the page Name.
  *
- *   "🔶  Alexion PNH PLEDGE Final SAP Delivery" → "🔶 Final SAP Delivery"
- *   "Alexion PNH: Submit IRB"                  → "Submit IRB"
- *   "Final SAP Delivery"                       → "Final SAP Delivery" (unchanged)
- *   "Alexion PNH PLEDGE" alone                 → "Alexion PNH PLEDGE" (don't reduce to empty)
+ *   "🔶  Alexion PNH PLEDGE Final SAP Delivery" → { title: "Final SAP Delivery", emoji: "🔶" }
+ *   "Alexion PNH: Submit IRB"                  → { title: "Submit IRB",         emoji: null }
+ *   "🔶 Random Task"                           → { title: "Random Task",        emoji: "🔶" }
+ *   "Final SAP Delivery"                       → { title: "Final SAP Delivery", emoji: null }
+ *   "🔶 Alexion PNH PLEDGE"  (would empty)     → { title: "🔶 Alexion PNH PLEDGE", emoji: null }
+ *   missing studyName                          → { title: <input>,              emoji: null }
+ *   non-recognized leading emoji ('📌 …')      → { title: <input>,              emoji: null }
+ *
+ * Reduce-to-empty case returns the input wholesale and `emoji: null` so call
+ * sites skip both the title PATCH and the icon PATCH (idempotent on the
+ * pathological row that's just the study name and a marker).
  */
-export function cleanTitleByStrippingStudyPrefix(name, studyName) {
-  if (!name || typeof name !== 'string') return name || '';
-  if (!studyName || typeof studyName !== 'string') return name;
+export function splitStudyPrefixAndEmoji(name, studyName) {
+  if (!name || typeof name !== 'string') return { title: name || '', emoji: null };
+  if (!studyName || typeof studyName !== 'string') return { title: name, emoji: null };
   let emoji = null;
   let body = name;
   for (const pre of TITLE_EMOJI_PREFIXES) {
@@ -55,8 +62,12 @@ export function cleanTitleByStrippingStudyPrefix(name, studyName) {
   }
   body = body.trimStart();
   const stripped = stripStudyPrefix(body, studyName);
-  if (!stripped) return name;
-  return emoji ? `${emoji} ${stripped}` : stripped;
+  if (!stripped) {
+    // Pathological row (title was nothing but the study name + optional marker).
+    // Preserve the original and emit emoji=null so neither PATCH fires.
+    return { title: name, emoji: null };
+  }
+  return { title: stripped, emoji };
 }
 
 export function stripStudyPrefix(name, studyName) {

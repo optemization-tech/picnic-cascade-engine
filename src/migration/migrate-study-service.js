@@ -20,7 +20,7 @@ import {
   isRepeatDeliveryRow,
   isCompletedRow,
 } from './matcher.js';
-import { normalizeAssigneeForOwner, cleanTitleByStrippingStudyPrefix } from './normalize.js';
+import { normalizeAssigneeForOwner, splitStudyPrefixAndEmoji } from './normalize.js';
 
 export class MigrateStudyGateError extends Error {
   /**
@@ -308,19 +308,27 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     if (matchConfidencePropId && confidence) {
       properties[matchConfidencePropId] = { select: { name: confidence } };
     }
-    // Title cleanup — drop the study-name prefix from the source title while
-    // preserving any leading emoji marker. Matched rows are audit-only at this
-    // point (the cascade twin owns the work surface), so a clean title makes
-    // the Migration Support callout's views more readable. Only PATCH when
-    // the cleaned title actually differs from the original — idempotent on
-    // re-runs that already cleaned the row.
+    // Title cleanup + emoji-to-icon — drop the study-name prefix from the
+    // source title and lift any recognized leading emoji marker (🔶 ✅ 🔷 ⚠️ 🚨)
+    // into the page icon. Matched rows are audit-only at this point (the
+    // cascade twin owns the work surface), so a clean title + status icon
+    // makes the Migration Support callout's views readable at a glance. Both
+    // writes are conditional + idempotent: title only patched when it differs
+    // from the original, icon only patched when an emoji was actually
+    // detached. Re-runs on already-cleaned rows are no-ops.
+    let icon;
     if (originalName && resolvedStudyName) {
-      const cleaned = cleanTitleByStrippingStudyPrefix(originalName, resolvedStudyName);
-      if (cleaned && cleaned !== originalName) {
-        properties.title = [{ type: 'text', text: { content: cleaned } }];
+      const split = splitStudyPrefixAndEmoji(originalName, resolvedStudyName);
+      if (split.title && split.title !== originalName) {
+        properties.title = [{ type: 'text', text: { content: split.title } }];
+      }
+      if (split.emoji) {
+        icon = { type: 'emoji', emoji: split.emoji };
       }
     }
-    migratedPatches.push({ taskId: migratedPageId, properties });
+    const patchEntry = { taskId: migratedPageId, properties };
+    if (icon) patchEntry.icon = icon;
+    migratedPatches.push(patchEntry);
     cascadeIdsMatched.add(cascadeId);
   }
 
