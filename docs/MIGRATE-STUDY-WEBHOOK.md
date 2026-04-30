@@ -84,7 +84,7 @@ Surviving knobs (defaults in `src/migration/thresholds.js`; override via env):
 | Env | Default | Meaning |
 |-----|---------|---------|
 | `MIGRATE_MIN_STUDY_TASKS` | `100` | Minimum Study Tasks for the Inception prerequisite check. Structural — not a data-quality threshold. |
-| `MIGRATE_JACCARD_MIN` | `0.6` | Minimum Jaccard score for the matcher's low-tier name match. Matcher tuning, not a gate. |
+| `MIGRATE_JACCARD_MIN` | `0.45` | Minimum Jaccard score for the matcher's low-tier name match. Matcher tuning, not a gate. Lowered from the original 0.6 once quality gates were removed and PMs began reconciling false positives in the Migration Support callout. |
 
 Removed env vars (formerly used; safe to leave inert on Railway): `MIGRATE_MIN_MIGRATED_TASKS`, `MIGRATE_MAX_MIGRATED_TASKS`, `MIGRATE_MAX_UNMATCHED_COMPLETED_RATIO`, `MIGRATE_MAX_LOW_TIER_MATCHES`.
 
@@ -111,10 +111,16 @@ Operations are designed to be **idempotent**: relation targets and completion ov
 **Match Confidence tier mapping:**
 - `prefilled` (Production Task already linked before this run) → **High**
 - `high` (matcher exact-name hit) → **High**
-- `medium` (matcher normalized / paren-strip / milestone-fallback) → **Medium**
+- `medium` (matcher normalized / paren-strip / milestone-fallback / milestone-inferred) → **Medium**
 - `low` (Jaccard token-set fallback) → **Low**
 
 The write is best-effort — if the Migrated Tasks DB doesn't expose a `Match Confidence` column, the run completes without it; the cascade-side rollup just stays empty for that run.
+
+**Matcher tier extensions for messy real-world studies:**
+
+- **Study-name prefix strip.** Source titles often wrap cascade-equivalent names with the study identifier (e.g., `🔶 Alexion PNH PLEDGE External Kickoff`, `Alexion PNH: Submit IRB`). Before any matcher tier runs, the study name is tokenized and peeled from the leading position of the source title. Internal occurrences of study tokens are preserved.
+- **Title-based milestone inference.** When a Migrated Task is tagged `Task Type Tags ⊇ {Milestone}` but the source `Milestone` select is empty (a common carryover gap), the matcher scans the (study-prefix-stripped) title for any cascade Milestone option in use on this study and uses the longest match as the inferred canonical for the milestone-fallback flow. Resolves to `tier: 'medium'`, source `'milestone-inferred'`.
+- **Lower Jaccard floor.** With quality gates removed and PMs reconciling false positives in the Migration Support callout, the low-tier Jaccard floor is `0.45` rather than the original `0.6` — net more matches, slightly more PM cleanup. Tunable per study via `MIGRATE_JACCARD_MIN` if a particular study needs a stricter floor.
 
 **What errors mean:** Red banner in **Automation Reporting** on the **Production Study** page + a comment on the Study page → gate failed or unexpected exception. (The single exception is `production_study_relation`, which surfaces on the **Exported Studies** row because the Production Study is not yet resolvable.) **No live writes** occurred unless Import Mode was armed (if armed, `finally` attempts to clear Import Mode).
 

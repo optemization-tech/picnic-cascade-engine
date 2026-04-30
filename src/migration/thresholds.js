@@ -12,8 +12,14 @@
 export const DEFAULT_MIGRATION_THRESHOLDS = {
   /** Minimum Study Tasks linked to the study (Inception prerequisite — structural, not data-quality). */
   minStudyTasks: 100,
-  /** Minimum Jaccard token-set similarity for low-tier match (0–1). Matcher tuning, not a gate. */
-  jaccardMin: 0.6,
+  /**
+   * Minimum Jaccard token-set similarity for low-tier match (0–1).
+   * Matcher tuning, not a gate. Lowered from 0.6 → 0.45 once quality-threshold
+   * gates were removed: with PMs reconciling false positives via the Migration
+   * Support callout, "match what we can" benefits from a more lenient floor.
+   * Studies whose data needs a stricter floor can override via env.
+   */
+  jaccardMin: 0.45,
 };
 
 export function parseMigrationThresholdsFromEnv() {
