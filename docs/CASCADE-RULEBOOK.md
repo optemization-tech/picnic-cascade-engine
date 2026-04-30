@@ -238,7 +238,8 @@ The distinction from drag-left is the direction of the shared translation.
    - Computes `seed.newStart = nextBusinessDay(max(non-frozen blocker.effectiveEnd))`. Frozen blockers are excluded from `max`. Frozen seeds short-circuit with `subcase: 'no-op'`.
    - Determines sub-case: `subcase = newStart === seed.start ? 'no-op' : newStart > seed.start ? 'violation' : 'gap'`.
    - Writes the seed update to `updatesMap`, then calls `tightenDownstreamFromSeed(new Set([seedTaskId]), updatesMap, taskById)` for chain-wide propagation. Seed set is single-task (D3 in plan) — there's no upstream pass to consider.
-3. **Apply or skip**: if `subcase === 'no-op'`, the route silently skips Activity Log (matches status-rollup's idempotent-no-op pattern; avoids noise on already-tight chains, frozen seeds, etc.). Otherwise, `notionClient.patchPages` writes the updates and Activity Log records `cascadeMode: 'dep-edit'` with `details.subcase`, `details.downstreamCount`, `details.cycleNodes`.
+3. **Roll up parents** via `runParentSubtask({ ..., parentMode: null, movedTaskIds, movedTaskMap, tasks })` (`src/engine/parent-subtask.js`). With `parentMode = null` only the "Cascade Roll-Up" pass runs (§5.4): for each moved subtask, the parent is recomputed as `min(child starts) / max(child ends)`. Mirrors the date-cascade route's pipeline (date-cascade.js:367-378). This step is what keeps a manually-inserted task set's parent date aligned to its subtasks after a Blocked-by edit on a leaf — without it, leaf cascading shifts subtasks but the parent stays put.
+4. **Apply or skip**: if `subcase === 'no-op'`, the route silently skips Activity Log (matches status-rollup's idempotent-no-op pattern; avoids noise on already-tight chains, frozen seeds, etc.). Otherwise, leaf updates and parent roll-ups are merged (leaf wins on collision; parent IDs never overlap with leaf IDs in practice because parents are stripped from the cascade graph). `notionClient.patchPages` writes the merged updates and Activity Log records `cascadeMode: 'dep-edit'` with `details.subcase`, `details.downstreamCount`, `details.rollUpCount`, `details.rollUpTaskIds`, `details.cycleNodes`.
 
 **Key properties**:
 - **Seed-then-downstream** — the seed is computed FIRST (before `tightenDownstreamFromSeed`), because that helper's topo loop deliberately skips seeds (line 401). For the date-edit `start-left` mode, seeds were authored upstream by `pullLeftUpstream`; for dep-edit, no upstream pass runs, so the orchestrator authors the seed directly.
@@ -330,6 +331,8 @@ Any task that has subtasks is blocked from direct date editing in `classify()`. 
 4. If changed, records a roll-up update.
 
 **Pre-applied dates** (lines 62-68): Before any roll-up computation, cascade-moved dates from `movedTaskMap` are applied to `taskById`. This prevents Case B from using stale sibling positions.
+
+**Both date-cascade and dep-edit invoke this pass.** date-cascade always passes a `parentMode` (case-a, case-b, or null) determined by `classify()`; dep-edit always passes `parentMode = null` because its seed is guaranteed to be a leaf (parent-task seeds short-circuit upstream). Both reach the same Cascade Roll-Up section because the gate is `movedTaskIds.length > 0`, not the parentMode value. Without this pass, leaf cascading silently leaves parent dates stale — that was the Meg Apr 30 report on dep-edit (parent didn't follow shifted subtasks).
 
 ---
 

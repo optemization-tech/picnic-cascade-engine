@@ -77,6 +77,11 @@ Route (`processDepEdit` in `src/routes/dep-edit.js`):
 - `BEH-DEP-EDIT-ROUTE-QUERY-REJECT`: A `queryStudyTasks` rejection (Notion 5xx, network timeout) logs an error to Activity Log and posts a study comment without invoking the helper or attempting writes.
 - `BEH-DEP-EDIT-ROUTE-200-IMMEDIATE`: The route replies `200 {ok: true}` before any async work begins.
 - `BEH-DEP-EDIT-ROUTE-ENQUEUE`: The route enqueues via `cascadeQueue.enqueue(payload, parseFn, processFn)` — inheriting 5s debounce + per-study FIFO.
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP`: After `tightenSeedAndDownstream`, the route invokes `runParentSubtask({ ..., parentMode: null, movedTaskIds, movedTaskMap })` and merges parent roll-up updates into the patch payload (CASCADE-RULEBOOK §5.4).
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-LOG`: Activity Log details surface `rollUpCount` and `rollUpTaskIds`; the success summary appends a `, N parent roll-up(s)` clause when parents moved.
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-NONE`: When no moved subtask has a parent, no parent rows appear in the patch payload and `rollUpCount === 0`.
+- `BEH-DEP-EDIT-PARENT-ROLLUP-INTEGRATION`: End-to-end with real `tightenSeedAndDownstream` + `runParentSubtask`: a manually-inserted task-set parent rolls up to span its now-shifted subtasks after a Blocked-by edit on a leaf (Meg Apr 30 repro).
+- `BEH-DEP-EDIT-PARENT-ROLLUP-NO-PARENT`: Top-level leaves (no `parentId`) emit no parent updates from the cascade-roll-up pass.
 
 ## 6) Current Known Gaps
 

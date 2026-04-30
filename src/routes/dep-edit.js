@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { parseWebhookPayload } from '../gates/guards.js';
 import { tightenSeedAndDownstream } from '../engine/cascade.js';
+import { runParentSubtask } from '../engine/parent-subtask.js';
 import { cascadeClient as notionClient, commentClient } from '../notion/clients.js';
 import { queryStudyTasks } from '../notion/queries.js';
 import { ActivityLogService } from '../services/activity-log.js';
@@ -18,17 +19,19 @@ function summarizeFailure(error) {
   return `Dep edit cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
 }
 
-function buildActivityDetails({ parsed, result, error, noActionReason }) {
+function buildActivityDetails({ parsed, result, parentResult, error, noActionReason }) {
   // Surface seed-task pre/post dates by finding the seed update inside the result.
   // Falls back to webhook payload's refStart/refEnd for the originals (which the
   // payload-first parser populates before the cascade computes anything).
   const seedUpdate = result?.updates?.find?.((u) => u.taskId === parsed?.taskId);
+  const leafCount = result?.updates?.length ?? 0;
+  const parentCount = parentResult?.updates?.length ?? 0;
   return {
     // Standard shape consumed by ActivityLogService.detailLines() — populating these
     // keys makes the rendered bullet section non-empty in the Notion Activity Log
     // entry. Dep-edit doesn't have caps/residue, so crossChain stays zeroed.
     movement: {
-      updatedCount: result?.updates?.length ?? 0,
+      updatedCount: leafCount + parentCount,
       movedTaskIds: result?.movedTaskIds || [],
     },
     sourceDates: {
@@ -59,12 +62,14 @@ function buildActivityDetails({ parsed, result, error, noActionReason }) {
     subcase: result?.subcase || null,
     reason: result?.reason || null,
     downstreamCount: result?.downstreamCount ?? 0,
+    rollUpCount: parentCount,
+    rollUpTaskIds: (parentResult?.updates || []).map((u) => u.taskId),
     cycleDetected: Boolean(result?.diagnostics?.cycleDetected),
     cycleTaskIds: result?.diagnostics?.cycleTaskIds || [],
   };
 }
 
-async function logTerminalEvent({ parsed, status, summary, result, noActionReason, error }) {
+async function logTerminalEvent({ parsed, status, summary, result, parentResult, noActionReason, error }) {
   await activityLogService.logTerminalEvent({
     workflow: 'Dep Edit Cascade',
     status,
@@ -78,11 +83,17 @@ async function logTerminalEvent({ parsed, status, summary, result, noActionReaso
     triggeredByUserId: parsed?.triggeredByUserId || null,
     editedByBot: parsed?.editedByBot || false,
     summary,
-    details: buildActivityDetails({ parsed, result, noActionReason, error }),
+    details: buildActivityDetails({ parsed, result, parentResult, noActionReason, error }),
   });
 }
 
 function buildUpdateProperties(update, sourceTaskName, subcase) {
+  // Parent roll-ups carry _isRollUp from runParentSubtask. They share the dep-edit
+  // chain that triggered them, so the message ties the roll-up back to the seed
+  // edit. Leaf updates use the violation/gap subcase phrasing.
+  const content = update._isRollUp
+    ? `❇️ dep-edit ${subcase} roll-up: dates set to ${update.newStart} — ${update.newEnd} (triggered by ${sourceTaskName})`
+    : `❇️ dep-edit ${subcase}: dates shifted (triggered by ${sourceTaskName})`;
   return {
     [STUDY_TASKS_PROPS.DATES.id]: { date: { start: update.newStart, end: update.newEnd } },
     [STUDY_TASKS_PROPS.REF_START.id]: { date: { start: update.newStart } },
@@ -90,9 +101,7 @@ function buildUpdateProperties(update, sourceTaskName, subcase) {
     [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
       rich_text: [{
         type: 'text',
-        text: {
-          content: `❇️ dep-edit ${subcase}: dates shifted (triggered by ${sourceTaskName})`,
-        },
+        text: { content },
         annotations: { color: 'green_background' },
       }],
     },
@@ -190,18 +199,50 @@ async function processDepEdit(payload) {
       return;
     }
 
-    const patchPayload = result.updates.map((u) => ({
+    // Roll up parents of moved subtasks. The dep-edit seed is always a leaf
+    // (parent-task seeds short-circuit upstream), so parentMode=null skips
+    // the case-a/case-b sections of runParentSubtask and runs only the
+    // "Cascade Roll-Up" pass: for each moved task, recompute its parent's
+    // dates as min(child starts) / max(child ends). Mirrors the date-cascade
+    // route's pipeline (date-cascade.js:367-378) so manually-inserted task
+    // sets see the same parent alignment after a Blocked-by edit as they
+    // would after a date drag.
+    const seedMoved = result.movedTaskMap?.[parsed.taskId];
+    const parentResult = runParentSubtask({
+      sourceTaskId: parsed.taskId,
+      sourceTaskName: parsed.taskName,
+      newStart: seedMoved?.newStart || null,
+      newEnd: seedMoved?.newEnd || null,
+      parentTaskId: null,
+      parentMode: null,
+      movedTaskIds: result.movedTaskIds || [],
+      movedTaskMap: result.movedTaskMap || {},
+      tasks: allTasks,
+    });
+
+    // Merge parent roll-ups into the patch payload. Leaf updates win on
+    // taskId collisions (defensive — runParentSubtask emits parent IDs only
+    // when parentMode=null, and parents are stripped from the cascade graph,
+    // so collisions shouldn't occur in practice).
+    const updatesByTaskId = new Map();
+    for (const u of parentResult.updates || []) updatesByTaskId.set(u.taskId, u);
+    for (const u of result.updates) updatesByTaskId.set(u.taskId, u);
+    const mergedUpdates = Array.from(updatesByTaskId.values());
+
+    const patchPayload = mergedUpdates.map((u) => ({
       taskId: u.taskId,
       properties: buildUpdateProperties(u, parsed.taskName, result.subcase),
     }));
 
     const patched = await notionClient.patchPages(patchPayload);
 
+    const rollUpCount = (parentResult.updates || []).length;
     await logTerminalEvent({
       parsed,
       status: 'success',
-      summary: `dep-edit ${result.subcase}: ${parsed.taskName} (${patched.updatedCount} updates, +${result.downstreamCount} downstream)`,
+      summary: `dep-edit ${result.subcase}: ${parsed.taskName} (${patched.updatedCount} updates, +${result.downstreamCount} downstream${rollUpCount > 0 ? `, ${rollUpCount} parent roll-up${rollUpCount === 1 ? '' : 's'}` : ''})`,
       result,
+      parentResult,
     });
   } catch (error) {
     console.error('[dep-edit] processing failed:', error);
