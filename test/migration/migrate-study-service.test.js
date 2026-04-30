@@ -111,6 +111,124 @@ describe('migrate-study-service', () => {
         details: { code: 'exported_study_relation_mismatch' },
       });
     });
+
+    it('warns when Migrated Tasks query exceeds Exported Studies relation count', async () => {
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') {
+          return exportedStudyFixture({ studyId: 'study-1', migratedTaskIds: ['mt-1'] });
+        }
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+        },
+      });
+      let q = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        q += 1;
+        if (q === 1) {
+          return [
+            {
+              id: 'mt-1',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'T', text: { content: 'T' } }] },
+                'Production Task': { relation: [{ id: 'cascade-1' }] },
+                Completed: { checkbox: false },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+            {
+              id: 'mt-2',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }] },
+                'Production Task': { relation: [] },
+                Completed: { checkbox: false },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 'cascade-1',
+            properties: {
+              'Task Name': {
+                title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }],
+              },
+              Study: { relation: [{ id: 'study-1' }] },
+              Milestone: { multi_select: [] },
+              Tags: { multi_select: [] },
+            },
+          },
+        ];
+      });
+      notionClient.listAllUsers.mockResolvedValue([]);
+
+      const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
+      expect(plan.warnings.some((w) => w.category === 'migrated-tasks-relation-underfilled')).toBe(true);
+      expect(plan.summary.migratedRows).toBe(2);
+    });
+
+    it('throws when Migrated Tasks query is below Exported Studies relation count', async () => {
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') {
+          return exportedStudyFixture({ studyId: 'study-1', migratedTaskIds: ['mt-1', 'mt-2'] });
+        }
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+        },
+      });
+      let q = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        q += 1;
+        if (q === 1) {
+          return [
+            {
+              id: 'mt-1',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'T', text: { content: 'T' } }] },
+                'Production Task': { relation: [{ id: 'cascade-1' }] },
+                Completed: { checkbox: false },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 'cascade-1',
+            properties: {
+              'Task Name': {
+                title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }],
+              },
+              Study: { relation: [{ id: 'study-1' }] },
+              Milestone: { multi_select: [] },
+              Tags: { multi_select: [] },
+            },
+          },
+        ];
+      });
+      notionClient.listAllUsers.mockResolvedValue([]);
+
+      await expect(buildMigrationPlan(notionClient, 'exported-1', {})).rejects.toMatchObject({
+        name: 'MigrateStudyGateError',
+        details: { code: 'migrated_count_mismatch' },
+      });
+    });
   });
 
   describe('runMigrateStudyPipeline', () => {
