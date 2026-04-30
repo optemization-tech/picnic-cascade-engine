@@ -315,11 +315,14 @@ async function processAddTaskSet(req) {
       }
     }
 
-    // For TLF buttons, clear Blocked by on Draft TLF tasks
+    // For TLF buttons, clear Blocked by on the Draft v1 TLF seed only — not on
+    // other TLF-named tasks such as Internal Review & Revisions of Draft TLF,
+    // which must retain intra-set blocker edges for wireRemainingRelations.
     if (isTlfButton) {
+      const draftV1Seed = 'draft v1 tlf';
       for (const { tasks } of filteredLevels) {
         for (const task of tasks) {
-          if (task._taskName.toLowerCase().includes('draft') && task._taskName.toLowerCase().includes('tlf')) {
+          if (task._taskName.toLowerCase() === draftV1Seed) {
             task._templateBlockedBy = [];
           }
         }

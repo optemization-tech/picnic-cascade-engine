@@ -931,6 +931,71 @@ describe('add-task-set route', () => {
     expect(mocks.createStudyTasks).not.toHaveBeenCalled();
   });
 
+  describe('TLF intra-set blocker wiring (Meg 2a)', () => {
+    it.each([
+      ['tlf-only'],
+      ['tlf-csr'],
+      ['tlf-insights'],
+      ['tlf-insights-csr'],
+    ])(
+      'preserves Internal Review blocker edge to Draft v1 TLF for %s',
+      async (buttonType) => {
+        mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+        mocks.mockClient.queryDatabase.mockResolvedValue([]);
+        mocks.fetchBlueprint.mockResolvedValue([
+          { id: 'bp-tlf' },
+          { id: 'bp-draft-v1' },
+          { id: 'bp-iir' },
+        ]);
+        const draftV1Child = {
+          _templateId: 'bp-draft-v1',
+          _taskName: 'Draft v1 TLF',
+          _templateParentId: 'bp-tlf',
+          _templateBlockedBy: ['bp-outside-placeholder'],
+        };
+        const iirChild = {
+          _templateId: 'bp-iir',
+          _taskName: 'Internal Review & Revisions of Draft TLF',
+          _templateParentId: 'bp-tlf',
+          _templateBlockedBy: ['bp-draft-v1'],
+        };
+        mocks.filterBlueprintSubtree.mockReturnValue([
+          { level: 0, tasks: [{ _templateId: 'bp-tlf', _taskName: 'TLF' }], isLastLevel: false },
+          { level: 1, tasks: [draftV1Child, iirChild], isLastLevel: true },
+        ]);
+        mocks.createStudyTasks.mockImplementation(async (client, levels) => {
+          const flat = levels.flatMap((lvl) => lvl.tasks);
+          expect(flat.find((t) => t._templateId === 'bp-draft-v1')._templateBlockedBy).toEqual([]);
+          expect(flat.find((t) => t._templateId === 'bp-iir')._templateBlockedBy).toEqual(['bp-draft-v1']);
+          return {
+            idMapping: { 'bp-tlf': 'prod-tlf', 'bp-draft-v1': 'prod-d1', 'bp-iir': 'prod-iir' },
+            totalCreated: 3,
+            depTracking: [{
+              templateId: 'bp-iir',
+              resolvedBlockedByIds: [],
+              unresolvedBlockedByTemplateIds: ['bp-draft-v1'],
+            }],
+            parentTracking: [],
+          };
+        });
+        mocks.wireRemainingRelations.mockResolvedValue({
+          parentsPatchedCount: 0,
+          depsPatchedCount: 1,
+        });
+
+        const { req, res } = makeReqRes(
+          { data: { id: 'study-1' } },
+          { 'x-button-type': buttonType, 'x-parent-task-names': 'TLF' },
+        );
+        await handleAddTaskSet(req, res);
+        await flush();
+
+        expect(draftV1Child._templateBlockedBy).toEqual([]);
+        expect(iirChild._templateBlockedBy).toEqual(['bp-draft-v1']);
+      },
+    );
+  });
+
   describe('Manual Workstream / Item tag (extraTags)', () => {
     function setupTlfCreateMocks() {
       mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
