@@ -86,6 +86,9 @@ function buildChildren(event) {
   if (Array.isArray(detailsForJson.rollUpTaskIds)) {
     detailsForJson.rollUpTaskIds = `[${detailsForJson.rollUpTaskIds.length} parents]`;
   }
+  if (Array.isArray(detailsForJson.cycleTaskIds)) {
+    detailsForJson.cycleTaskIds = `[${detailsForJson.cycleTaskIds.length} cycle nodes]`;
+  }
   const rawDetails = JSON.stringify(detailsForJson, null, 2);
 
   const children = [

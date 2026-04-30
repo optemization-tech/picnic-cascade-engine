@@ -444,17 +444,23 @@ describe('tightenSeedAndDownstream', () => {
         tasks, // pass the original tasks; runParentSubtask re-applies movedTaskMap itself
       });
 
-      // Parent TLF #3 should roll up to span min(child starts) / max(child ends)
+      // Parent TLF #3 should roll up to span min(child starts) / max(child ends).
+      // Pin both endpoints to specific computed values — a regression that
+      // collapsed parent.newEnd=parent.newStart, used max(blocker.end) instead
+      // of max(child.end), or stripped a subtask from the rollup would all
+      // pass the looser "differs from original" check the test used to have.
       const parentUpdate = parentResult.updates.find((u) => u.taskId === 'tlf-3');
       expect(parentUpdate).toBeDefined();
       expect(parentUpdate._isRollUp).toBe(true);
 
-      // Parent dates differ from the original Apr 06 — Apr 17
-      expect(parentUpdate.newStart).not.toBe('2026-04-06');
-      expect(parentUpdate.newEnd).not.toBe('2026-04-17');
-
-      // Specifically, parent's new start = min of moved subtasks (draft-v1.newStart = May 06)
-      expect(parentUpdate.newStart).toBe(draftUpdate.newStart);
+      // Newly-derived range: draft-v1 starts May 06, final (TLF Delivery) ends May 19.
+      // Original parent window was Apr 06 - Apr 17; new window must span the
+      // earliest moved subtask start to the latest moved subtask end.
+      const finalUpdate = cascadeResult.updates.find((u) => u.taskId === 'final');
+      expect(parentUpdate.newStart).toBe('2026-05-06');
+      expect(parentUpdate.newEnd).toBe('2026-05-19');
+      expect(parentUpdate.newStart).toBe(draftUpdate.newStart); // min(child starts)
+      expect(parentUpdate.newEnd).toBe(finalUpdate.newEnd);     // max(child ends)
     });
 
     // @behavior BEH-DEP-EDIT-PARENT-ROLLUP-NO-PARENT

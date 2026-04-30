@@ -388,6 +388,55 @@ describe('handleDepEdit', () => {
         }),
       );
     });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-HELPER-THROWS
+    it('preserves leaf cascade context when runParentSubtask itself throws', async () => {
+      // Distinct from the patchPages-rejects scenario above. If the rollup
+      // helper synchronously throws (e.g., malformed taskById), parentResult
+      // stays null. The failure row must still carry the leaf cascade
+      // context (subcase, movedTaskIds, downstreamCount) — not pretend
+      // nothing happened.
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1', parentId: 'parent-1' }, { id: 'parent-1' }]);
+      mocks.tightenSeedAndDownstream.mockReturnValue({
+        subcase: 'violation',
+        updates: [{ taskId: 'task-1', taskName: 'Test Task', newStart: '2026-04-06', newEnd: '2026-04-07' }],
+        movedTaskIds: ['task-1'],
+        movedTaskMap: { 'task-1': { newStart: '2026-04-06', newEnd: '2026-04-07' } },
+        downstreamCount: 0,
+        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      });
+      mocks.runParentSubtask.mockImplementation(() => {
+        throw new Error('rollup helper crashed');
+      });
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'failed',
+          details: expect.objectContaining({
+            // Leaf cascade context preserved even though parentResult is null
+            subcase: 'violation',
+            // No rollup ran -> rollUpCount zero, rollUpTaskIds empty
+            rollUpCount: 0,
+            rollUpTaskIds: [],
+            error: expect.objectContaining({
+              errorMessage: expect.stringContaining('rollup helper crashed'),
+            }),
+            movement: expect.objectContaining({
+              // movement.updatedCount reflects only the leaf cascade (1) since rollup didn't run
+              updatedCount: 1,
+              movedTaskIds: ['task-1'],
+            }),
+          }),
+        }),
+      );
+      // patchPages was never called (rollup threw before merge/patch)
+      expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    });
   });
 
   describe('early-return guards (defense in depth vs Notion filter)', () => {
