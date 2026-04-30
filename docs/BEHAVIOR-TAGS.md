@@ -29,6 +29,7 @@ For the behavior contract itself (governance matrix, cross-chain algorithm, chan
 - `BEH-COMPLETE-FREEZE`: Tasks with status `Done` or `N/A` never move during cascades and are ignored as blocking constraints.
 - `BEH-BL-H5G`: Parent tasks do not participate in dependency-driven cascading; parent-level dependency edges are stripped before the engine runs.
 - `BEH-PARENT-DIRECT-EDIT-BLOCK`: A top-level parent task cannot be directly date-edited; the classifier rejects that edit and the route reverts the parent back to its reference dates.
+- `BEH-PARENT-SUBTASK-NULL-MODE-SEED-IN-TASKS`: `runParentSubtask` with `parentMode: null` correctly rolls up the seed task's parent when the seed is itself in `tasks` and `movedTaskMap` (the dep-edit case, distinct from the synthetic-source precedent).
 
 ## 4) Route And Automation Rules
 
@@ -77,6 +78,14 @@ Route (`processDepEdit` in `src/routes/dep-edit.js`):
 - `BEH-DEP-EDIT-ROUTE-QUERY-REJECT`: A `queryStudyTasks` rejection (Notion 5xx, network timeout) logs an error to Activity Log and posts a study comment without invoking the helper or attempting writes.
 - `BEH-DEP-EDIT-ROUTE-200-IMMEDIATE`: The route replies `200 {ok: true}` before any async work begins.
 - `BEH-DEP-EDIT-ROUTE-ENQUEUE`: The route enqueues via `cascadeQueue.enqueue(payload, parseFn, processFn)` — inheriting 5s debounce + per-study FIFO.
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP`: After `tightenSeedAndDownstream`, the route invokes `runParentSubtask({ ..., parentMode: null, movedTaskIds, movedTaskMap })` and merges parent roll-up updates into the patch payload (CASCADE-RULEBOOK §5.4).
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-LOG`: Activity Log details surface top-level `rollUpCount` and `rollUpTaskIds`; `movement.updatedCount` reflects merged leaf+parent total; the success summary appends `, N parent roll-up(s)` when parents moved.
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-NONE`: When no moved subtask has a parent, no parent rows appear in the patch payload, `rollUpCount === 0`, and the success summary does not contain a "parent roll-up" phrase.
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-FAILURE-CONTEXT`: When `patchPages` throws after `tightenSeedAndDownstream` and `runParentSubtask` have computed updates, the failure-path Activity Log row preserves rollup context (`rollUpCount`, `rollUpTaskIds`) alongside the cascade context.
+- `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-HELPER-THROWS`: When `runParentSubtask` itself throws (e.g., malformed taskById), `parentResult` stays null but the failure-path Activity Log row still preserves the leaf cascade context (`subcase`, `movement.movedTaskIds`, `movement.updatedCount: leaf only`). `patchPages` is not called.
+- `BEH-DEP-EDIT-ROUTE-NOOP-SKIPS-ROLLUP`: When `subcase === 'no-op'`, the route returns silently before invoking `runParentSubtask` (preserves the no-Activity-Log-noise property and avoids redundant work).
+- `BEH-DEP-EDIT-PARENT-ROLLUP-INTEGRATION`: End-to-end with real `tightenSeedAndDownstream` + `runParentSubtask`: a manually-inserted task-set parent rolls up to span its now-shifted subtasks after a Blocked-by edit on a leaf (Meg Apr 30 repro).
+- `BEH-DEP-EDIT-PARENT-ROLLUP-NO-PARENT`: Top-level leaves (no `parentId`) emit no parent updates from the cascade-roll-up pass.
 
 ## 6) Current Known Gaps
 

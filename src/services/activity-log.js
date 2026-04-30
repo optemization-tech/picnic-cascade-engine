@@ -75,12 +75,19 @@ function detailLines(details = {}) {
 
 function buildChildren(event) {
   const lines = detailLines(event.details);
-  // Strip movedTaskIds from the JSON block — it's an array of UUIDs that
-  // can easily exceed the 2000-char Notion limit and push timing/retry
-  // data off the end. The update count is still in the bullet points.
+  // Strip large UUID arrays from the JSON block — they can easily exceed
+  // the 2000-char Notion limit and push timing/retry data off the end.
+  // Counts stay in the bullet points; the IDs are preserved in raw form
+  // in Railway logs and the patchPages response, so forensics aren't lost.
   const detailsForJson = { ...(event.details || {}) };
   if (detailsForJson.movement) {
     detailsForJson.movement = { ...detailsForJson.movement, movedTaskIds: `[${detailsForJson.movement.movedTaskIds?.length || 0} tasks]` };
+  }
+  if (Array.isArray(detailsForJson.rollUpTaskIds)) {
+    detailsForJson.rollUpTaskIds = `[${detailsForJson.rollUpTaskIds.length} parents]`;
+  }
+  if (Array.isArray(detailsForJson.cycleTaskIds)) {
+    detailsForJson.cycleTaskIds = `[${detailsForJson.cycleTaskIds.length} cycle nodes]`;
   }
   const rawDetails = JSON.stringify(detailsForJson, null, 2);
 

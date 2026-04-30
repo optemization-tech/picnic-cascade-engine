@@ -396,9 +396,9 @@ PMs can wire or rewire a task's `Blocked by` relation manually. When they do, th
 
 **Notion-side automation:** `Dep Edit Cascade` watches the `Blocked by` property on Study Tasks DB. Filters mirror the manual-task pattern — `Last edited by ≠ <bot integration users>`, `[Do Not Edit] Reference Start Date is not empty` (matches the `Fill Refs` precedent above), `Subtask(s) is empty` (parent-task exclusion per BL-H5g). Watches `Blocked by` only — NOT `Blocking` — to avoid Notion's dual-sync double-fire.
 
-**Engine-side handler:** [`src/routes/dep-edit.js`](../src/routes/dep-edit.js) → [`src/engine/cascade.js#tightenSeedAndDownstream`](../src/engine/cascade.js). Inherits 5s debounce + per-study FIFO via `cascadeQueue`, plus the `editedByBot` short-circuit at the route layer.
+**Engine-side handler:** [`src/routes/dep-edit.js`](../src/routes/dep-edit.js) → [`src/engine/cascade.js#tightenSeedAndDownstream`](../src/engine/cascade.js) → [`src/engine/parent-subtask.js#runParentSubtask`](../src/engine/parent-subtask.js) (parent roll-up, parentMode=null). Inherits 5s debounce + per-study FIFO via `cascadeQueue`, plus the `editedByBot` short-circuit at the route layer.
 
-**Behavior:** the seed is tightened to `nextBusinessDay(max(non-frozen blocker.end))`, end shifts by the same delta, and the downstream chain re-validates against the new positions via `tightenDownstreamFromSeed`. See Section 1 Behavior Matrix for the full row.
+**Behavior:** the seed is tightened to `nextBusinessDay(max(non-frozen blocker.end))`, end shifts by the same delta, and the downstream chain re-validates against the new positions via `tightenDownstreamFromSeed`. After leaf cascading, `runParentSubtask({ ..., parentMode: null, movedTaskIds, movedTaskMap })` rolls up each affected parent's dates to `min(child starts) / max(child ends)` (CASCADE-RULEBOOK §5.4). Mirrors the date-cascade pipeline so manually-inserted task sets stay aligned with their now-shifted subtasks after a Blocked-by edit on a leaf. See Section 1 Behavior Matrix for the full row.
 
 **Reuse of the `[Do Not Edit] Reference Start Date is not empty` filter** is critical for the same reason as `Fill Refs`: if the new automation fires on a manual task whose Reference is still empty, the cascade would compute `delta = 0` against the empty Reference and silently no-op. Filtering at the Notion automation layer prevents this and matches the bootstrap-then-cascade lifecycle above.
 
@@ -424,6 +424,20 @@ For every behavior change:
 5. Record decision in pulse log
 
 ## Changelog
+
+### 2026-04-30 — Dep-edit cascade rolls up parent dates (Meg Apr 30 report)
+
+Plan: `docs/plans/2026-04-30-002-fix-dep-edit-parent-rollup-plan.md`.
+
+`processDepEdit` now invokes `runParentSubtask({ ..., parentMode: null, movedTaskIds, movedTaskMap })` after `tightenSeedAndDownstream` and merges the resulting parent updates into the patch payload. Mirrors the date-cascade route's pipeline (date-cascade.js:367-378) so a manually-inserted task set's parent re-aligns to its now-shifted subtasks after a Blocked-by edit on a leaf — without this step, leaf cascading shifted subtasks but the parent date stayed put.
+
+`parentMode = null` deliberately skips the case-a/case-b branches inside `runParentSubtask` (the dep-edit seed is always a leaf — parent-task seeds short-circuit upstream at dep-edit.js:133), running only the §5.4 "Cascade Roll-Up" pass. Activity Log gains top-level `details.rollUpCount` and `details.rollUpTaskIds` (forensics, alongside existing `subcase`/`downstreamCount`); `details.movement.updatedCount` is bumped to include parent rollup updates so the rendered bullet count matches the patched total. The `_reportingMsg` fallback in `buildUpdateProperties` (mirrors date-cascade.js:180) lets parent rollup rows carry a roll-up-flavored Automation Reporting message while leaf rows keep dep-edit's existing phrasing. The `activity-log.js` JSON-strip list is extended to truncate `rollUpTaskIds` array (precedent: `movement.movedTaskIds`) so the Notion JSON block stays under the 2000-char limit.
+
+`parentResult` is hoisted alongside `result` outside the `try` block so the catch's failure-path log preserves rollup context if `patchPages` throws after computing parent updates. Note: date-cascade does not currently thread `parentResult` through its catch — this is a dep-edit-specific improvement; cross-route parity is a follow-up if useful.
+
+**Deferred (same limitation as date-cascade):** multi-level rollup. The pass walks one parent level — grandparents do not realign automatically. Meg's repro is single-level (TLF #3 → Draft v1 TLF), so this fix covers her report. If a 3-level hierarchy regression surfaces, address both routes simultaneously in a separate plan.
+
+Resolves the 2026-04-30 Meg Slack thread on "Manual Workstream / Item" tasks: button-added TLF #3 + Repeat Delivery #3, then Draft v1 TLF wired as `Blocked by` Data Delivery #3 — subtasks shifted, parent TLF #3 didn't follow. CASCADE-RULEBOOK §3.7 step 3 and §5.4 updated; BEHAVIOR-TAGS.md adds 6 new dep-edit route/integration tags + 1 new parent-subtask tag.
 
 ### 2026-04-28 — `[Do Not Edit]` property rename across Study Tasks / Studies / Study Blueprint
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { tightenSeedAndDownstream } from '../../src/engine/cascade.js';
+import { runParentSubtask } from '../../src/engine/parent-subtask.js';
 import { parseDate, countBDInclusive } from '../../src/utils/business-days.js';
 import {
   fanIn,
@@ -368,6 +369,127 @@ describe('tightenSeedAndDownstream', () => {
       expect(result.subcase).toBe('violation');
       const update = result.updates.find((u) => u.taskId === 'iir');
       expect(update).toMatchObject({ newStart: '2026-07-28', newEnd: '2026-07-29' });
+    });
+  });
+
+  // -----------------------------------------------------------
+  // Parent rollup integration: tightenSeedAndDownstream + runParentSubtask
+  // composed exactly like the dep-edit route does. Reproduces Meg Apr 30 with
+  // real helpers (no mocks) — the only test that exercises the seed-with-
+  // parentId case end-to-end.
+  // -----------------------------------------------------------
+  describe('integration — parent rollup after dep-edit (Meg Apr 30)', () => {
+    /**
+     * Manual task-set fixture mirroring Meg's repro: TLF parent + 4 subtasks
+     * in a tight intra-set chain, plus an external Data Delivery task placed
+     * after the TLF window. Wiring Data Delivery as Blocked by Draft v1 TLF
+     * shifts the whole TLF subtree forward, and the parent should roll up.
+     */
+    function manualTlfWithDelivery() {
+      return [
+        // External blocker (e.g., Data Delivery #3) — placed AFTER the TLF window
+        task('delivery', 'Data Delivery #3', '2026-05-01', '2026-05-05'),
+        // Parent TLF — originally aligned to its subtasks (Apr 06 - Apr 17)
+        task('tlf-3', 'TLF #3', '2026-04-06', '2026-04-17'),
+        // Subtasks of TLF #3 in a tight intra-set chain
+        task('draft-v1', 'Draft v1 TLF', '2026-04-06', '2026-04-09', {
+          parentId: 'tlf-3',
+          blockingIds: ['internal-review'],
+        }),
+        task('internal-review', 'Internal Review & Revisions', '2026-04-10', '2026-04-13', {
+          parentId: 'tlf-3',
+          blockedByIds: ['draft-v1'],
+          blockingIds: ['client-review'],
+        }),
+        task('client-review', 'Client Review Round 1', '2026-04-14', '2026-04-15', {
+          parentId: 'tlf-3',
+          blockedByIds: ['internal-review'],
+          blockingIds: ['final'],
+        }),
+        task('final', 'TLF Delivery', '2026-04-16', '2026-04-17', {
+          parentId: 'tlf-3',
+          blockedByIds: ['client-review'],
+        }),
+      ];
+    }
+
+    // @behavior BEH-DEP-EDIT-PARENT-ROLLUP-INTEGRATION
+    it('rolls up the parent task to span the shifted subtask range (Meg Apr 30 repro)', () => {
+      const tasks = manualTlfWithDelivery();
+      // Wire delivery as a blocker on Draft v1 TLF (the user-initiated edit)
+      tasks.find((t) => t.id === 'draft-v1').blockedByIds = ['delivery'];
+
+      // Step 1: leaf cascade (what dep-edit's tightenSeedAndDownstream does)
+      const cascadeResult = tightenSeedAndDownstream({
+        seedTaskId: 'draft-v1',
+        tasks,
+      });
+      expect(cascadeResult.subcase).toBe('violation');
+
+      // Subtasks of TLF #3 should all shift forward.
+      // delivery.end = May 05 (Tue) → nextBD = May 06 (Wed).
+      const draftUpdate = cascadeResult.updates.find((u) => u.taskId === 'draft-v1');
+      expect(draftUpdate).toMatchObject({ newStart: '2026-05-06' });
+
+      // Step 2: parent rollup (what the route fix adds)
+      const parentResult = runParentSubtask({
+        sourceTaskId: 'draft-v1',
+        sourceTaskName: 'Draft v1 TLF',
+        newStart: cascadeResult.movedTaskMap['draft-v1'].newStart,
+        newEnd: cascadeResult.movedTaskMap['draft-v1'].newEnd,
+        parentTaskId: null,
+        parentMode: null,
+        movedTaskIds: cascadeResult.movedTaskIds,
+        movedTaskMap: cascadeResult.movedTaskMap,
+        tasks, // pass the original tasks; runParentSubtask re-applies movedTaskMap itself
+      });
+
+      // Parent TLF #3 should roll up to span min(child starts) / max(child ends).
+      // Pin both endpoints to specific computed values — a regression that
+      // collapsed parent.newEnd=parent.newStart, used max(blocker.end) instead
+      // of max(child.end), or stripped a subtask from the rollup would all
+      // pass the looser "differs from original" check the test used to have.
+      const parentUpdate = parentResult.updates.find((u) => u.taskId === 'tlf-3');
+      expect(parentUpdate).toBeDefined();
+      expect(parentUpdate._isRollUp).toBe(true);
+
+      // Newly-derived range: draft-v1 starts May 06, final (TLF Delivery) ends May 19.
+      // Original parent window was Apr 06 - Apr 17; new window must span the
+      // earliest moved subtask start to the latest moved subtask end.
+      const finalUpdate = cascadeResult.updates.find((u) => u.taskId === 'final');
+      expect(parentUpdate.newStart).toBe('2026-05-06');
+      expect(parentUpdate.newEnd).toBe('2026-05-19');
+      expect(parentUpdate.newStart).toBe(draftUpdate.newStart); // min(child starts)
+      expect(parentUpdate.newEnd).toBe(finalUpdate.newEnd);     // max(child ends)
+    });
+
+    // @behavior BEH-DEP-EDIT-PARENT-ROLLUP-NO-PARENT
+    it('emits no parent updates when the seed has no parent (top-level leaf)', () => {
+      // linearTightChain has no parentId on any task — pure top-level chain
+      const tasks = linearTightChain();
+      // Push a's end forward to create a violation when b is the seed
+      const a = tasks.find((t) => t.id === 'a');
+      a.end = parseDate('2026-04-10');
+      a.duration = countBDInclusive(a.start, a.end);
+
+      const cascadeResult = tightenSeedAndDownstream({ seedTaskId: 'b', tasks });
+      // If still tight after the fixture mutation, skip — not what this test is verifying
+      if (cascadeResult.subcase === 'no-op') return;
+
+      const parentResult = runParentSubtask({
+        sourceTaskId: 'b',
+        sourceTaskName: 'B',
+        newStart: cascadeResult.movedTaskMap['b']?.newStart || null,
+        newEnd: cascadeResult.movedTaskMap['b']?.newEnd || null,
+        parentTaskId: null,
+        parentMode: null,
+        movedTaskIds: cascadeResult.movedTaskIds,
+        movedTaskMap: cascadeResult.movedTaskMap,
+        tasks,
+      });
+
+      // No tasks have parents → no rollup updates emitted
+      expect(parentResult.updates).toEqual([]);
     });
   });
 });
