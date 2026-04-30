@@ -4,6 +4,7 @@ import {
   MigrateStudyGateError,
   runMigrateStudyPipeline,
 } from '../../src/migration/migrate-study-service.js';
+import { tierToMatchConfidence } from '../../src/migration/constants.js';
 import { STUDIES_PROPS as S } from '../../src/notion/property-names.js';
 
 function prop(type, id, value) {
@@ -57,6 +58,27 @@ describe('migrate-study-service', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  describe('tierToMatchConfidence', () => {
+    it('maps prefilled and high tiers to "High"', () => {
+      expect(tierToMatchConfidence('prefilled')).toBe('High');
+      expect(tierToMatchConfidence('high')).toBe('High');
+    });
+
+    it('maps medium tier to "Medium"', () => {
+      expect(tierToMatchConfidence('medium')).toBe('Medium');
+    });
+
+    it('maps low tier to "Low"', () => {
+      expect(tierToMatchConfidence('low')).toBe('Low');
+    });
+
+    it('returns null for unknown / missing tiers', () => {
+      expect(tierToMatchConfidence(undefined)).toBeNull();
+      expect(tierToMatchConfidence(null)).toBeNull();
+      expect(tierToMatchConfidence('mystery')).toBeNull();
+    });
   });
 
   describe('MigrateStudyGateError', () => {
@@ -255,6 +277,7 @@ describe('migrate-study-service', () => {
         properties: {
           Study: { id: 'sch-study' },
           'Production Task': { id: 'sch-pt' },
+          'Match Confidence': { id: 'sch-mc' },
         },
       });
       let q = 0;
@@ -294,6 +317,63 @@ describe('migrate-study-service', () => {
       const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
       expect(plan.migratedPatches.length).toBe(1);
       expect(plan.migratedPatches[0].taskId).toBe('mt-done');
+      // Exact-name match → tier 'high' → Match Confidence "High".
+      expect(plan.migratedPatches[0].properties['sch-mc']).toEqual({ select: { name: 'High' } });
+      expect(plan.migratedPatches[0].properties['sch-pt']).toEqual({ relation: [{ id: 'cascade-1' }] });
+    });
+
+    it('skips Match Confidence write when the Migrated Tasks DB does not expose the column', async () => {
+      // Best-effort: older Migrated Tasks DBs without the Match Confidence column
+      // should still complete a migration; the cascade-side rollup just stays empty.
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+          // No 'Match Confidence' here — older schema.
+        },
+      });
+      let q = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        q += 1;
+        if (q === 1) {
+          return [
+            {
+              id: 'mt-done',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }] },
+                'Production Task': { relation: [] },
+                Completed: { checkbox: true },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 'cascade-1',
+            properties: {
+              'Task Name': { title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }] },
+              Study: { relation: [{ id: 'study-1' }] },
+              Milestone: { multi_select: [] },
+              Tags: { multi_select: [] },
+            },
+          },
+        ];
+      });
+      notionClient.listAllUsers.mockResolvedValue([]);
+
+      const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
+      expect(plan.migratedPatches.length).toBe(1);
+      // Production Task still written; Match Confidence absent (no schema id resolved).
+      expect(plan.migratedPatches[0].properties).toHaveProperty('sch-pt');
+      expect(Object.keys(plan.migratedPatches[0].properties)).toEqual(['sch-pt']);
     });
 
     it('warns (does not throw) when Migrated Tasks query is below Exported Studies relation count', async () => {

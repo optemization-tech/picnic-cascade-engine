@@ -5,6 +5,7 @@ import {
   MIGRATED_TASKS_DB_ID,
   MIGRATED_TASK_PROP,
   MIGRATED_TASK_PRODUCTION_RELATION_NAMES,
+  tierToMatchConfidence,
 } from './constants.js';
 import { relationIds } from './extract.js';
 import { titlePlain, richTextPlain } from './extract.js';
@@ -139,6 +140,10 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
   const mtDb = await notionClient.retrieveDatabase(MIGRATED_TASKS_DB_ID);
   const studyPropIdOnMigratedTasks = propertySchemaId(mtDb, MIGRATED_TASK_PROP.STUDY);
   const productionTaskPropId = propertySchemaIdFirst(mtDb, MIGRATED_TASK_PRODUCTION_RELATION_NAMES);
+  // Optional: older Migrated Tasks DBs may not have this column yet. Best-effort
+  // — when missing we skip the write rather than halting; the cascade-side
+  // rollup just stays empty for that run.
+  const matchConfidencePropId = propertySchemaId(mtDb, MIGRATED_TASK_PROP.MATCH_CONFIDENCE);
   if (!studyPropIdOnMigratedTasks || !productionTaskPropId) {
     throw new MigrateStudyGateError(
       'Could not resolve Migrated Tasks schema (Study / Production Task or Notion Task property ids).',
@@ -286,13 +291,19 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
   const cascadePatches = new Map();
   const cascadeIdsMatched = new Set();
 
-  function queueProductionTask(migratedPageId, cascadeId) {
-    migratedPatches.push({
-      taskId: migratedPageId,
-      properties: {
-        [productionTaskPropId]: { relation: [{ id: cascadeId }] },
-      },
-    });
+  function queueProductionTask(migratedPageId, cascadeId, tier) {
+    const properties = {
+      [productionTaskPropId]: { relation: [{ id: cascadeId }] },
+    };
+    // Match Confidence write — best-effort. Lives on the Migrated Tasks DB
+    // (select: High|Medium|Low). The cascade-side `Match Confidence` is a
+    // rollup through `Notion Task` <-> `Asana Task`, so writing here
+    // populates both surfaces.
+    const confidence = tierToMatchConfidence(tier);
+    if (matchConfidencePropId && confidence) {
+      properties[matchConfidencePropId] = { select: { name: confidence } };
+    }
+    migratedPatches.push({ taskId: migratedPageId, properties });
     cascadeIdsMatched.add(cascadeId);
   }
 
@@ -328,7 +339,7 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
       && twinCascadePage
       && hasManualWorkstreamTag(twinCascadePage.properties);
     if (!skipProdLinkForManual) {
-      queueProductionTask(mPage.id, twin.cascadeId);
+      queueProductionTask(mPage.id, twin.cascadeId, twin.tier);
     }
 
     const assignee = richTextPlain(props, MIGRATED_TASK_PROP.ASSIGNEE);

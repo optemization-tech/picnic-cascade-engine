@@ -106,7 +106,15 @@ Operations are designed to be **idempotent**: relation targets and completion ov
 
 ## PM one-pager
 
-**What the button does:** After carryover + inception, wires **Production Task** relations, applies completion overlay (max **Date Completed** across contributors per cascade task, skipping **Manual Workstream / Item** where applicable), assigns owners when assignee text resolves to a workspace user, sets **Migration Status**, and marks remaining unmatched cascade tasks **Blueprint-default**.
+**What the button does:** After carryover + inception, wires **Production Task** (alias **Notion Task**) relations on Migrated Tasks, applies completion overlay (max **Date Completed** across contributors per cascade task, skipping **Manual Workstream / Item** where applicable), assigns owners when assignee text resolves to a workspace user, writes **Match Confidence** (`High` / `Medium` / `Low`) on each linked Migrated Task — the cascade-side `Match Confidence` is a rollup through `Notion Task` ↔ `Asana Task`, so this populates both surfaces — sets **Migration Status**, and marks remaining unmatched cascade tasks **Blueprint-default**.
+
+**Match Confidence tier mapping:**
+- `prefilled` (Production Task already linked before this run) → **High**
+- `high` (matcher exact-name hit) → **High**
+- `medium` (matcher normalized / paren-strip / milestone-fallback) → **Medium**
+- `low` (Jaccard token-set fallback) → **Low**
+
+The write is best-effort — if the Migrated Tasks DB doesn't expose a `Match Confidence` column, the run completes without it; the cascade-side rollup just stays empty for that run.
 
 **What errors mean:** Red banner in **Automation Reporting** on the **Production Study** page + a comment on the Study page → gate failed or unexpected exception. (The single exception is `production_study_relation`, which surfaces on the **Exported Studies** row because the Production Study is not yet resolvable.) **No live writes** occurred unless Import Mode was armed (if armed, `finally` attempts to clear Import Mode).
 
