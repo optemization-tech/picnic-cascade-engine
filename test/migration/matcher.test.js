@@ -11,7 +11,12 @@ import {
   isCompletedRow,
   hasManualWorkstreamTag,
 } from '../../src/migration/matcher.js';
-import { cleanTitleByStrippingStudyPrefix, stripStudyPrefix } from '../../src/migration/normalize.js';
+import {
+  applyNameAliases,
+  cleanTitleByStrippingStudyPrefix,
+  jaccardTokens,
+  stripStudyPrefix,
+} from '../../src/migration/normalize.js';
 
 const TN = STUDY_TASKS_PROPS.TASK_NAME.name;
 
@@ -279,6 +284,98 @@ describe('migration/matcher', () => {
       expect(
         cleanTitleByStrippingStudyPrefix('🔷 Alexion PNH PLEDGE Future', 'Alexion PNH PLEDGE'),
       ).toBe('🔷 Future');
+    });
+  });
+
+  describe('applyNameAliases (MILESTONE_VOCAB-derived substitutions)', () => {
+    it('replaces source-side milestone phrasing with cascade canonical (case-insensitive)', () => {
+      expect(applyNameAliases('External Kickoff Meeting')).toBe('External Kickoff');
+      expect(applyNameAliases('external kickoff meeting')).toBe('External Kickoff');
+      expect(applyNameAliases('Submit IRB')).toBe('IRB Submission');
+    });
+
+    it('respects word boundaries (does not chop substrings inside larger words)', () => {
+      expect(applyNameAliases('Resubmit IRBackup task')).toBe('Resubmit IRBackup task');
+    });
+
+    it('returns the input unchanged when no alias matches', () => {
+      expect(applyNameAliases('Random project task')).toBe('Random project task');
+    });
+
+    it('handles empty / null input', () => {
+      expect(applyNameAliases('')).toBe('');
+      expect(applyNameAliases(null)).toBe('');
+      expect(applyNameAliases(undefined)).toBe('');
+    });
+
+    it('flows through jaccardTokens so source and cascade phrasings score against the canonical token shape', () => {
+      // "Submit IRB" aliases to "IRB Submission" and tokenizes to {irb, submission}.
+      // "IRB Submission" tokenizes to {irb, submission} directly.
+      // Jaccard(A, B) = |A ∩ B| / |A ∪ B| = 2 / 2 = 1.0 — a perfect match.
+      expect(jaccardTokens('Submit IRB', 'IRB Submission')).toBe(1);
+    });
+  });
+
+  describe('resolveCascadeTwin — milestone-fallback Jaccard disambiguation (Fix C)', () => {
+    it('picks the candidate whose cascade name is most Jaccard-similar to the source title when milestone is shared', () => {
+      // Two cascade tasks tagged Milestone "External Kickoff" — one whose name
+      // shares more tokens with the source title, one whose name shares fewer.
+      // Neither name matches the source via name-lookup (so milestone-fallback
+      // is the only path), and Jaccard breaks the tie.
+      const pages = [
+        studyTask('cascade-ek-sponsor', 'External Kickoff Sponsor Meeting', {
+          [STUDY_TASKS_PROPS.MILESTONE.name]: { multi_select: [{ name: 'External Kickoff' }] },
+        }),
+        studyTask('cascade-ek-prep', 'Pre-Kickoff Logistics', {
+          [STUDY_TASKS_PROPS.MILESTONE.name]: { multi_select: [{ name: 'External Kickoff' }] },
+        }),
+      ];
+      const idx = buildStudyTaskNameIndex(pages);
+      const opts = collectCascadeMilestoneOptions(pages);
+      const result = resolveCascadeTwin({
+        migratedProps: {
+          [MIGRATED_TASK_PROP.NAME]: titleValue('🔶 Test Study External Kickoff Sponsor'),
+          [MIGRATED_TASK_PROP.TASK_TYPE_TAGS]: { multi_select: [{ name: 'Milestone' }] },
+        },
+        studyTaskPages: pages,
+        nameIndex: idx,
+        requireMilestoneTagForFallback: true,
+        jaccardMin: 0.35,
+        studyName: 'Test Study',
+        cascadeMilestoneOptions: opts,
+      });
+      // Sponsor candidate scores higher Jaccard than Pre-Kickoff candidate.
+      expect(result?.cascadeId).toBe('cascade-ek-sponsor');
+      expect(result?.tier).toBe('medium');
+      expect(result?.source).toBe('milestone-inferred-disambiguated');
+    });
+
+    it('still returns ambiguous when two candidates tie on Jaccard score', () => {
+      const pages = [
+        studyTask('a', 'Kickoff Alpha', {
+          [STUDY_TASKS_PROPS.MILESTONE.name]: { multi_select: [{ name: 'External Kickoff' }] },
+        }),
+        studyTask('b', 'Kickoff Beta', {
+          [STUDY_TASKS_PROPS.MILESTONE.name]: { multi_select: [{ name: 'External Kickoff' }] },
+        }),
+      ];
+      const idx = buildStudyTaskNameIndex(pages);
+      const opts = collectCascadeMilestoneOptions(pages);
+      const result = resolveCascadeTwin({
+        migratedProps: {
+          [MIGRATED_TASK_PROP.NAME]: titleValue('🔶 Test Study External Kickoff Sponsor'),
+          [MIGRATED_TASK_PROP.TASK_TYPE_TAGS]: { multi_select: [{ name: 'Milestone' }] },
+        },
+        studyTaskPages: pages,
+        nameIndex: idx,
+        requireMilestoneTagForFallback: true,
+        jaccardMin: 0.35,
+        studyName: 'Test Study',
+        cascadeMilestoneOptions: opts,
+      });
+      // Both candidates score the same against the source, so disambiguation
+      // refuses to guess and returns ambiguous.
+      expect(result).toEqual({ ambiguous: true });
     });
   });
 

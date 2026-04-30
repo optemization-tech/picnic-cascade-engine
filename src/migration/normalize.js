@@ -1,3 +1,5 @@
+import { MILESTONE_VOCAB } from './vocabulary.js';
+
 /** Companion §2 — trim, collapse space, lowercase, strip leading emoji/markers. Parentheses preserved. */
 
 /** Strip leading milestone markers from §2 (defensive). */
@@ -81,9 +83,43 @@ export function stripStudyPrefix(name, studyName) {
 
 const MARKERS = /^\[(?:FYI|Milestone|Optional|Parent|Subtask)\]\s*/i;
 
+/**
+ * Reusable, MILESTONE_VOCAB-derived name aliases. The vocabulary already maps
+ * source-side milestone phrasings to canonical cascade milestone phrasings
+ * (e.g., "External Kickoff Meeting" → "External Kickoff", "Submit IRB" →
+ * "IRB Submission"). Applied as case-insensitive word-boundary substitutions
+ * during name normalization and Jaccard tokenization, so both the name-lookup
+ * tier and the low-tier Jaccard score benefit.
+ */
+const NAME_ALIAS_PATTERNS = (() => {
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const entries = [];
+  for (const [source, canonical] of Object.entries(MILESTONE_VOCAB)) {
+    if (!canonical) continue;
+    if (source === canonical) continue; // identity mapping is a no-op
+    entries.push({
+      pattern: new RegExp(`\\b${escapeRe(source)}\\b`, 'gi'),
+      canonical,
+    });
+  }
+  // Longest-source-first, so "External Kickoff Meeting" replaces before the
+  // shorter "External Kickoff" key (if present) tries.
+  return entries.sort((a, b) => b.pattern.source.length - a.pattern.source.length);
+})();
+
+export function applyNameAliases(name) {
+  if (!name || typeof name !== 'string') return name || '';
+  let result = name;
+  for (const { pattern, canonical } of NAME_ALIAS_PATTERNS) {
+    result = result.replace(pattern, canonical);
+  }
+  return result;
+}
+
 export function normalizeName(raw) {
   if (!raw || typeof raw !== 'string') return '';
   let s = stripLeadingMarkers(raw);
+  s = applyNameAliases(s);
   s = s.trim().replace(/\s+/g, ' ').toLowerCase();
   for (;;) {
     const next = s.replace(MARKERS, '');
@@ -108,8 +144,10 @@ export function normalizeAssigneeForOwner(raw) {
 
 export function tokenSet(str) {
   if (!str) return new Set();
+  // Aliases applied so source/cascade phrasings meet at the canonical token
+  // shape (e.g., "Submit IRB" tokens align with "IRB Submission" tokens).
   return new Set(
-    str
+    applyNameAliases(str)
       .toLowerCase()
       .split(/[^a-z0-9]+/i)
       .filter(Boolean),

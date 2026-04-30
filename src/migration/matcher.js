@@ -171,6 +171,33 @@ export function resolveCascadeTwin({
         return { cascadeId: ids[0], source, tier: 'medium' };
       }
       if (ids.length > 1) {
+        // Disambiguate via Jaccard against the source title — when one
+        // candidate's name is meaningfully closer to the source row than the
+        // others, prefer it over `ambiguous`. Only resolve when there's a
+        // single clear winner with a non-zero score.
+        const propName2 = STUDY_TASKS_PROPS.TASK_NAME.name;
+        let bestId = null;
+        let bestScore = -1;
+        let tie = false;
+        for (const id of ids) {
+          const page = studyTaskPages.find((p) => p.id === id);
+          if (!page) continue;
+          const tn = titlePlain(page.properties, propName2);
+          const score = jaccardTokens(stripped, tn);
+          if (score > bestScore) {
+            bestScore = score;
+            bestId = id;
+            tie = false;
+          } else if (score === bestScore && bestScore > 0) {
+            tie = true;
+          }
+        }
+        if (!tie && bestId && bestScore > 0) {
+          const source = inferredMilestone
+            ? 'milestone-inferred-disambiguated'
+            : 'milestone-fallback-disambiguated';
+          return { cascadeId: bestId, source, tier: 'medium' };
+        }
         return { ambiguous: true };
       }
     }
