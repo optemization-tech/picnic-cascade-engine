@@ -20,8 +20,13 @@ const UNSUPPORTED_BLOCK_TYPES = new Set([
   'breadcrumb',
   'column_list',
   'column',
+  // Tables need hydrated row/cell children — shallow template fetch yields incomplete payloads and append 400s
+  'table',
+  'table_row',
   // NOTE: synced_block is NOT here — we resolve them into real blocks
 ]);
+
+const TABLE_SKIP_TYPES = new Set(['table', 'table_row']);
 
 const RICH_TEXT_BLOCK_TYPES = new Set([
   'paragraph',
@@ -41,6 +46,62 @@ const PROGRESS_INTERVAL = 50;
 const DEFAULT_CONCURRENCY = 5;
 const DEFAULT_READ_WORKERS_PER_TOKEN = 3;
 const DEFAULT_WRITE_WORKERS_PER_TOKEN = 10;
+
+/**
+ * Notion block reads often embed `mention` objects in `rich_text` that fail append validation
+ * (e.g. `link_preview`, partial `user`). Converts problematic mentions to plain `text` segments,
+ * preserving a hyperlink when a URL is known.
+ *
+ * @param {object[]} richText - rich_text array from block read shape
+ * @returns {object[]}
+ */
+export function sanitizeRichTextForAppend(richText) {
+  if (!Array.isArray(richText)) return richText;
+
+  const out = [];
+  for (const seg of richText) {
+    if (!seg || typeof seg !== 'object') continue;
+
+    if (seg.type === 'equation') {
+      out.push(seg);
+      continue;
+    }
+
+    const hasMention = seg.type === 'mention' || (seg.mention && typeof seg.mention === 'object');
+    if (hasMention) {
+      const annotations =
+        seg.annotations && typeof seg.annotations === 'object' ? { annotations: seg.annotations } : {};
+      const mention = seg.mention || {};
+      const mt = mention.type;
+
+      if (mt === 'link_preview') {
+        const url =
+          mention.link_preview?.url ||
+          mention.link_preview?.external?.url ||
+          null;
+        if (url) {
+          out.push({
+            type: 'text',
+            text: { content: url, link: { url } },
+            ...annotations,
+          });
+          continue;
+        }
+      }
+
+      // Other mention types (user, page, date, …) need shapes Notion rejects on append without full hydration
+      out.push({
+        type: 'text',
+        text: { content: ' ' },
+        ...annotations,
+      });
+      continue;
+    }
+
+    out.push(seg);
+  }
+  return out;
+}
 
 /**
  * Recursively strips null and undefined values from an object.
@@ -85,6 +146,10 @@ export function cleanBlock(block) {
     if (RICH_TEXT_BLOCK_TYPES.has(block.type) && data.text && !data.rich_text) {
       data.rich_text = data.text;
       delete data.text;
+    }
+
+    if (RICH_TEXT_BLOCK_TYPES.has(block.type) && Array.isArray(data.rich_text)) {
+      data.rich_text = sanitizeRichTextForAppend(data.rich_text);
     }
 
     cleaned[block.type] = stripNullValues(data);
@@ -200,8 +265,22 @@ async function prepareTemplateChildren(client, templateId, syncCache, { tracer }
 
   const resolved = await resolveSyncedBlocks(client, rawBlocks, syncCache, { tracer });
 
-  return resolved
-    .filter((b) => !UNSUPPORTED_BLOCK_TYPES.has(b.type))
+  let skippedTable = false;
+  const filtered = resolved.filter((b) => {
+    if (!UNSUPPORTED_BLOCK_TYPES.has(b.type)) return true;
+    if (TABLE_SKIP_TYPES.has(b.type)) skippedTable = true;
+    return false;
+  });
+
+  if (skippedTable) {
+    console.log(JSON.stringify({
+      event: 'copy_blocks_skipped_block',
+      reason: 'table_requires_hydration',
+      templateId,
+    }));
+  }
+
+  return filtered
     .map(cleanBlock)
     .slice(0, MAX_BLOCKS_PER_APPEND);
 }
