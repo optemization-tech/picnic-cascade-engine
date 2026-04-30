@@ -73,22 +73,24 @@ The webhook **does not** replace carryover; it assumes migrated rows already exi
 
 ## Dry-run gates (abort before any write)
 
-Hard failures include: `production_study_relation` (Exported Studies row has 0 or >1 Production Study links), `import_mode_on` (Production Study Import Mode already true), `contract_sign_empty`, `exported_study_relation_mismatch` / `exported_study_relation_count` (round-trip 1:1 broken), `schema_migrated_tasks` (couldn't resolve Migrated Tasks DB property ids for Study + Production Task / Notion Task), `migrated_tasks_empty` / `migrated_count_low` / `migrated_count_high`, `migrated_count_mismatch` (Migrated Tasks **query** count is **less** than the Exported Studies `Migrated Tasks` relation count — not the reverse: an under-filled parent relation logs warning `migrated-tasks-relation-underfilled` and continues), `study_tasks_low`, `carryover_study_missing` (a Migrated Task row missing its Study relation), `unmatched_completed_ratio`, `low_tier_cap`.
+Only structural / operational gates remain. Quality-blocking thresholds (min/max migrated count, unmatched-completed ratio, low-tier match cap) were removed because the actual workflow is **"match what we can, PMs reconcile the rest in the Migration Support callout."** Match-quality counters still appear in the success summary so PMs see the scope of manual reconciliation needed; they no longer fail the run.
 
-Configurable thresholds (defaults in `src/migration/thresholds.js`; override via env):
+Hard failures include: `production_study_relation` (Exported Studies row has 0 or >1 Production Study links), `import_mode_on` (Production Study Import Mode already true), `contract_sign_empty`, `exported_study_relation_mismatch` / `exported_study_relation_count` (round-trip 1:1 broken), `schema_migrated_tasks` (couldn't resolve Migrated Tasks DB property ids for Study + Production Task / Notion Task), `migrated_tasks_empty` (zero rows — nothing to migrate), `study_tasks_low` (Inception prerequisite — fewer than `MIGRATE_MIN_STUDY_TASKS` cascade tasks), `carryover_study_missing` (a Migrated Task row missing its Study relation).
+
+Query/relation count discrepancies (`migrated-tasks-relation-overfilled`, `migrated-tasks-relation-underfilled`) are now **warnings** that surface in the success summary rather than gates that halt the run.
+
+Surviving knobs (defaults in `src/migration/thresholds.js`; override via env):
 
 | Env | Default | Meaning |
 |-----|---------|---------|
-| `MIGRATE_MIN_STUDY_TASKS` | `100` | Minimum Study Tasks linked to the study. |
-| `MIGRATE_MIN_MIGRATED_TASKS` | `10` | Minimum Migrated Tasks rows for carryover sanity. |
-| `MIGRATE_MAX_MIGRATED_TASKS` | `500` | Maximum rows (wrong-filter guardrail). |
-| `MIGRATE_MAX_UNMATCHED_COMPLETED_RATIO` | `0.25` | Max share of completed non–Repeat Delivery rows that fail matching / are ambiguous. |
-| `MIGRATE_MAX_LOW_TIER_MATCHES` | `50` | Max Jaccard-based “low tier” matches. |
-| `MIGRATE_JACCARD_MIN` | `0.6` | Minimum score for low-tier name match. |
+| `MIGRATE_MIN_STUDY_TASKS` | `100` | Minimum Study Tasks for the Inception prerequisite check. Structural — not a data-quality threshold. |
+| `MIGRATE_JACCARD_MIN` | `0.6` | Minimum Jaccard score for the matcher's low-tier name match. Matcher tuning, not a gate. |
+
+Removed env vars (formerly used; safe to leave inert on Railway): `MIGRATE_MIN_MIGRATED_TASKS`, `MIGRATE_MAX_MIGRATED_TASKS`, `MIGRATE_MAX_UNMATCHED_COMPLETED_RATIO`, `MIGRATE_MAX_LOW_TIER_MATCHES`.
 
 If any gate fails: **Automation Reporting** on the Study shows an error and a Study comment is posted with the failure summary.
 
-**Reporting target by gate:** Every post-resolution gate (Import Mode, Contract Sign Date, round-trip relation, schema, Migrated Tasks counts, Study Tasks count, carryover, unmatched ratio, low-tier cap) reports on the **Production Study** page — the gate error carries the resolved Production Study id so the catch routes correctly. Only `production_study_relation` reports on the **Exported Studies** row, because that gate fires before the Production Study is known. If the report PATCH itself fails (e.g., property missing on the target page), the failure is now logged as `[migrate-study] reportStatus failed on …` / `[migrate-study] postComment failed on …` rather than swallowed silently.
+**Reporting target by gate:** Every post-resolution gate (Import Mode, Contract Sign Date, round-trip relation, schema, Migrated Tasks empty, Study Tasks count, carryover) reports on the **Production Study** page — the gate error carries the resolved Production Study id so the catch routes correctly. Only `production_study_relation` reports on the **Exported Studies** row, because that gate fires before the Production Study is known. If the report PATCH itself fails (e.g., property missing on the target page), the failure is now logged as `[migrate-study] reportStatus failed on …` / `[migrate-study] postComment failed on …` rather than swallowed silently.
 
 ## Success path
 
@@ -108,4 +110,6 @@ Operations are designed to be **idempotent**: relation targets and completion ov
 
 **What errors mean:** Red banner in **Automation Reporting** on the **Production Study** page + a comment on the Study page → gate failed or unexpected exception. (The single exception is `production_study_relation`, which surfaces on the **Exported Studies** row because the Production Study is not yet resolvable.) **No live writes** occurred unless Import Mode was armed (if armed, `finally` attempts to clear Import Mode).
 
-**Who to ask:** Meg/Tem for threshold tuning (`MIGRATE_*` env vars on Railway).
+**Match quality in the summary:** the success message now reports `Unmatched completed: X/Y (Z%); low-confidence matches: N` so PMs see exactly how much manual reconciliation the run leaves behind. These are surface counts, not blockers — the run still patches everything it could match.
+
+**Who to ask:** Meg/Tem for matcher tuning (`MIGRATE_JACCARD_MIN`) or the Inception prerequisite minimum (`MIGRATE_MIN_STUDY_TASKS`).

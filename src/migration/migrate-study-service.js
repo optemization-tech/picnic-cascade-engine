@@ -166,32 +166,17 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     );
   }
 
-  if (migratedTaskPages.length < thresholds.minMigratedTasks) {
-    throw new MigrateStudyGateError(
-      `Migrated Tasks row count ${migratedTaskPages.length} < minimum ${thresholds.minMigratedTasks} (carryover or filter issue).`,
-      { code: 'migrated_count_low' },
-      studyPageId,
-    );
-  }
-  if (migratedTaskPages.length > thresholds.maxMigratedTasks) {
-    throw new MigrateStudyGateError(
-      `Migrated Tasks row count ${migratedTaskPages.length} > maximum ${thresholds.maxMigratedTasks}.`,
-      { code: 'migrated_count_high' },
-      studyPageId,
-    );
-  }
-
   // Query uses `Study` → Exported Studies row (authoritative for which rows belong to this study).
-  // The parent row's `Migrated Tasks` relation is often under-filled after carryover; do not fail
-  // when query > relation. Fail when query < relation (orphan links on the parent or bad filter).
+  // Mismatches between query count and parent relation count are noted as warnings, not gates —
+  // PMs reconcile via the Migration Support callout. "Match what we can" beats "block when counts
+  // don't tally" for studies whose carryover is messy by nature.
   if (migratedTaskPages.length < migratedTasksRelCount) {
-    throw new MigrateStudyGateError(
-      `Migrated Tasks query (${migratedTaskPages.length}) is fewer than Migrated Studies relation count (${migratedTasksRelCount}).`,
-      { code: 'migrated_count_mismatch' },
-      studyPageId,
-    );
-  }
-  if (migratedTaskPages.length > migratedTasksRelCount) {
+    warnings.push({
+      category: 'migrated-tasks-relation-overfilled',
+      queryCount: migratedTaskPages.length,
+      relationCount: migratedTasksRelCount,
+    });
+  } else if (migratedTaskPages.length > migratedTasksRelCount) {
     warnings.push({
       category: 'migrated-tasks-relation-underfilled',
       queryCount: migratedTaskPages.length,
@@ -262,27 +247,12 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     }
   }
 
+  // Match-quality counters surface in the success summary so PMs can see scope of
+  // manual reconciliation needed, but they no longer gate the run. "Match what we
+  // can and call it a day" — PMs reconcile unmatched + low-confidence rows via
+  // the Migration Support callout's curated dashboard views.
   const unmatchedRatio =
     completedNonRepeatDenom === 0 ? 0 : unmatchedCompletedNonRepeat / completedNonRepeatDenom;
-  if (unmatchedRatio > thresholds.maxUnmatchedCompletedRatio) {
-    throw new MigrateStudyGateError(
-      `Unmatched completed (non–Repeat Delivery) ratio ${(unmatchedRatio * 100).toFixed(1)}% exceeds max ${(thresholds.maxUnmatchedCompletedRatio * 100).toFixed(1)}%.`,
-      {
-        code: 'unmatched_completed_ratio',
-        unmatchedCompletedNonRepeat,
-        completedNonRepeatDenom,
-      },
-      studyPageId,
-    );
-  }
-
-  if (lowTierCount > thresholds.maxLowTierMatches) {
-    throw new MigrateStudyGateError(
-      `Low-confidence (Jaccard) matches ${lowTierCount} exceed max ${thresholds.maxLowTierMatches}.`,
-      { code: 'low_tier_cap', lowTierCount },
-      studyPageId,
-    );
-  }
 
   const collisionContributors = new Map();
   for (const mPage of migratedTaskPages) {
@@ -397,6 +367,10 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     warnings: warnings.length,
     cascadePatchCount: cascadePatches.size,
     migratedPatchCount: migratedPatches.length,
+    completedNonRepeatDenom,
+    unmatchedCompletedNonRepeat,
+    unmatchedRatio,
+    lowTierCount,
   };
 
   return {
@@ -490,7 +464,8 @@ export async function runMigrateStudyPipeline(body, notionClient, {
 
     const applyResult = await applyMigrationPlan(notionClient, plan, { tracer });
 
-    const msg = `Migrate Study complete — migrated PATCHes: ${plan.summary.migratedPatchCount}, cascade PATCHes: ${plan.summary.cascadePatchCount}, total ops: ${applyResult.patched}.`;
+    const unmatchedPct = (plan.summary.unmatchedRatio * 100).toFixed(1);
+    const msg = `Migrate Study complete — migrated PATCHes: ${plan.summary.migratedPatchCount}, cascade PATCHes: ${plan.summary.cascadePatchCount}, total ops: ${applyResult.patched}. Unmatched completed: ${plan.summary.unmatchedCompletedNonRepeat}/${plan.summary.completedNonRepeatDenom} (${unmatchedPct}%); low-confidence matches: ${plan.summary.lowTierCount}. PMs reconcile remaining rows via the Migration Support callout.`;
     await notionClient.reportStatus(studyPageId, 'success', msg, { tracer });
 
     return { ok: true, plan, applyResult };
