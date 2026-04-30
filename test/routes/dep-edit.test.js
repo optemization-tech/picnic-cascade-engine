@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   },
   parseWebhookPayload: vi.fn(),
   tightenSeedAndDownstream: vi.fn(),
+  runParentSubtask: vi.fn(),
   queryStudyTasks: vi.fn(),
   activityLogService: {
     logTerminalEvent: vi.fn(),
@@ -42,6 +43,10 @@ vi.mock('../../src/gates/guards.js', () => ({
 
 vi.mock('../../src/engine/cascade.js', () => ({
   tightenSeedAndDownstream: mocks.tightenSeedAndDownstream,
+}));
+
+vi.mock('../../src/engine/parent-subtask.js', () => ({
+  runParentSubtask: mocks.runParentSubtask,
 }));
 
 vi.mock('../../src/notion/queries.js', () => ({
@@ -88,6 +93,8 @@ function happyParsed(overrides = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: no parent rollups. Tests that exercise the rollup path override this.
+  mocks.runParentSubtask.mockReturnValue({ updates: [], rollUpCount: 0 });
   mocks.cascadeQueueEnqueue.mockImplementation((payload, _parseFn, processFn) => {
     void processFn(payload).catch(() => {});
   });
@@ -182,6 +189,204 @@ describe('handleDepEdit', () => {
 
       expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
       expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+    });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-NOOP-SKIPS-ROLLUP
+    it('skips runParentSubtask entirely when subcase=no-op (silent path preserved)', async () => {
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+      mocks.tightenSeedAndDownstream.mockReturnValue({
+        subcase: 'no-op',
+        reason: 'already-tight',
+        updates: [],
+        movedTaskIds: [],
+        downstreamCount: 0,
+        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      });
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mocks.runParentSubtask).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('parent rollup (cascade-roll-up pass)', () => {
+    // @behavior BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP
+    it('calls runParentSubtask with parentMode=null and merges parent updates into the patch', async () => {
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+      const allTasks = [
+        { id: 'task-1', parentId: 'parent-1' },
+        { id: 'task-2', parentId: 'parent-1' },
+        { id: 'parent-1' },
+      ];
+      mocks.queryStudyTasks.mockResolvedValue(allTasks);
+      mocks.tightenSeedAndDownstream.mockReturnValue({
+        subcase: 'violation',
+        updates: [
+          { taskId: 'task-1', taskName: 'Test Task', newStart: '2026-04-06', newEnd: '2026-04-07' },
+          { taskId: 'task-2', taskName: 'Sibling', newStart: '2026-04-08', newEnd: '2026-04-09' },
+        ],
+        movedTaskIds: ['task-1', 'task-2'],
+        movedTaskMap: {
+          'task-1': { newStart: '2026-04-06', newEnd: '2026-04-07' },
+          'task-2': { newStart: '2026-04-08', newEnd: '2026-04-09' },
+        },
+        downstreamCount: 1,
+        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      });
+      mocks.runParentSubtask.mockReturnValue({
+        updates: [
+          {
+            taskId: 'parent-1',
+            taskName: 'Parent 1',
+            newStart: '2026-04-06',
+            newEnd: '2026-04-09',
+            newReferenceStartDate: '2026-04-06',
+            newReferenceEndDate: '2026-04-09',
+            _isRollUp: true,
+            _reportingMsg: '❇️ Roll-up: dates set to 2026-04-06 — 2026-04-09',
+          },
+        ],
+        rollUpCount: 1,
+      });
+      mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 3 });
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      // runParentSubtask invoked with parentMode=null and the cascade's moved data
+      expect(mocks.runParentSubtask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceTaskId: 'task-1',
+          parentTaskId: null,
+          parentMode: null,
+          movedTaskIds: ['task-1', 'task-2'],
+          movedTaskMap: expect.objectContaining({ 'task-1': expect.any(Object) }),
+          tasks: allTasks,
+        }),
+      );
+
+      // Patch payload merges leaf + parent updates
+      expect(mocks.mockClient.patchPages).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ taskId: 'task-1' }),
+          expect.objectContaining({ taskId: 'task-2' }),
+          expect.objectContaining({ taskId: 'parent-1' }),
+        ]),
+      );
+    });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-LOG
+    it('records rollUpCount and rollUpTaskIds in the Activity Log details and bumps movement.updatedCount', async () => {
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1', parentId: 'parent-1' }, { id: 'parent-1' }]);
+      mocks.tightenSeedAndDownstream.mockReturnValue({
+        subcase: 'violation',
+        updates: [{ taskId: 'task-1', taskName: 'Test Task', newStart: '2026-04-06', newEnd: '2026-04-07' }],
+        movedTaskIds: ['task-1'],
+        movedTaskMap: { 'task-1': { newStart: '2026-04-06', newEnd: '2026-04-07' } },
+        downstreamCount: 0,
+        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      });
+      mocks.runParentSubtask.mockReturnValue({
+        updates: [
+          { taskId: 'parent-1', taskName: 'Parent 1', newStart: '2026-04-06', newEnd: '2026-04-07', _isRollUp: true },
+        ],
+        rollUpCount: 1,
+      });
+      mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 2 });
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'success',
+          summary: expect.stringContaining('parent roll-up'),
+          details: expect.objectContaining({
+            rollUpCount: 1,
+            rollUpTaskIds: ['parent-1'],
+            // movement.updatedCount reflects merged total (1 leaf + 1 parent = 2)
+            movement: expect.objectContaining({ updatedCount: 2 }),
+            // Existing forensics scalars stay top-level
+            subcase: 'violation',
+            downstreamCount: 0,
+          }),
+        }),
+      );
+    });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-NONE
+    it('emits no parent updates and no rollup phrasing when no moved subtask has a parent', async () => {
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+      mocks.tightenSeedAndDownstream.mockReturnValue({
+        subcase: 'gap',
+        updates: [{ taskId: 'task-1', taskName: 'Test Task', newStart: '2026-04-01', newEnd: '2026-04-02' }],
+        movedTaskIds: ['task-1'],
+        movedTaskMap: { 'task-1': { newStart: '2026-04-01', newEnd: '2026-04-02' } },
+        downstreamCount: 0,
+        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      });
+      mocks.runParentSubtask.mockReturnValue({ updates: [], rollUpCount: 0 });
+      mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 1 });
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      // Patch contains only the leaf row
+      const callArgs = mocks.mockClient.patchPages.mock.calls[0][0];
+      expect(callArgs).toHaveLength(1);
+      expect(callArgs[0]).toMatchObject({ taskId: 'task-1' });
+      // Activity Log records rollUpCount=0; success summary has no "parent roll-up" phrase
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          summary: expect.not.stringContaining('parent roll-up'),
+          details: expect.objectContaining({ rollUpCount: 0, rollUpTaskIds: [] }),
+        }),
+      );
+    });
+
+    // @behavior BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-FAILURE-CONTEXT
+    it('preserves parent-rollup context on the failure-path Activity Log row when patchPages throws', async () => {
+      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1', parentId: 'parent-1' }, { id: 'parent-1' }]);
+      mocks.tightenSeedAndDownstream.mockReturnValue({
+        subcase: 'violation',
+        updates: [{ taskId: 'task-1', taskName: 'Test Task', newStart: '2026-04-06', newEnd: '2026-04-07' }],
+        movedTaskIds: ['task-1'],
+        movedTaskMap: { 'task-1': { newStart: '2026-04-06', newEnd: '2026-04-07' } },
+        downstreamCount: 0,
+        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      });
+      mocks.runParentSubtask.mockReturnValue({
+        updates: [
+          { taskId: 'parent-1', taskName: 'Parent 1', newStart: '2026-04-06', newEnd: '2026-04-07', _isRollUp: true },
+        ],
+        rollUpCount: 1,
+      });
+      mocks.mockClient.patchPages.mockRejectedValue(new Error('Notion 502'));
+
+      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+      await handleDepEdit(req, res);
+      await new Promise((r) => setImmediate(r));
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'failed',
+          details: expect.objectContaining({
+            // Failure row preserves rollup context computed before patchPages threw
+            rollUpCount: 1,
+            rollUpTaskIds: ['parent-1'],
+            subcase: 'violation',
+          }),
+        }),
+      );
     });
   });
 

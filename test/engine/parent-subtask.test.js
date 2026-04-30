@@ -140,4 +140,47 @@ describe('runParentSubtask', () => {
     expect(q.newEnd).toBe('2026-04-06');
     expect(q._isRollUp).toBe(true);
   });
+
+  // @behavior BEH-PARENT-SUBTASK-NULL-MODE-SEED-IN-TASKS
+  // The dep-edit case: source task IS in tasks AND IS in movedTaskMap AND has a parentId.
+  // Distinct from the synthetic-source precedent above; closes the load-bearing test gap
+  // that the dep-edit route's parent-rollup integration depends on.
+  it('rolls up the source task\'s own parent when source is in tasks with a parentId (parentMode=null)', () => {
+    const tasks = [
+      task('p', 'Parent P', '2026-03-30', '2026-04-03'),
+      task('seed', 'Seed (leaf)', '2026-03-30', '2026-03-31', { parentId: 'p' }),
+      task('sib', 'Sibling', '2026-04-02', '2026-04-03', { parentId: 'p' }),
+    ];
+
+    // Mirrors what tightenSeedAndDownstream produces: seed is in movedTaskIds AND
+    // has a new position in movedTaskMap. Parent 'p' should roll up to span from
+    // seed's new start (Apr 06) through sibling's unchanged end (Apr 03)... wait,
+    // the seed moved AFTER the sibling. Roll-up should span the full new range.
+    const result = runParentSubtask({
+      sourceTaskId: 'seed',
+      sourceTaskName: 'Seed',
+      newStart: '2026-04-06',
+      newEnd: '2026-04-07',
+      parentTaskId: null,
+      parentMode: null,
+      movedTaskIds: ['seed'],
+      movedTaskMap: {
+        seed: { newStart: '2026-04-06', newEnd: '2026-04-07' },
+      },
+      tasks,
+    });
+
+    // Parent's children after movedTaskMap pre-application:
+    //   seed: 2026-04-06 → 2026-04-07
+    //   sib:  2026-04-02 → 2026-04-03 (unchanged)
+    // Roll-up: min(start)=2026-04-02, max(end)=2026-04-07
+    const p = result.updates.find((u) => u.taskId === 'p');
+    expect(p).toBeDefined();
+    expect(p.newStart).toBe('2026-04-02');
+    expect(p.newEnd).toBe('2026-04-07');
+    expect(p._isRollUp).toBe(true);
+    // The line-311 guard (`if (task.parentId === sourceTaskId) continue;`) must NOT fire here,
+    // because seed.parentId ('p') !== sourceTaskId ('seed'). If a future refactor tightens
+    // that guard to `task.id === sourceTaskId`, this test catches the regression.
+  });
 });
