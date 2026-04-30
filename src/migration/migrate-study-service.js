@@ -76,6 +76,7 @@ function resolveOwnerPeople(assigneeText, emailMap, nameMap) {
  */
 export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tracer } = {}) {
   const thresholds = parseMigrationThresholdsFromEnv();
+  const warnings = [];
 
   const migratedStudyPage = await notionClient.getPage(exportedStudyPageId);
   const prodStudyIds = relationIds(migratedStudyPage.properties, MIGRATED_STUDIES_PROP.PRODUCTION_STUDY);
@@ -161,11 +162,21 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     );
   }
 
-  if (migratedTaskPages.length !== migratedTasksRelCount) {
+  // Query uses `Study` → Exported Studies row (authoritative for which rows belong to this study).
+  // The parent row's `Migrated Tasks` relation is often under-filled after carryover; do not fail
+  // when query > relation. Fail when query < relation (orphan links on the parent or bad filter).
+  if (migratedTaskPages.length < migratedTasksRelCount) {
     throw new MigrateStudyGateError(
-      `Migrated Tasks query (${migratedTaskPages.length}) does not match Migrated Studies relation count (${migratedTasksRelCount}).`,
+      `Migrated Tasks query (${migratedTaskPages.length}) is fewer than Migrated Studies relation count (${migratedTasksRelCount}).`,
       { code: 'migrated_count_mismatch' },
     );
+  }
+  if (migratedTaskPages.length > migratedTasksRelCount) {
+    warnings.push({
+      category: 'migrated-tasks-relation-underfilled',
+      queryCount: migratedTaskPages.length,
+      relationCount: migratedTasksRelCount,
+    });
   }
 
   const studyTaskPages = await notionClient.queryDatabase(
@@ -219,7 +230,6 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
   let completedNonRepeatDenom = 0;
   let unmatchedCompletedNonRepeat = 0;
   let lowTierCount = 0;
-  const warnings = [];
 
   for (const { twin, repeat, completed } of resolutionByMigratedId.values()) {
     if (twin?.tier === 'low') lowTierCount += 1;
