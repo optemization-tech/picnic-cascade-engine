@@ -44,8 +44,11 @@ Production Study from there — see "Pipeline shape" below.
 `exportedStudyPageId` and the legacy `studyPageId` keys are also accepted at
 the top level for ergonomic dry-run scripts. The handler responds
 **`200 { ok: true }` immediately**; processing continues in the background
-with locking on the Exported Studies row id + flight tracker (same pattern as
-Inception).
+with **`withStudyLock` on the resolved Production Study page id** (prefetched
+from the Exported Studies row; falls back to the exported row id if the relation
+is not exactly one or prefetch fails) so Migrate Study serializes against
+Inception and add-task-set on the same study. Flight tracker wraps the async run
+(same pattern as Inception).
 
 ## Pipeline shape
 

@@ -1,4 +1,6 @@
 import { provisionClient as notionClient, commentClient } from '../notion/clients.js';
+import { MIGRATED_STUDIES_PROP } from '../migration/constants.js';
+import { relationIds } from '../migration/extract.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
 import { flightTracker } from '../services/flight-tracker.js';
@@ -6,6 +8,22 @@ import { withStudyLock } from '../services/study-lock.js';
 import { runMigrateStudyPipeline } from '../migration/migrate-study-service.js';
 
 const studyCommentService = new StudyCommentService({ notionClient: commentClient });
+
+/**
+ * Match Inception / add-task-set: `withStudyLock` keys the Production Study page id.
+ * Prefetch the Exported Studies row once so we serialize migrate vs inception on the same study.
+ * Falls back to the exported row id when relation is not exactly 1 or prefetch fails.
+ */
+export async function resolveMigrateStudyLockId(notion, exportedStudyPageId) {
+  try {
+    const page = await notion.getPage(exportedStudyPageId);
+    const prodIds = relationIds(page.properties, MIGRATED_STUDIES_PROP.PRODUCTION_STUDY);
+    if (prodIds.length === 1) return prodIds[0];
+  } catch (err) {
+    console.warn('[migrate-study] lock-key prefetch failed; falling back to exported row id:', err.message);
+  }
+  return exportedStudyPageId;
+}
 
 async function processMigrateStudy(body) {
   const exportedStudyPageId = body?.data?.id || body?.exportedStudyPageId || body?.studyPageId;
@@ -37,11 +55,10 @@ export async function handleMigrateStudy(req, res) {
   if (!exportedStudyPageId) {
     console.warn('[migrate-study] missing exportedStudyPageId on webhook; running unlocked');
   }
-  // Lock by the Exported Studies row id (the actual unique trigger). The
-  // pipeline still resolves Production Study from there for reporting +
-  // Import Mode toggle.
   const run = exportedStudyPageId
-    ? withStudyLock(exportedStudyPageId, () => processMigrateStudy(req.body))
+    ? resolveMigrateStudyLockId(notionClient, exportedStudyPageId).then((lockId) =>
+        withStudyLock(lockId, () => processMigrateStudy(req.body)),
+      )
     : processMigrateStudy(req.body);
   flightTracker.track(
     run.catch((err) => console.error('[migrate-study] unhandled:', err)),

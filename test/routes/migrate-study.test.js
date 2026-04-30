@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   mockClient: {
     reportStatus: vi.fn(),
     request: vi.fn(),
+    getPage: vi.fn(),
   },
   runMigrateStudyPipeline: vi.fn(),
 }));
@@ -34,7 +35,7 @@ vi.mock('../../src/migration/migrate-study-service.js', () => ({
   runMigrateStudyPipeline: mocks.runMigrateStudyPipeline,
 }));
 
-import { handleMigrateStudy } from '../../src/routes/migrate-study.js';
+import { handleMigrateStudy, resolveMigrateStudyLockId } from '../../src/routes/migrate-study.js';
 import { _resetStudyLocks } from '../../src/services/study-lock.js';
 
 function makeReqRes(body = {}) {
@@ -59,6 +60,11 @@ describe('migrate-study route', () => {
     vi.useFakeTimers();
     _resetStudyLocks();
     mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.getPage.mockResolvedValue({
+      properties: {
+        'Production Study': { type: 'relation', relation: [{ id: 'production-study-for-lock' }] },
+      },
+    });
     mocks.runMigrateStudyPipeline.mockResolvedValue({ ok: true });
   });
 
@@ -74,6 +80,7 @@ describe('migrate-study route', () => {
     expect(res.json).toHaveBeenCalledWith({ ok: true });
 
     await flush();
+    expect(mocks.mockClient.getPage).toHaveBeenCalledWith('exported-study-1');
     expect(mocks.runMigrateStudyPipeline).toHaveBeenCalled();
   });
 
@@ -83,6 +90,7 @@ describe('migrate-study route', () => {
     await handleMigrateStudy(req, res);
     await flush();
 
+    expect(mocks.mockClient.getPage).toHaveBeenCalledWith('exported-study-from-notion');
     expect(mocks.runMigrateStudyPipeline).toHaveBeenCalledWith(
       payload,
       mocks.mockClient,
@@ -114,6 +122,38 @@ describe('migrate-study route', () => {
     await handleMigrateStudy(req, res);
     await flush();
 
+    expect(mocks.mockClient.getPage).toHaveBeenCalledWith('legacy-id');
     expect(mocks.runMigrateStudyPipeline).toHaveBeenCalled();
+  });
+});
+
+describe('resolveMigrateStudyLockId', () => {
+  it('returns Production Study id when Exported row has exactly one relation', async () => {
+    const notion = {
+      getPage: vi.fn().mockResolvedValue({
+        properties: {
+          'Production Study': { type: 'relation', relation: [{ id: 'prod-1' }] },
+        },
+      }),
+    };
+    await expect(resolveMigrateStudyLockId(notion, 'exp-1')).resolves.toBe('prod-1');
+  });
+
+  it('falls back to exported row id when Production Study relation count !== 1', async () => {
+    const notion = {
+      getPage: vi.fn().mockResolvedValue({
+        properties: {
+          'Production Study': { type: 'relation', relation: [] },
+        },
+      }),
+    };
+    await expect(resolveMigrateStudyLockId(notion, 'exp-1')).resolves.toBe('exp-1');
+  });
+
+  it('falls back when getPage throws', async () => {
+    const notion = {
+      getPage: vi.fn().mockRejectedValue(new Error('network')),
+    };
+    await expect(resolveMigrateStudyLockId(notion, 'exp-1')).resolves.toBe('exp-1');
   });
 });
