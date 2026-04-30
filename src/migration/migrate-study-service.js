@@ -320,7 +320,13 @@ export async function buildMigrationPlan(notionClient, exportedStudyPageId, { tr
     if (originalName && resolvedStudyName) {
       const split = splitStudyPrefixAndEmoji(originalName, resolvedStudyName);
       if (split.title && split.title !== originalName) {
-        properties.title = [{ type: 'text', text: { content: split.title } }];
+        // Notion title property update shape: `{ title: [<rich_text>] }`. The
+        // outer wrapper is load-bearing — without it Notion 400s the entire
+        // PATCH (and misattributes the failure to the first property in
+        // JSON-key order, which made this bug silent for several PRs).
+        properties.title = {
+          title: [{ type: 'text', text: { content: split.title } }],
+        };
       }
       if (split.emoji) {
         icon = { type: 'emoji', emoji: split.emoji };
