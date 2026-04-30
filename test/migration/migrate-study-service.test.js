@@ -176,6 +176,57 @@ describe('migrate-study-service', () => {
       expect(plan.summary.migratedRows).toBe(2);
     });
 
+    it('queues Production Task link for completed non-repeat rows with a twin', async () => {
+      notionClient.getPage.mockImplementation(async (id) => {
+        if (id === 'exported-1') return exportedStudyFixture({ studyId: 'study-1' });
+        if (id === 'study-1') return studyPageFixture({ importMode: false, exportedStudyId: 'exported-1' });
+        return { properties: {} };
+      });
+      notionClient.retrieveDatabase.mockResolvedValue({
+        properties: {
+          Study: { id: 'sch-study' },
+          'Production Task': { id: 'sch-pt' },
+        },
+      });
+      let q = 0;
+      notionClient.queryDatabase.mockImplementation(async () => {
+        q += 1;
+        if (q === 1) {
+          return [
+            {
+              id: 'mt-done',
+              properties: {
+                Study: { relation: [{ id: 'exported-1' }] },
+                Name: { title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }] },
+                'Production Task': { relation: [] },
+                Completed: { checkbox: true },
+                Milestone: { select: { name: 'Contract Signed' } },
+                Assignee: { rich_text: [] },
+              },
+            },
+          ];
+        }
+        return [
+          {
+            id: 'cascade-1',
+            properties: {
+              'Task Name': {
+                title: [{ plain_text: 'Twin Task', text: { content: 'Twin Task' } }],
+              },
+              Study: { relation: [{ id: 'study-1' }] },
+              Milestone: { multi_select: [] },
+              Tags: { multi_select: [] },
+            },
+          },
+        ];
+      });
+      notionClient.listAllUsers.mockResolvedValue([]);
+
+      const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
+      expect(plan.migratedPatches.length).toBe(1);
+      expect(plan.migratedPatches[0].taskId).toBe('mt-done');
+    });
+
     it('throws when Migrated Tasks query is below Exported Studies relation count', async () => {
       notionClient.getPage.mockImplementation(async (id) => {
         if (id === 'exported-1') {
