@@ -13,8 +13,8 @@ import {
 } from '../../src/migration/matcher.js';
 import {
   applyNameAliases,
-  cleanTitleByStrippingStudyPrefix,
   jaccardTokens,
+  splitStudyPrefixAndEmoji,
   stripStudyPrefix,
 } from '../../src/migration/normalize.js';
 
@@ -247,43 +247,83 @@ describe('migration/matcher', () => {
     });
   });
 
-  describe('cleanTitleByStrippingStudyPrefix', () => {
-    it('preserves the leading emoji marker and strips study tokens', () => {
+  describe('splitStudyPrefixAndEmoji', () => {
+    it('detaches both leading emoji and study prefix into separate fields', () => {
       expect(
-        cleanTitleByStrippingStudyPrefix('🔶  Alexion PNH PLEDGE Final SAP Delivery', 'Alexion PNH PLEDGE'),
-      ).toBe('🔶 Final SAP Delivery');
+        splitStudyPrefixAndEmoji('🔶  Alexion PNH PLEDGE Final SAP Delivery', 'Alexion PNH PLEDGE'),
+      ).toEqual({ title: 'Final SAP Delivery', emoji: '🔶' });
     });
 
-    it('strips study tokens with no emoji marker', () => {
-      expect(
-        cleanTitleByStrippingStudyPrefix('Alexion PNH: Submit IRB', 'Alexion PNH PLEDGE'),
-      ).toBe('Submit IRB');
+    it('detaches each recognized emoji marker', () => {
+      expect(splitStudyPrefixAndEmoji('🔶 Alexion PNH PLEDGE Foo', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Foo',
+        emoji: '🔶',
+      });
+      expect(splitStudyPrefixAndEmoji('✅ Alexion PNH PLEDGE Foo', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Foo',
+        emoji: '✅',
+      });
+      expect(splitStudyPrefixAndEmoji('🔷 Alexion PNH PLEDGE Foo', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Foo',
+        emoji: '🔷',
+      });
+      expect(splitStudyPrefixAndEmoji('⚠️ Alexion PNH PLEDGE Foo', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Foo',
+        emoji: '⚠️',
+      });
+      expect(splitStudyPrefixAndEmoji('🚨 Alexion PNH PLEDGE Foo', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Foo',
+        emoji: '🚨',
+      });
     });
 
-    it('returns the input unchanged when title is already clean', () => {
-      expect(
-        cleanTitleByStrippingStudyPrefix('Final SAP Delivery', 'Alexion PNH PLEDGE'),
-      ).toBe('Final SAP Delivery');
+    it('returns emoji=null when title has study prefix but no emoji', () => {
+      expect(splitStudyPrefixAndEmoji('Alexion PNH: Submit IRB', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Submit IRB',
+        emoji: null,
+      });
     });
 
-    it('returns the input unchanged when title is only the study name (no reduce-to-empty)', () => {
-      expect(
-        cleanTitleByStrippingStudyPrefix('Alexion PNH PLEDGE', 'Alexion PNH PLEDGE'),
-      ).toBe('Alexion PNH PLEDGE');
+    it('returns title untouched when only an emoji is present (no study prefix)', () => {
+      expect(splitStudyPrefixAndEmoji('🔶 Random Task', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Random Task',
+        emoji: '🔶',
+      });
     });
 
-    it('returns the input unchanged when studyName is missing', () => {
-      expect(cleanTitleByStrippingStudyPrefix('Some Task', null)).toBe('Some Task');
-      expect(cleanTitleByStrippingStudyPrefix('Some Task', '')).toBe('Some Task');
+    it('returns the input unchanged with emoji=null when title is already clean', () => {
+      expect(splitStudyPrefixAndEmoji('Final SAP Delivery', 'Alexion PNH PLEDGE')).toEqual({
+        title: 'Final SAP Delivery',
+        emoji: null,
+      });
     });
 
-    it('handles each recognized emoji marker', () => {
-      expect(
-        cleanTitleByStrippingStudyPrefix('✅ Alexion PNH PLEDGE Done Item', 'Alexion PNH PLEDGE'),
-      ).toBe('✅ Done Item');
-      expect(
-        cleanTitleByStrippingStudyPrefix('🔷 Alexion PNH PLEDGE Future', 'Alexion PNH PLEDGE'),
-      ).toBe('🔷 Future');
+    it('returns input wholesale (no reduce-to-empty) when title is only the study name plus an emoji', () => {
+      // "🔶 Alexion PNH PLEDGE" would otherwise reduce to empty after both
+      // strips. Preserve original and emit emoji=null so call sites skip
+      // both the title PATCH and the icon PATCH.
+      expect(splitStudyPrefixAndEmoji('🔶 Alexion PNH PLEDGE', 'Alexion PNH PLEDGE')).toEqual({
+        title: '🔶 Alexion PNH PLEDGE',
+        emoji: null,
+      });
+    });
+
+    it('returns the input unchanged when studyName is missing or empty', () => {
+      expect(splitStudyPrefixAndEmoji('Some Task', null)).toEqual({ title: 'Some Task', emoji: null });
+      expect(splitStudyPrefixAndEmoji('Some Task', '')).toEqual({ title: 'Some Task', emoji: null });
+      expect(splitStudyPrefixAndEmoji('Some Task', undefined)).toEqual({
+        title: 'Some Task',
+        emoji: null,
+      });
+    });
+
+    it('does not detach a non-recognized emoji at the leading position', () => {
+      // '📌' is not in TITLE_EMOJI_PREFIXES — stays as a regular character in
+      // the title, study prefix still strips.
+      expect(splitStudyPrefixAndEmoji('📌 Alexion PNH PLEDGE Note', 'Alexion PNH PLEDGE')).toEqual({
+        title: '📌 Alexion PNH PLEDGE Note',
+        emoji: null,
+      });
     });
   });
 

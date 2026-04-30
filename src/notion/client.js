@@ -301,7 +301,14 @@ export class NotionClient {
   }
 
   /**
-   * updates: [{ taskId, properties }]
+   * updates: [{ taskId, properties, icon? }]
+   *
+   * `icon` is optional. When present, it is forwarded as a top-level field on
+   * the Notion `PATCH /pages/{id}` body alongside `properties`. Notion accepts
+   * shapes like `{ type: 'emoji', emoji: '🔶' }` or `null` (to clear).
+   * Callers that only want to update properties simply omit `icon` — the field
+   * is dropped from the request body so we never send `icon: undefined` or
+   * accidentally clobber an existing icon.
    */
   async patchPages(updates, { tracer, workersPerToken } = {}) {
     if (!Array.isArray(updates) || updates.length === 0) {
@@ -312,7 +319,10 @@ export class NotionClient {
       updates.map((update) => ({
         method: 'PATCH',
         path: `/pages/${update.taskId}`,
-        body: { properties: update.properties },
+        body: {
+          properties: update.properties,
+          ...(Object.prototype.hasOwnProperty.call(update, 'icon') ? { icon: update.icon } : {}),
+        },
       })),
       { tracer, workersPerToken },
     );

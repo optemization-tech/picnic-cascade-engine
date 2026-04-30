@@ -150,6 +150,65 @@ describe('NotionClient', () => {
     });
   });
 
+  it('patchPages forwards an `icon` field on the request body when present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'ok' }),
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+
+    await client.patchPages([
+      {
+        taskId: 'task-iconed',
+        properties: { [ST.STATUS.id]: { status: { name: 'Done' } } },
+        icon: { type: 'emoji', emoji: '🔶' },
+      },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({
+      properties: { [ST.STATUS.id]: { status: { name: 'Done' } } },
+      icon: { type: 'emoji', emoji: '🔶' },
+    });
+  });
+
+  it('patchPages omits the `icon` key entirely when the update has no icon', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ id: 'ok' }),
+      status: 200,
+      statusText: 'OK',
+      headers: { get: () => null },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NotionClient({
+      tokens: ['t1'],
+      rateLimit: { maxPerSecond: 100 },
+      retry: { maxAttempts: 2, baseMs: 1 },
+    });
+
+    await client.patchPages([
+      { taskId: 'task-1', properties: { [ST.STATUS.id]: { status: { name: 'Done' } } } },
+    ]);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({
+      properties: { [ST.STATUS.id]: { status: { name: 'Done' } } },
+    });
+    expect(Object.prototype.hasOwnProperty.call(body, 'icon')).toBe(false);
+  });
+
   // @behavior BEH-AUTOMATION-REPORTING
   it('reportStatus patches Automation Reporting with formatted rich text', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
