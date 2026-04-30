@@ -166,6 +166,63 @@ describe('cleanBlock', () => {
     // text should remain since image is not a rich text block type
     expect(result.image.text).toBe('something');
   });
+
+  it('sanitizes link_preview rich_text mentions into text+link for append', () => {
+    const block = makeBlock('paragraph', {
+      rich_text: [
+        { type: 'text', text: { content: 'See ' } },
+        {
+          type: 'mention',
+          mention: {
+            type: 'link_preview',
+            link_preview: { url: 'https://docs.google.com/document/x' },
+          },
+        },
+      ],
+    });
+    const result = cleanBlock(block);
+    expect(result.paragraph.rich_text.some((s) => s.type === 'mention' || s.mention)).toBe(false);
+    const linkSeg = result.paragraph.rich_text.find((s) => s.text?.link?.url);
+    expect(linkSeg.text.content).toBe('https://docs.google.com/document/x');
+    expect(linkSeg.text.link.url).toBe('https://docs.google.com/document/x');
+  });
+
+  it('replaces non-link_preview mentions with minimal text for append safety', () => {
+    const block = makeBlock('paragraph', {
+      rich_text: [
+        {
+          type: 'mention',
+          mention: { type: 'user', user: { id: 'usr-1' } },
+        },
+      ],
+    });
+    const result = cleanBlock(block);
+    expect(result.paragraph.rich_text).toEqual([{ type: 'text', text: { content: ' ' } }]);
+  });
+
+  it('preserves equation segments in rich_text', () => {
+    const block = makeBlock('paragraph', {
+      rich_text: [{ type: 'equation', equation: { expression: 'E=mc^2' } }],
+    });
+    const result = cleanBlock(block);
+    expect(result.paragraph.rich_text[0]).toEqual({
+      type: 'equation',
+      equation: { expression: 'E=mc^2' },
+    });
+  });
+
+  it('handles link_preview mention missing URL', () => {
+    const block = makeBlock('paragraph', {
+      rich_text: [
+        {
+          type: 'mention',
+          mention: { type: 'link_preview', link_preview: {} },
+        },
+      ],
+    });
+    const result = cleanBlock(block);
+    expect(result.paragraph.rich_text).toEqual([{ type: 'text', text: { content: ' ' } }]);
+  });
 });
 
 // --- copyBlocks ---
@@ -219,6 +276,7 @@ describe('copyBlocks', () => {
       makeBlock('breadcrumb', {}),
       makeBlock('column_list', {}),
       makeBlock('column', {}),
+      makeBlock('table', { table_width: 2 }),
       makeBlock('synced_block', { synced_from: { block_id: 'sync-source' } }, { id: 'sb-1' }),
       makeBlock('heading_1', { rich_text: [{ text: { content: 'Also keep' } }] }),
     ];
@@ -234,7 +292,7 @@ describe('copyBlocks', () => {
       studyName: 'Test',
     });
 
-    // 3 blocks: paragraph + synced paragraph + heading_1
+    // 3 blocks: paragraph + synced paragraph + heading_1 (table excluded)
     expect(result.blocksWrittenCount).toBe(3);
     const appendCall = client.calls.request.find(
       (c) => c.method === 'PATCH' && c.path.includes('prod-1'),
@@ -374,6 +432,35 @@ describe('copyBlocks', () => {
       (c) => c.method === 'PATCH' && c.path.includes('prod-1'),
     );
     expect(appendCall.body.children).toHaveLength(100);
+  });
+
+  it('drops table blocks from append and logs copy_blocks_skipped_block', async () => {
+    const blocks = [
+      makeBlock('paragraph', { rich_text: [{ text: { content: 'Before' } }] }),
+      makeBlock('table', { table_width: 3 }),
+      makeBlock('paragraph', { rich_text: [{ text: { content: 'After' } }] }),
+    ];
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const client = mockClient({ blocksByPage: { 'tpl-1': blocks } });
+
+    const result = await copyBlocks(client, { 'tpl-1': 'prod-1' }, {
+      studyPageId: 'study-1',
+      studyName: 'Test',
+    });
+
+    expect(result.blocksWrittenCount).toBe(2);
+    const appendCall = client.calls.request.find(
+      (c) => c.method === 'PATCH' && c.path.includes('prod-1'),
+    );
+    expect(appendCall.body.children.every((c) => c.type !== 'table')).toBe(true);
+
+    const skipLog = consoleSpy.mock.calls.find((c) =>
+      typeof c[0] === 'string' && c[0].includes('copy_blocks_skipped_block'),
+    );
+    expect(skipLog).toBeTruthy();
+    expect(JSON.parse(skipLog[0]).reason).toBe('table_requires_hydration');
+
+    consoleSpy.mockRestore();
   });
 
   it('isolates errors — one page fails, others succeed', async () => {

@@ -82,7 +82,7 @@ Status Roll-Up (parent-direct snap-back):
 
 **Copy-blocks scope:** Add-task-set only passes newly created task IDs to copy-blocks, not the full idMapping (which includes existing tasks seeded for dependency resolution).
 
-**Owner property asymmetry (2026-04-28 rename):** `Owner` is renamed only in Blueprint; Study Tasks' `Owner` keeps its original name. The provisioning code reads `[Do Not Edit] Owner` from Blueprint and writes `Owner` to Study Tasks. The per-DB property-name constants enforce this by construction.
+**Copy-blocks append fidelity:** Template bodies are shallow-fetched (page-direct children only) then normalized for `PATCH /blocks/{page}/children`. Inline **`rich_text` mentions** that round-trip poorly from Notion reads — notably **`link_preview`** — are flattened to **`text`** (+ hyperlink when a URL exists); other mention shapes may become minimal placeholder text so the append batch is not rejected as a whole. **`table` / `table_row` blocks are omitted** until a future change hydrates nested rows/cells (otherwise append fails with missing `children`). When tables are dropped, the engine emits a structured console line `copy_blocks_skipped_block` with `reason: table_requires_hydration`. Plan reference: `docs/plans/2026-04-29-003-fix-copy-blocks-append-validation-plan.md`. `Owner` is renamed only in Blueprint; Study Tasks' `Owner` keeps its original name. The provisioning code reads `[Do Not Edit] Owner` from Blueprint and writes `Owner` to Study Tasks. The per-DB property-name constants enforce this by construction.
 
 ### 3) Module Mapping
 Map each behavior to concrete modules/functions:
