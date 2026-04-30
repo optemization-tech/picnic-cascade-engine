@@ -73,7 +73,7 @@ The webhook **does not** replace carryover; it assumes migrated rows already exi
 
 ## Dry-run gates (abort before any write)
 
-Hard failures include: `production_study_relation` (Exported Studies row has 0 or >1 Production Study links), `import_mode_on` (Production Study Import Mode already true), `contract_sign_empty`, `exported_study_relation_mismatch` / `exported_study_relation_count` (round-trip 1:1 broken), `schema_migrated_tasks` (couldn't resolve Migrated Tasks DB property ids), `migrated_tasks_empty` / `migrated_count_low` / `migrated_count_high` / `migrated_count_mismatch`, `study_tasks_low`, `carryover_study_missing` (a Migrated Task row missing its Study relation), `unmatched_completed_ratio`, `low_tier_cap`.
+Hard failures include: `production_study_relation` (Exported Studies row has 0 or >1 Production Study links), `import_mode_on` (Production Study Import Mode already true), `contract_sign_empty`, `exported_study_relation_mismatch` / `exported_study_relation_count` (round-trip 1:1 broken), `schema_migrated_tasks` (couldn't resolve Migrated Tasks DB property ids for Study + Production Task / Notion Task), `migrated_tasks_empty` / `migrated_count_low` / `migrated_count_high` / `migrated_count_mismatch`, `study_tasks_low`, `carryover_study_missing` (a Migrated Task row missing its Study relation), `unmatched_completed_ratio`, `low_tier_cap`.
 
 Configurable thresholds (defaults in `src/migration/thresholds.js`; override via env):
 

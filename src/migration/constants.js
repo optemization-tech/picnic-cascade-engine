@@ -19,7 +19,15 @@ export const MIGRATED_TASK_PROP = {
   WORKSTREAM: 'Workstream',
   ASSIGNEE: 'Assignee',
   PRODUCTION_TASK: 'Production Task',
+  /** Live Picnic schema: relation to Study Tasks (replaces older "Production Task" label). */
+  NOTION_TASK: 'Notion Task',
 };
+
+/** Order matters: legacy name first, then current Picnic label. */
+export const MIGRATED_TASK_PRODUCTION_RELATION_NAMES = [
+  MIGRATED_TASK_PROP.PRODUCTION_TASK,
+  MIGRATED_TASK_PROP.NOTION_TASK,
+];
 
 /** Migrated Studies DB property names (name-keyed). */
 export const MIGRATED_STUDIES_PROP = {

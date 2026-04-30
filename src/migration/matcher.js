@@ -1,5 +1,5 @@
 import { STUDY_TASKS_PROPS } from '../notion/property-names.js';
-import { MIGRATED_TASK_PROP } from './constants.js';
+import { MIGRATED_TASK_PROP, MIGRATED_TASK_PRODUCTION_RELATION_NAMES } from './constants.js';
 import {
   titlePlain,
   multiSelectNames,
@@ -10,6 +10,14 @@ import {
 } from './extract.js';
 import { mapSourceMilestone } from './vocabulary.js';
 import { jaccardTokens, normalizeName, stripParenSegment } from './normalize.js';
+
+function productionTaskRelationIds(properties) {
+  for (const name of MIGRATED_TASK_PRODUCTION_RELATION_NAMES) {
+    const ids = relationIds(properties, name);
+    if (ids.length >= 1) return ids;
+  }
+  return [];
+}
 
 /**
  * Build normalized-name → task id or array of ids when duplicate names exist.
@@ -63,7 +71,7 @@ export function resolveCascadeTwin({
   requireMilestoneTagForFallback,
   jaccardMin,
 }) {
-  const prodIds = relationIds(migratedProps, MIGRATED_TASK_PROP.PRODUCTION_TASK);
+  const prodIds = productionTaskRelationIds(migratedProps);
   if (prodIds.length >= 1) {
     return { cascadeId: prodIds[0], source: 'pre-filled', tier: 'prefilled' };
   }
