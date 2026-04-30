@@ -373,9 +373,13 @@ describe('migrate-study-service', () => {
 
       const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
       // Title is cleaned of BOTH the study prefix and the leading emoji.
-      expect(plan.migratedPatches[0].properties.title).toEqual([
-        { type: 'text', text: { content: 'Twin Task' } },
-      ]);
+      // Notion's title property update wraps the rich-text array in `{ title: [...] }`.
+      // PR #91 shipped without the wrapper; every Migrator click since silently 400'd
+      // until #95 fixed the shape. Assert the wrapper directly so a regression here
+      // fails the test instead of producing a runtime 400 in production.
+      expect(plan.migratedPatches[0].properties.title).toEqual({
+        title: [{ type: 'text', text: { content: 'Twin Task' } }],
+      });
       // Icon is set to the detached emoji.
       expect(plan.migratedPatches[0].icon).toEqual({ type: 'emoji', emoji: '🔶' });
     });
@@ -427,9 +431,13 @@ describe('migrate-study-service', () => {
       notionClient.listAllUsers.mockResolvedValue([]);
 
       const plan = await buildMigrationPlan(notionClient, 'exported-1', {});
-      expect(plan.migratedPatches[0].properties.title).toEqual([
-        { type: 'text', text: { content: 'Twin Task' } },
-      ]);
+      // Notion's title property update wraps the rich-text array in `{ title: [...] }`.
+      // PR #91 shipped without the wrapper; every Migrator click since silently 400'd
+      // until #95 fixed the shape. Assert the wrapper directly so a regression here
+      // fails the test instead of producing a runtime 400 in production.
+      expect(plan.migratedPatches[0].properties.title).toEqual({
+        title: [{ type: 'text', text: { content: 'Twin Task' } }],
+      });
       expect(plan.migratedPatches[0].icon).toBeUndefined();
     });
 
