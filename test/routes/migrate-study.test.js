@@ -117,6 +117,35 @@ describe('migrate-study route', () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
+  it('emits tracer log to console.log on the success path', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { req, res } = makeReqRes({ data: { id: 'exported-traced-success' } });
+    await handleMigrateStudy(req, res);
+    await flush();
+
+    const tracerLogs = logSpy.mock.calls
+      .map((call) => call[0])
+      .filter((arg) => typeof arg === 'string' && arg.startsWith('{') && arg.includes('"cascadeId"'));
+    expect(tracerLogs.length).toBe(1);
+    expect(JSON.parse(tracerLogs[0])).toMatchObject({ totalDurationMs: expect.any(Number) });
+    logSpy.mockRestore();
+  });
+
+  it('emits tracer log to console.log even when the pipeline rejects', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    mocks.runMigrateStudyPipeline.mockRejectedValueOnce(new Error('gate failed mid-pipeline'));
+    const { req, res } = makeReqRes({ data: { id: 'exported-traced-failure' } });
+    await handleMigrateStudy(req, res);
+    await flush();
+
+    const tracerLogs = logSpy.mock.calls
+      .map((call) => call[0])
+      .filter((arg) => typeof arg === 'string' && arg.startsWith('{') && arg.includes('"cascadeId"'));
+    expect(tracerLogs.length).toBe(1);
+    expect(JSON.parse(tracerLogs[0])).toMatchObject({ totalDurationMs: expect.any(Number) });
+    logSpy.mockRestore();
+  });
+
   it('still accepts body.studyPageId for back-compat with existing dry-run scripts', async () => {
     const { req, res } = makeReqRes({ studyPageId: 'legacy-id' });
     await handleMigrateStudy(req, res);

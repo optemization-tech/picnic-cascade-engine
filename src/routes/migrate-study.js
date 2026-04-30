@@ -38,15 +38,24 @@ async function processMigrateStudy(body) {
   tracer.set('workflow', 'Migrate Study');
   tracer.set('exported_study_id', exportedStudyPageId);
 
-  await runMigrateStudyPipeline(body, notionClient, {
-    tracer,
-    studyCommentService,
-    triggeredByUserId,
-    editedByBot,
-    studyNameFallback: null,
-  });
-
-  console.log(tracer.toConsoleLog());
+  try {
+    await runMigrateStudyPipeline(body, notionClient, {
+      tracer,
+      studyCommentService,
+      triggeredByUserId,
+      editedByBot,
+      studyNameFallback: null,
+    });
+  } finally {
+    // Emit on both success and failure so post-mortem debugging has the same
+    // diagnostic surface either way. Never let trace serialization corrupt the
+    // failure signal — log a warn and continue if toConsoleLog itself throws.
+    try {
+      console.log(tracer.toConsoleLog());
+    } catch (traceErr) {
+      console.warn('[migrate-study] tracer log emit failed:', traceErr?.message || traceErr);
+    }
+  }
 }
 
 export async function handleMigrateStudy(req, res) {
