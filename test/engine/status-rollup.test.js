@@ -62,4 +62,10 @@ describe('computeStatusRollup', () => {
   it('returns Not Started for empty siblings list', () => {
     expect(computeStatusRollup([])).toBe('Not Started');
   });
+
+  // @behavior BEH-STATUS-ROLLUP-PARTIAL-DONE
+  it('handles raw-string siblings (not just objects) for partial-done', () => {
+    expect(computeStatusRollup(['Done', 'Not Started'])).toBe('In Progress');
+    expect(computeStatusRollup(['N/A', 'Not Started'])).toBe('In Progress');
+  });
 });
