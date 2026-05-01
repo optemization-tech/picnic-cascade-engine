@@ -124,32 +124,41 @@ export async function createPage(parentDatabaseId, properties, opts) {
 }
 
 /**
- * Move pages to a different data source.
+ * Move pages to a different data source — single-page endpoint, called per page.
  *
- * Bulk: POST /v1/pages/move (up to 100 ids per call). Single: POST /v1/pages/{id}/move.
- * Empirically verified per ~/memory/notion-api-guide.md §Page Moves.
+ * Empirically verified live 2026-04-30: the correct shape is
+ *   POST /v1/pages/{page_id}/move
+ *   Notion-Version: 2025-09-03
+ *   body: { parent: { type: 'data_source_id', data_source_id: '...' } }
+ *
+ * The body shape `{ data_source_id: '...' }` documented in
+ * ~/memory/notion-api-guide.md §Page Moves is INCORRECT — Notion responds with
+ * `body failed validation: body.parent should be defined, instead was undefined`.
+ * The correct shape uses a parent wrapper, like createPage. notion-api-guide.md
+ * has been corrected in the same change that landed this fix.
  *
  * - Properties auto-map by name + type to the target schema
- * - Properties without name+type match in the target are added as new schema columns
- *   (so non-canonical source columns "schema-extend" the destination — be aware)
+ * - Properties without name+type match in the target are added as new schema
+ *   columns (source columns "schema-extend" the destination — be aware)
  * - Page IDs, body blocks, and comments are preserved
+ * - Throttled to 2 req/s by `request()`, so 100 pages takes ~50s
  *
  * @param {string[]} pageIds
- * @param {string} destDataSourceId  data_source_id of the target DB (NOT database_id, even when they look identical)
+ * @param {string} destDataSourceId  data_source_id of the target DB
  */
 export async function movePages(pageIds, destDataSourceId, opts) {
   if (!pageIds.length) return { moved: [] };
-  // Notion accepts up to 100 ids per bulk move call.
-  const chunks = [];
-  for (let i = 0; i < pageIds.length; i += 100) chunks.push(pageIds.slice(i, i + 100));
   const moved = [];
-  for (const chunk of chunks) {
-    const resp = await request('POST', `/v1/pages/move`, {
+  const parentBody = {
+    parent: { type: 'data_source_id', data_source_id: destDataSourceId },
+  };
+  for (const pageId of pageIds) {
+    const resp = await request('POST', `/v1/pages/${pageId}/move`, {
       ...opts,
       version: MOVE_VERSION,
-      body: { page_ids: chunk, data_source_id: destDataSourceId },
+      body: parentBody,
     });
-    moved.push(...(resp?.moved_pages || resp?.results || chunk.map((id) => ({ id }))));
+    moved.push(resp || { id: pageId });
   }
   return { moved };
 }
