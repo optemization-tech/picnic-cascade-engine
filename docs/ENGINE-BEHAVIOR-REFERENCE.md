@@ -49,6 +49,7 @@ Parent guard:
 - The Error 1 revert-and-warn flow runs **regardless of the parent's frozen status**. A `Done`/`N/A` parent whose dates are edited still has its dates reverted to Reference dates and the red "edit a subtask directly" warning posted. Implementation: the `isFrozen` guard runs AFTER `classify` so Error 1 fires first for top-level parent edits; non-Error-1 paths (leaves, middle-parent case-a) still short-circuit on frozen.
 
 Status Roll-Up (parent-direct snap-back):
+- **Roll-up algorithm (shared by both branches):** `computeStatusRollup` applies a precedence ladder — all children `Done`/`N/A` → `Done`; any child `In Progress` → `In Progress`; any child `Done` (partial completion, no `In Progress`) → `In Progress` (BEH-STATUS-ROLLUP-PARTIAL-DONE); otherwise → `Not Started`. The same helper drives both the parent-direct snap-back below and the subtask-triggered rollup, so the rule is consistent regardless of which side initiated the change.
 - When a PM directly edits a parent task's Status, the engine computes the parent's rollup from its own subtasks and patches back if the manual value disagrees. Behaves both directions: all-subtasks-Done drives parent to Done; any mismatch in either direction snaps parent to computed. Silent correction -- no Notion comment; audit trail lives in the Activity Log with summary prefix "Parent ... status corrected: ... (direct edit blocked)" and `details.direction = 'parent-direct'`. The existing leaf-subtask → parent rollup path is unchanged and logs with `details.direction = 'subtask-triggered'`.
 - Echo-loop guard: parent-direct branch skips when `parsed.editedByBot === true` so the engine's own patch doesn't re-enter and amplify Notion reads.
 - Stale-relation guard: if `Subtask(s)` relation claims children exist but the children query returns none (deleted pages), the branch returns without patching -- avoids silently snapping a Done parent to Not Started based on stale data.
@@ -424,6 +425,16 @@ For every behavior change:
 5. Record decision in pulse log
 
 ## Changelog
+
+### 2026-05-01 — Status Roll-Up surfaces partial completion (Meg May 1 report)
+
+Plan: `docs/plans/2026-05-01-002-feat-status-rollup-partial-done-plan.md`.
+
+`computeStatusRollup` precedence ladder gains a fourth branch: when at least one child status is `Done` (or `N/A`) but not all children are complete, and no child is `In Progress`, the helper returns `In Progress` instead of falling through to `Not Started`. Both route branches in `src/routes/status-rollup.js` (parent-direct snap-back and subtask-triggered roll-up) inherit the new behavior automatically — no route changes. Tag: `BEH-STATUS-ROLLUP-PARTIAL-DONE`.
+
+Resolves Meg's 2026-05-01 PM check-in report: "if one subtest is done, and others are not yet done, it should be marked as in progress." Previously a parent with `[Done, Not Started, ...]` children stayed `Not Started`, so PMs couldn't see partial-completion state in the parent's status property.
+
+**Pre-existing limitation (unchanged):** grandparent roll-up does not fire because the parent-direct branch returns early on `editedByBot=true` (status-rollup.js:56) to prevent patch storms. After this change, more middle parents will flip from `Not Started` → `In Progress`, which may make the grandparent gap more visible. Documented behavior — see `test/routes/status-rollup-route.test.js:310-371`. Surface as a separate follow-up plan if PM testing reveals it as blocking.
 
 ### 2026-04-30 — Dep-edit cascade rolls up parent dates (Meg Apr 30 report)
 

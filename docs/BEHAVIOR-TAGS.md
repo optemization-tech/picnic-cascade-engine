@@ -87,7 +87,12 @@ Route (`processDepEdit` in `src/routes/dep-edit.js`):
 - `BEH-DEP-EDIT-PARENT-ROLLUP-INTEGRATION`: End-to-end with real `tightenSeedAndDownstream` + `runParentSubtask`: a manually-inserted task-set parent rolls up to span its now-shifted subtasks after a Blocked-by edit on a leaf (Meg Apr 30 repro).
 - `BEH-DEP-EDIT-PARENT-ROLLUP-NO-PARENT`: Top-level leaves (no `parentId`) emit no parent updates from the cascade-roll-up pass.
 
-## 6) Current Known Gaps
+## 6) Status Roll-Up
+
+Engine helper (`computeStatusRollup`):
+- `BEH-STATUS-ROLLUP-PARTIAL-DONE`: When at least one child status is `Done` (or `N/A`) but not all children are complete and none are `In Progress`, the helper returns `In Progress` instead of `Not Started`. Both route branches in `src/routes/status-rollup.js` (parent-direct snap-back and subtask-triggered roll-up) inherit this rule via the shared helper.
+
+## 7) Current Known Gaps
 
 - V1 parent `case-a` now drags connected dependencies with shifted subtasks, but it still infers a single delta from the parent envelope. It does not yet classify parent edits into distinct start-left, end-left, and drag modes.
 - V2 still has no `parentMode`. Its parent fan-out recomputes direct subtask offsets from the moved parent's start date and does not drag dependency-connected tasks beyond those subtasks.

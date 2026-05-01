@@ -8,7 +8,12 @@ function normalizeStatus(s) {
 }
 
 /**
- * Roll-up: all Done/N/A => Done; any In Progress => In Progress; else Not Started.
+ * Roll-up precedence ladder:
+ *   - all Done/N/A           => Done
+ *   - any In Progress        => In Progress
+ *   - any Done (partial)     => In Progress  (BEH-STATUS-ROLLUP-PARTIAL-DONE)
+ *   - else                   => Not Started
+ *
  * Accepts siblings as status strings or sibling objects with `status`.
  */
 export function computeStatusRollup(siblings) {
@@ -20,6 +25,9 @@ export function computeStatusRollup(siblings) {
 
   const anyInProgress = statuses.some((s) => s === 'In Progress');
   if (anyInProgress) return 'In Progress';
+
+  const anyDone = statuses.some((s) => s === 'Done');
+  if (anyDone) return 'In Progress';
 
   return 'Not Started';
 }

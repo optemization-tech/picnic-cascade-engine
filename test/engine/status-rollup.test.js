@@ -24,4 +24,48 @@ describe('computeStatusRollup', () => {
       { status: 'Not started' },
     ])).toBe('Not Started');
   });
+
+  // @behavior BEH-STATUS-ROLLUP-PARTIAL-DONE
+  it('returns In Progress when at least one sibling is Done but not all are', () => {
+    expect(computeStatusRollup([
+      { status: 'Done' },
+      { status: 'Not Started' },
+    ])).toBe('In Progress');
+  });
+
+  // @behavior BEH-STATUS-ROLLUP-PARTIAL-DONE
+  it('returns In Progress for Meg Apr 30 / May 1 repro (one Done + two Not Started)', () => {
+    expect(computeStatusRollup([
+      { status: 'Done' },
+      { status: 'Not Started' },
+      { status: 'Not Started' },
+    ])).toBe('In Progress');
+  });
+
+  // @behavior BEH-STATUS-ROLLUP-PARTIAL-DONE
+  it('treats N/A as Done for partial-done rollup (any N/A + non-complete -> In Progress)', () => {
+    expect(computeStatusRollup([
+      { status: 'N/A' },
+      { status: 'Not Started' },
+    ])).toBe('In Progress');
+  });
+
+  // @behavior BEH-STATUS-ROLLUP-PARTIAL-DONE
+  it('returns In Progress when most siblings are Done but at least one is Not Started', () => {
+    expect(computeStatusRollup([
+      { status: 'Done' },
+      { status: 'Done' },
+      { status: 'Not Started' },
+    ])).toBe('In Progress');
+  });
+
+  it('returns Not Started for empty siblings list', () => {
+    expect(computeStatusRollup([])).toBe('Not Started');
+  });
+
+  // @behavior BEH-STATUS-ROLLUP-PARTIAL-DONE
+  it('handles raw-string siblings (not just objects) for partial-done', () => {
+    expect(computeStatusRollup(['Done', 'Not Started'])).toBe('In Progress');
+    expect(computeStatusRollup(['N/A', 'Not Started'])).toBe('In Progress');
+  });
 });
