@@ -41,11 +41,25 @@ async function request(method, url, { token, body, version = DEFAULT_VERSION, re
   let attempt = 0;
   while (true) {
     await throttle();
-    const resp = await fetch(`${NOTION_BASE}${url}`, {
-      method,
-      headers: authHeaders(token, version),
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let resp;
+    try {
+      resp = await fetch(`${NOTION_BASE}${url}`, {
+        method,
+        headers: authHeaders(token, version),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (fetchErr) {
+      // Connection-level errors (TypeError: fetch failed / terminated /
+      // ECONNRESET / socket hang up). Retry with backoff before giving up.
+      if (attempt < retries) {
+        const wait = 2 ** attempt * 1000;
+        console.warn(`[notion] fetch ${url} threw ${fetchErr.message} — retrying in ${wait}ms`);
+        await new Promise((r) => setTimeout(r, wait));
+        attempt++;
+        continue;
+      }
+      throw fetchErr;
+    }
 
     if (resp.ok) {
       const text = await resp.text();
