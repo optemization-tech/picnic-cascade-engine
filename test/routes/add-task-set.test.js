@@ -1364,4 +1364,206 @@ describe('add-task-set route', () => {
       await flush(40);
     });
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // U3: batch-aborted Error from createStudyTasks. Mirror of the
+  // inception route scenarios — both routes share the same catch-block
+  // shape and must surface partial-failure visibly even under brownout.
+  // ────────────────────────────────────────────────────────────────────
+  describe('createStudyTasks throws batch-aborted Error (U3)', () => {
+    function batchAbortedError({ attempted = 12, created = 8, failedUnsafe = 1, notAttempted = 3 } = {}) {
+      const msg = `Inception batch incomplete: created ${created}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
+      return Object.assign(new Error(msg), {
+        kind: 'batch-aborted',
+        attempted,
+        created,
+        failedUnsafe,
+        notAttempted,
+        idMapping: {},
+      });
+    }
+
+    function setupHappyUpToCreate() {
+      mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1' }]);
+      mocks.filterBlueprintSubtree.mockReturnValue([
+        { level: 0, tasks: [{ _templateId: 'bp-1', _taskName: 'Data Delivery', _templateBlockedBy: [] }], isLastLevel: true },
+      ]);
+    }
+
+    it('logs Activity Log terminal event with status=failed and breakdown summary', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflow: 'Add Task Set',
+          status: 'failed',
+          summary: expect.stringContaining('batch incomplete'),
+        }),
+      );
+    });
+
+    it('study comment posted with operator-actionable summary', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      const commentCall = mocks.studyCommentService.postComment.mock.calls[0]?.[0];
+      expect(commentCall).toBeDefined();
+      expect(commentCall.workflow).toBe('Add Task Set');
+      expect(commentCall.status).toBe('failed');
+      expect(commentCall.summary).toMatch(/incomplete|created|runbook|archive/i);
+    });
+
+    it('reportStatus called with error severity', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      const errorCalls = mocks.mockClient.reportStatus.mock.calls.filter((call) => call[1] === 'error');
+      expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+      expect(errorCalls[errorCalls.length - 1][2]).toMatch(/Add Task Set failed/);
+    });
+
+    it('disables Import Mode in finally even on throw path', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      const disableCalls = mocks.mockClient.request.mock.calls.filter(
+        (call) => call[0] === 'PATCH'
+          && call[1] === '/pages/study-1'
+          && call[2]?.properties?.[S.IMPORT_MODE.id]?.checkbox === false,
+      );
+      expect(disableCalls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('Notion-down resilience: when logTerminalEvent rejects, reportStatus and postComment still run', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+      mocks.activityLogService.logTerminalEvent.mockRejectedValue(new Error('Notion 500'));
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      const errorReportStatusCalls = mocks.mockClient.reportStatus.mock.calls.filter((call) => call[1] === 'error');
+      expect(errorReportStatusCalls.length).toBeGreaterThanOrEqual(1);
+      expect(mocks.studyCommentService.postComment).toHaveBeenCalled();
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalled();
+    });
+
+    it('Notion-down resilience: when reportStatus rejects, logTerminalEvent and postComment still run', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+      mocks.mockClient.reportStatus.mockImplementation(async (_id, severity) => {
+        if (severity === 'error') throw new Error('Notion 500');
+        return {};
+      });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ workflow: 'Add Task Set', status: 'failed' }),
+      );
+      expect(mocks.studyCommentService.postComment).toHaveBeenCalled();
+    });
+
+    it('Notion-down resilience: when all three reject, original error is preserved (no mask)', async () => {
+      setupHappyUpToCreate();
+      const original = batchAbortedError();
+      mocks.createStudyTasks.mockRejectedValue(original);
+      mocks.activityLogService.logTerminalEvent.mockRejectedValue(new Error('AL 500'));
+      mocks.studyCommentService.postComment.mockRejectedValue(new Error('Comment 500'));
+      mocks.mockClient.reportStatus.mockImplementation(async (_id, severity) => {
+        if (severity === 'error') throw new Error('Status 500');
+        return {};
+      });
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const { req, res } = makeReqRes(
+          { data: { id: 'study-1' } },
+          { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+        );
+        await handleAddTaskSet(req, res);
+        await flush();
+
+        const unhandledLog = consoleError.mock.calls.find(
+          (args) => typeof args[0] === 'string' && args[0].startsWith('[add-task-set] unhandled:'),
+        );
+        expect(unhandledLog).toBeDefined();
+        expect(unhandledLog[1]).toBe(original);
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it('terminal event details include batchOutcome (tracer recordBatchOutcome path)', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockImplementation(async (_client, _levels, opts) => {
+        const tracer = opts.tracer;
+        if (tracer) {
+          tracer.startPhase('createStudyTasks');
+          tracer.recordBatchOutcome({ attempted: 12, created: 8, failedUnsafe: 1, notAttempted: 3 });
+          tracer.endPhase('createStudyTasks');
+        }
+        throw batchAbortedError();
+      });
+
+      const { req, res } = makeReqRes(
+        { data: { id: 'study-1' } },
+        { 'x-button-type': 'tlf-only', 'x-parent-task-names': 'TLF' },
+      );
+      await handleAddTaskSet(req, res);
+      await flush();
+
+      const terminalCall = mocks.activityLogService.logTerminalEvent.mock.calls.find(
+        ([arg]) => arg.status === 'failed',
+      );
+      expect(terminalCall).toBeDefined();
+      const details = terminalCall[0].details;
+      expect(details.batchOutcome).toEqual({
+        attempted: 12,
+        created: 8,
+        failedUnsafe: 1,
+        notAttempted: 3,
+      });
+    });
+  });
 });

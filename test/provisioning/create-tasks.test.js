@@ -777,3 +777,274 @@ describe('createStudyTasks — parallel page creation', () => {
     expect(client.request).toHaveBeenCalledTimes(5);
   });
 });
+
+// ── Partial-batch failure (U1) ─────────────────────────────────────────────
+//
+// runParallel returns a mixed array containing real page objects, Error
+// instances (worker-rejected slots), and `undefined` (slots a worker never
+// picked up before the batch aborted). createStudyTasks must detect any
+// non-success bucket and throw a structured Error, otherwise inception
+// reports "success" on a partial study state.
+//
+// @behavior BEH-INCEPTION-BATCH-INCOMPLETE
+
+describe('createStudyTasks — partial-batch failure (U1)', () => {
+  function tasksFor(n) {
+    return Array.from({ length: n }, (_, i) => taskEntry(`t${i}`, `Task ${i}`));
+  }
+
+  function pageFor(templateId, productionId) {
+    return {
+      id: productionId,
+      properties: {
+        [ST.TEMPLATE_SOURCE_ID.name]: {
+          id: ST.TEMPLATE_SOURCE_ID.id,
+          type: 'rich_text',
+          rich_text: [{ text: { content: templateId }, plain_text: templateId }],
+        },
+      },
+    };
+  }
+
+  function clientWithCreatePagesReturning(pages) {
+    return {
+      optimalBatchSize: 50,
+      createPages: vi.fn(async () => pages),
+      request: vi.fn(),
+    };
+  }
+
+  it('happy path: no throw when all entries return real pages', async () => {
+    const tasks = tasksFor(3);
+    const levels = buildLevels(tasks);
+    const pages = tasks.map((t, i) => pageFor(t._templateId, `prod-${i}`));
+    const client = clientWithCreatePagesReturning(pages);
+
+    const result = await createStudyTasks(client, levels, baseOptions);
+
+    expect(result.totalCreated).toBe(3);
+    expect(Object.keys(result.idMapping)).toHaveLength(3);
+  });
+
+  it('zero entries (empty levels) does not throw', async () => {
+    const client = clientWithCreatePagesReturning([]);
+    const result = await createStudyTasks(client, buildLevels([]), baseOptions);
+
+    expect(result.totalCreated).toBe(0);
+    expect(client.createPages).not.toHaveBeenCalled();
+  });
+
+  it('throws batch-aborted with failedUnsafe=1 when 1 Error slot, 0 undefined', async () => {
+    const tasks = tasksFor(3);
+    const levels = buildLevels(tasks);
+    const pages = [
+      pageFor(tasks[0]._templateId, 'prod-1'),
+      new Error('Notion 500 — unsafe retry suppressed'),
+      pageFor(tasks[2]._templateId, 'prod-3'),
+    ];
+    const client = clientWithCreatePagesReturning(pages);
+
+    const promise = createStudyTasks(client, levels, baseOptions);
+
+    await expect(promise).rejects.toMatchObject({
+      kind: 'batch-aborted',
+      attempted: 3,
+      created: 2,
+      failedUnsafe: 1,
+      notAttempted: 0,
+    });
+  });
+
+  it('throws batch-aborted with notAttempted=K when K undefined slots, 0 Error', async () => {
+    const tasks = tasksFor(5);
+    const levels = buildLevels(tasks);
+    const pages = [
+      pageFor(tasks[0]._templateId, 'prod-1'),
+      pageFor(tasks[1]._templateId, 'prod-2'),
+      undefined,
+      undefined,
+      undefined,
+    ];
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(createStudyTasks(client, levels, baseOptions)).rejects.toMatchObject({
+      kind: 'batch-aborted',
+      attempted: 5,
+      created: 2,
+      failedUnsafe: 0,
+      notAttempted: 3,
+    });
+  });
+
+  it('throws batch-aborted with all counts populated for mixed Error + undefined', async () => {
+    const tasks = tasksFor(5);
+    const levels = buildLevels(tasks);
+    const pages = [
+      pageFor(tasks[0]._templateId, 'prod-1'),
+      new Error('unsafe retry suppressed'),
+      pageFor(tasks[2]._templateId, 'prod-3'),
+      undefined,
+      undefined,
+    ];
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(createStudyTasks(client, levels, baseOptions)).rejects.toMatchObject({
+      kind: 'batch-aborted',
+      attempted: 5,
+      created: 2,
+      failedUnsafe: 1,
+      notAttempted: 2,
+    });
+  });
+
+  it('error message stays within 180 chars across realistic count ranges', async () => {
+    // inception.js:291 slices the message to 180 chars before posting to
+    // the study comment + Activity Log summary. Pin the budget so future
+    // wording changes can't push past it.
+    async function messageFor(attempted, failedUnsafe, notAttempted) {
+      const tasks = tasksFor(attempted);
+      const levels = buildLevels(tasks);
+      const pages = tasks.map((t, i) => {
+        if (i < failedUnsafe) return new Error('e');
+        if (i < failedUnsafe + notAttempted) return undefined;
+        return pageFor(t._templateId, `prod-${i}`);
+      });
+      const client = clientWithCreatePagesReturning(pages);
+      try {
+        await createStudyTasks(client, levels, baseOptions);
+        return null;
+      } catch (err) {
+        return err.message;
+      }
+    }
+
+    // representative count combinations
+    const cases = [
+      [1, 1, 0],
+      [10, 1, 0],
+      [10, 0, 9],
+      [202, 1, 70], // today's incident shape
+      [1000, 100, 500], // exaggerated upper bound
+    ];
+
+    for (const [attempted, failedUnsafe, notAttempted] of cases) {
+      const msg = await messageFor(attempted, failedUnsafe, notAttempted);
+      expect(msg).not.toBeNull();
+      expect(msg.length).toBeLessThanOrEqual(180);
+    }
+  });
+
+  it('error message references the operator runbook so the recovery path is discoverable', async () => {
+    const tasks = tasksFor(2);
+    const levels = buildLevels(tasks);
+    const pages = [pageFor(tasks[0]._templateId, 'prod-1'), undefined];
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(createStudyTasks(client, levels, baseOptions)).rejects.toMatchObject({
+      message: expect.stringMatching(/runbook/i),
+    });
+  });
+
+  it('throws runParallel contract drift error when batch returns an unknown slot shape', async () => {
+    // Future runParallel evolution that adds a new slot shape (e.g., a
+    // sentinel object) must fail loud rather than silently undercounting,
+    // which would reproduce the silent-batch-abort invisibility this fix
+    // is designed to prevent.
+    const tasks = tasksFor(3);
+    const levels = buildLevels(tasks);
+    const pages = [
+      pageFor(tasks[0]._templateId, 'prod-1'),
+      { sentinel: 'unexpected' }, // not a page (no .id with our TEMPLATE_SOURCE_ID props), not an Error, not undefined — actually it has no .id at all
+      pageFor(tasks[2]._templateId, 'prod-3'),
+    ];
+    // To make this a contract-drift case, the partition must reject this
+    // shape. A "real page" needs .id; a {sentinel:'unexpected'} object has
+    // no .id, isn't an Error, and isn't undefined. That's the drift case.
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(createStudyTasks(client, levels, baseOptions))
+      .rejects.toThrow(/runParallel contract drift/);
+  });
+
+  it('idMapping is populated for survivor slots (queryable from the throw)', async () => {
+    // A future cleanup tool needs to discover which production pages were
+    // created before the abort — attach idMapping to the thrown error.
+    const tasks = tasksFor(3);
+    const levels = buildLevels(tasks);
+    const pages = [
+      pageFor(tasks[0]._templateId, 'prod-survivor-A'),
+      new Error('unsafe retry suppressed'),
+      undefined,
+    ];
+    const client = clientWithCreatePagesReturning(pages);
+
+    let caught;
+    try {
+      await createStudyTasks(client, levels, baseOptions);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeDefined();
+    expect(caught.kind).toBe('batch-aborted');
+    expect(caught.idMapping).toMatchObject({ [tasks[0]._templateId]: 'prod-survivor-A' });
+    // No mapping for the failed/abandoned slots
+    expect(caught.idMapping[tasks[1]._templateId]).toBeUndefined();
+    expect(caught.idMapping[tasks[2]._templateId]).toBeUndefined();
+  });
+
+  it('tracer.endPhase("createStudyTasks") fires even when the function throws', async () => {
+    // Phase timing on the throw path: without this guarantee, the failure-
+    // path Activity Log entry silently drops `timing.phases.createStudyTasks`
+    // — exactly where post-mortem diagnosis needs it.
+    const phases = [];
+    const tracer = {
+      startPhase(name) { phases.push(`start:${name}`); },
+      endPhase(name) { phases.push(`end:${name}`); },
+      recordBatchOutcome: vi.fn(),
+    };
+    const tasks = tasksFor(2);
+    const levels = buildLevels(tasks);
+    const pages = [pageFor(tasks[0]._templateId, 'prod-1'), undefined];
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(
+      createStudyTasks(client, levels, { ...baseOptions, tracer }),
+    ).rejects.toMatchObject({ kind: 'batch-aborted' });
+
+    expect(phases).toContain('start:createStudyTasks');
+    expect(phases).toContain('end:createStudyTasks');
+    // end fires after start
+    expect(phases.indexOf('end:createStudyTasks')).toBeGreaterThan(
+      phases.indexOf('start:createStudyTasks'),
+    );
+  });
+
+  it('calls tracer.recordBatchOutcome with the count breakdown before throw', async () => {
+    const tracer = {
+      startPhase: vi.fn(),
+      endPhase: vi.fn(),
+      recordBatchOutcome: vi.fn(),
+    };
+    const tasks = tasksFor(4);
+    const levels = buildLevels(tasks);
+    const pages = [
+      pageFor(tasks[0]._templateId, 'prod-1'),
+      pageFor(tasks[1]._templateId, 'prod-2'),
+      new Error('unsafe'),
+      undefined,
+    ];
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(
+      createStudyTasks(client, levels, { ...baseOptions, tracer }),
+    ).rejects.toMatchObject({ kind: 'batch-aborted' });
+
+    expect(tracer.recordBatchOutcome).toHaveBeenCalledWith({
+      attempted: 4,
+      created: 2,
+      failedUnsafe: 1,
+      notAttempted: 1,
+    });
+  });
+});

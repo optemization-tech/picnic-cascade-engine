@@ -219,4 +219,58 @@ describe('CascadeTracer', () => {
       expect(details.narrowRetrySuppressed).toBe(1);
     });
   });
+
+  describe('batchOutcome (U2 — surfaces partial-failure counts to Activity Log)', () => {
+    it('omits batchOutcome from toActivityLogDetails when never recorded', () => {
+      const tracer = new CascadeTracer('t-bo-1');
+      const details = tracer.toActivityLogDetails();
+      expect(details.batchOutcome).toBeUndefined();
+    });
+
+    it('omits batchOutcome when failedUnsafe and notAttempted are both zero', () => {
+      // Mirrors the narrowRetrySuppressed pattern: emit only on signal so
+      // the common-case Activity Log entry stays clean.
+      const tracer = new CascadeTracer('t-bo-2');
+      tracer.recordBatchOutcome({ attempted: 5, created: 5, failedUnsafe: 0, notAttempted: 0 });
+      const details = tracer.toActivityLogDetails();
+      expect(details.batchOutcome).toBeUndefined();
+    });
+
+    it('emits batchOutcome with all four fields when failedUnsafe > 0', () => {
+      const tracer = new CascadeTracer('t-bo-3');
+      tracer.recordBatchOutcome({ attempted: 3, created: 2, failedUnsafe: 1, notAttempted: 0 });
+      const details = tracer.toActivityLogDetails();
+      expect(details.batchOutcome).toEqual({
+        attempted: 3,
+        created: 2,
+        failedUnsafe: 1,
+        notAttempted: 0,
+      });
+    });
+
+    it('emits batchOutcome when only notAttempted > 0 (un-picked-up slots)', () => {
+      const tracer = new CascadeTracer('t-bo-4');
+      tracer.recordBatchOutcome({ attempted: 202, created: 131, failedUnsafe: 0, notAttempted: 71 });
+      const details = tracer.toActivityLogDetails();
+      expect(details.batchOutcome).toEqual({
+        attempted: 202,
+        created: 131,
+        failedUnsafe: 0,
+        notAttempted: 71,
+      });
+    });
+
+    it('overwrites earlier counts on repeat call (last write wins for the operator-facing batch)', () => {
+      const tracer = new CascadeTracer('t-bo-5');
+      tracer.recordBatchOutcome({ attempted: 5, created: 4, failedUnsafe: 1, notAttempted: 0 });
+      tracer.recordBatchOutcome({ attempted: 10, created: 9, failedUnsafe: 0, notAttempted: 1 });
+      const details = tracer.toActivityLogDetails();
+      expect(details.batchOutcome).toEqual({
+        attempted: 10,
+        created: 9,
+        failedUnsafe: 0,
+        notAttempted: 1,
+      });
+    });
+  });
 });

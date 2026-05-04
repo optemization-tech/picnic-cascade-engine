@@ -70,6 +70,13 @@ function detailLines(details = {}) {
     lines.push(`Narrow retry suppressed: ${details.narrowRetrySuppressed} (non-idempotent write surfaced on unsafe error)`);
   }
 
+  if (details.batchOutcome) {
+    const { attempted, created, failedUnsafe, notAttempted } = details.batchOutcome;
+    lines.push(
+      `Batch incomplete: created ${created} of ${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted — runParallel abort).`,
+    );
+  }
+
   return lines;
 }
 

@@ -177,6 +177,47 @@ describe('ActivityLogService', () => {
     expect(bodyText).not.toContain('Narrow retry suppressed');
   });
 
+  it('renders batchOutcome line with all four counts when present (U2)', async () => {
+    // The batch-incomplete line gives operators an at-a-glance breakdown
+    // of how many tasks landed vs. were lost in the abort, without
+    // forcing them into the JSON details block.
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Inception',
+      status: 'failed',
+      summary: 'Inception batch incomplete: created 131/202',
+      details: {
+        batchOutcome: { attempted: 202, created: 131, failedUnsafe: 1, notAttempted: 70 },
+      },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    const bodyText = JSON.stringify(children);
+    expect(bodyText).toContain('Batch incomplete:');
+    expect(bodyText).toContain('131');
+    expect(bodyText).toContain('202');
+    expect(bodyText).toContain('1 failed');
+    expect(bodyText).toContain('70 not attempted');
+  });
+
+  it('omits batchOutcome line when not present (U2)', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'Cascade complete',
+      details: { timing: { totalMs: 50 } },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    const bodyText = JSON.stringify(children);
+    expect(bodyText).not.toContain('Batch incomplete');
+  });
+
   // Defensive retry — upstream may set triggeredByUserId to a bot id while
   // editedByBot stays false (e.g. webhook source.user_id is a bot integration,
   // or last_edited_by.type is missing). When that slips through, Notion 400s

@@ -279,17 +279,66 @@ export async function createStudyTasks(client, levels, { studyPageId, contractSi
   }
 
   let totalCreated = 0;
-  if (entries.length > 0) {
-    const createdPages = await createBatch(client, entries, { tracer });
-    // createdPages may contain Error instances (narrow-retry suppressed
-    // or other post-flight failures) or undefined (batch aborted before
-    // this slot was picked up). Only count real page objects.
-    const successes = createdPages.filter((p) => p && !(p instanceof Error));
-    accumulateIdMappings(successes, entries, idMapping, depTracking, parentTracking);
-    totalCreated = successes.length;
-  }
+  try {
+    if (entries.length > 0) {
+      const createdPages = await createBatch(client, entries, { tracer });
+      // runParallel returns a mixed array. Partition into three buckets:
+      //   - successes: real page objects
+      //   - failedUnsafe: Error instances (worker rejected this slot,
+      //     typically narrow-retry suppression on a non-idempotent unsafe
+      //     error — the slot may or may not have written server-side)
+      //   - notAttempted: undefined (worker never picked up this slot
+      //     because the batch aborted before reaching it)
+      let failedUnsafe = 0;
+      let notAttempted = 0;
+      const successes = [];
+      for (const slot of createdPages) {
+        if (slot instanceof Error) {
+          failedUnsafe += 1;
+        } else if (slot === undefined) {
+          notAttempted += 1;
+        } else if (slot && typeof slot === 'object' && slot.id) {
+          successes.push(slot);
+        } else {
+          // Bucket invariant guard. runParallel's contract is "page object
+          // | Error | undefined" per src/notion/client.js:153-201. Any
+          // other slot shape means runParallel evolved and this caller's
+          // partition is undercounting — fail loud rather than silently
+          // recreating the invisibility this fix is designed to prevent.
+          throw new Error(
+            `runParallel contract drift: createPages returned an unrecognized slot shape (${typeof slot}). Update create-tasks.js partition logic.`,
+          );
+        }
+      }
+      accumulateIdMappings(successes, entries, idMapping, depTracking, parentTracking);
+      totalCreated = successes.length;
 
-  if (tracer) tracer.endPhase('createStudyTasks');
+      if (failedUnsafe > 0 || notAttempted > 0) {
+        const attempted = entries.length;
+        if (tracer && typeof tracer.recordBatchOutcome === 'function') {
+          tracer.recordBatchOutcome({ attempted, created: totalCreated, failedUnsafe, notAttempted });
+        }
+        // Operator-facing summary; ≤180 chars to fit inception.js:291
+        // slicing. The runbook reference gives the on-call a concrete
+        // next step; archiving the partial tasks restores the
+        // double-inception precondition so a re-run can succeed cleanly.
+        const msg = `Inception batch incomplete: created ${totalCreated}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
+        throw Object.assign(new Error(msg), {
+          kind: 'batch-aborted',
+          attempted,
+          created: totalCreated,
+          failedUnsafe,
+          notAttempted,
+          idMapping,
+        });
+      }
+    }
+  } finally {
+    // Always close the phase, even on the throw path. Without this, the
+    // failure-path Activity Log entry silently drops timing.phases
+    // .createStudyTasks — exactly where post-mortem diagnosis needs it.
+    if (tracer) tracer.endPhase('createStudyTasks');
+  }
 
   return {
     idMapping,

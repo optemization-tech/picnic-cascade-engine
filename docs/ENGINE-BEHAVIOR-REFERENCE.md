@@ -426,6 +426,22 @@ For every behavior change:
 
 ## Changelog
 
+### 2026-05-04 — Inception silent batch-abort partial-failure made visible
+
+Plan: `docs/plans/2026-05-04-001-fix-inception-silent-batch-abort-plan.md`. Runbook: `docs/runbooks/inception-batch-incomplete.md`.
+
+Before this change, when `runParallel` (`src/notion/client.js:153-201`) aborted a `createPages` batch on the first non-idempotent unsafe error, `createStudyTasks` filtered both `undefined` (un-picked-up slots) and `Error` (rejected slots) out of `successes` equivalently — partial-failure looked identical to success, and the Activity Log entry reported `status: success` with `totalCreated: N` even when up to ~70 blueprint tasks were silently dropped. Mechanism is documented and tested at `test/notion/client.test.js:629-741`; the gap was at the caller layer, not in `runParallel`.
+
+`createStudyTasks` (`src/provisioning/create-tasks.js:281-292`) now partitions the `createPages` return into three buckets — successes, `Error` (failedUnsafe), and `undefined` (notAttempted) — and throws a structured Error when either failure bucket is non-zero. The thrown Error carries `kind: 'batch-aborted'` plus own properties `attempted`, `created`, `failedUnsafe`, `notAttempted`, `idMapping`. Both inception and add-task-set routes inherit the failure path automatically: existing catch blocks (`src/routes/inception.js:270-306`, `src/routes/add-task-set.js:615-661`) post the Activity Log terminal event with `status: failed`, the study comment, and reset Import Mode in `finally`. `tracer.endPhase('createStudyTasks')` runs in a `finally` so phase timing is preserved on the throw path. A bucket-invariant guard throws a `runParallel contract drift:` Error if `createPages` returns an unrecognized slot shape — forcing future `runParallel` evolution to fail loud rather than recreate the invisibility this fix removes.
+
+`CascadeTracer` gains `recordBatchOutcome({ attempted, created, failedUnsafe, notAttempted })`; `toActivityLogDetails()` emits `batchOutcome` only when `failedUnsafe > 0 || notAttempted > 0`, mirroring the `narrowRetrySuppressed` "emit only on signal" pattern. `activity-log.js` body-builder renders an additional bullet line — `Batch incomplete: created X of Y (Z failed transient, W not attempted — runParallel abort).` — so the breakdown is visible from the Notion entry without opening the JSON block.
+
+Operator-facing summary stays within the 180-char `inception.js:291` slice budget and ends with `(see runbook)` so the Activity Log entry is self-discoverable. `docs/runbooks/inception-batch-incomplete.md` documents the recovery procedure: identify partial Study Tasks via `[Do Not Edit] Template Source ID` diff, archive them, then re-trigger inception (the existing double-inception guard re-permits the run once `existingTasks.length === 0`). Tag: `BEH-INCEPTION-BATCH-INCOMPLETE`.
+
+`Promise.all` in both routes' catch blocks survives all Notion-down resilience scenarios under test (`test/routes/inception.test.js`, `test/routes/add-task-set.test.js`, `createStudyTasks throws batch-aborted Error (U3)` describes): when any of the three calls (`reportStatus`, `logTerminalEvent`, `postComment`) rejects, the others still attempt and the original batch-aborted Error rethrows unmodified via the inner `try { } catch { /* don't mask original error */ }`. No source change to the catch blocks beyond the new throw path arriving from `createStudyTasks`.
+
+Resolves the 2026-05-01 Ionis HAE 001 incident (study `35323867-60c2-81d0-bb16-fb6e33ee64c9`) where 70 of 202 blueprint tasks were silently dropped from a `success`-marked Activity Log entry. PR E2 (post-flight duplicate sweep, `docs/plans/2026-04-20-003-feat-post-flight-duplicate-sweep-plan.md`) remains unbuilt and out of scope; an automatic-retry follow-up is unblocked but deferred until incident frequency justifies it.
+
 ### 2026-05-01 — Status Roll-Up surfaces partial completion (Meg May 1 report)
 
 Plan: `docs/plans/2026-05-01-002-feat-status-rollup-partial-done-plan.md`.

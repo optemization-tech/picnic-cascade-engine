@@ -817,4 +817,228 @@ describe('inception route', () => {
       for (let i = 0; i < 40; i++) await Promise.resolve();
     });
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // U3: batch-aborted Error from createStudyTasks (silent partial-failure
+  // fix). Verifies the route's existing failure path correctly surfaces
+  // the structured error AND survives the same Notion brownout that
+  // likely caused the abort in the first place.
+  // ────────────────────────────────────────────────────────────────────
+  describe('createStudyTasks throws batch-aborted Error (U3)', () => {
+    function batchAbortedError({ attempted = 202, created = 131, failedUnsafe = 1, notAttempted = 70 } = {}) {
+      const msg = `Inception batch incomplete: created ${created}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
+      return Object.assign(new Error(msg), {
+        kind: 'batch-aborted',
+        attempted,
+        created,
+        failedUnsafe,
+        notAttempted,
+        idMapping: {},
+      });
+    }
+
+    function setupHappyUpToCreate() {
+      mocks.mockClient.getPage.mockResolvedValue({
+        properties: {
+          [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } },
+          [S.STUDY_NAME.name]: { id: S.STUDY_NAME.id, type: 'title', title: [{ text: { content: 'Ionis HAE 001' } }] },
+        },
+      });
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
+      mocks.buildTaskTree.mockReturnValue([{ level: 0, tasks: [], isLastLevel: true }]);
+    }
+
+    it('logs Activity Log terminal event with status=failed and breakdown summary', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+      await handleInception(req, res);
+      await flush();
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflow: 'Inception',
+          status: 'failed',
+          summary: expect.stringContaining('batch incomplete'),
+          studyId: 'study-ionis',
+        }),
+      );
+    });
+
+    it('study comment posted with operator-actionable summary', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+      await handleInception(req, res);
+      await flush();
+
+      const commentCall = mocks.studyCommentService.postComment.mock.calls[0]?.[0];
+      expect(commentCall).toBeDefined();
+      expect(commentCall.workflow).toBe('Inception');
+      expect(commentCall.status).toBe('failed');
+      // The 180-char slice should keep the operator next-action visible.
+      expect(commentCall.summary.length).toBeLessThanOrEqual(220); // includes "Study setup failed: " prefix
+      expect(commentCall.summary).toMatch(/incomplete|created|runbook|archive/i);
+    });
+
+    it('reportStatus called with error severity and failure message', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+      await handleInception(req, res);
+      await flush();
+
+      // reportStatus is called multiple times during a run (info "started",
+      // info "tasks created", final). On the failure path the catch-block
+      // call uses 'error' severity.
+      const errorCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+        (call) => call[1] === 'error',
+      );
+      expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+      const lastErrorCall = errorCalls[errorCalls.length - 1];
+      expect(lastErrorCall[2]).toMatch(/Inception failed/);
+    });
+
+    it('disables Import Mode in finally even on throw path', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+
+      const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+      await handleInception(req, res);
+      await flush();
+
+      // Find the LAST PATCH for IMPORT_MODE — should be the finally cleanup
+      // setting it back to false.
+      const importModePatches = mocks.mockClient.request.mock.calls.filter(
+        ([method, path, body]) =>
+          method === 'PATCH' &&
+          path === '/pages/study-ionis' &&
+          body?.properties?.[S.IMPORT_MODE.id] !== undefined,
+      );
+      expect(importModePatches.length).toBeGreaterThanOrEqual(2); // enable + finally disable
+      const lastPatch = importModePatches[importModePatches.length - 1];
+      expect(lastPatch[2].properties[S.IMPORT_MODE.id].checkbox).toBe(false);
+    });
+
+    it('Notion-down resilience: when logTerminalEvent rejects, reportStatus and postComment still run', async () => {
+      // Mirror of the brownout scenario that likely caused the abort: the
+      // catch block must not let one failed Notion call drop the others.
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+      mocks.activityLogService.logTerminalEvent.mockRejectedValue(new Error('Notion 500'));
+
+      const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+      await handleInception(req, res);
+      await flush();
+
+      // reportStatus 'error' was attempted
+      const errorReportStatusCalls = mocks.mockClient.reportStatus.mock.calls.filter(
+        (call) => call[1] === 'error',
+      );
+      expect(errorReportStatusCalls.length).toBeGreaterThanOrEqual(1);
+      // postComment was attempted
+      expect(mocks.studyCommentService.postComment).toHaveBeenCalled();
+      // logTerminalEvent itself was attempted (the rejection means it tried)
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalled();
+    });
+
+    it('Notion-down resilience: when reportStatus rejects, logTerminalEvent and postComment still run', async () => {
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockRejectedValue(batchAbortedError());
+      // reportStatus fails ONLY for the catch-block 'error' call — keep
+      // earlier 'info' calls succeeding so the run reaches the catch block
+      // with the same shape it would in production.
+      mocks.mockClient.reportStatus.mockImplementation(async (_studyId, severity) => {
+        if (severity === 'error') throw new Error('Notion 500');
+        return {};
+      });
+
+      const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+      await handleInception(req, res);
+      await flush();
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ workflow: 'Inception', status: 'failed' }),
+      );
+      expect(mocks.studyCommentService.postComment).toHaveBeenCalled();
+    });
+
+    it('Notion-down resilience: when all three reject, original error is preserved (no mask)', async () => {
+      // Worst case — entire Notion brownout. The route's catch block has
+      // an inner try/catch ("don't mask original error"); the original
+      // batch-aborted Error must still surface so flightTracker logs it
+      // unmodified.
+      setupHappyUpToCreate();
+      const original = batchAbortedError();
+      mocks.createStudyTasks.mockRejectedValue(original);
+      mocks.activityLogService.logTerminalEvent.mockRejectedValue(new Error('AL 500'));
+      mocks.studyCommentService.postComment.mockRejectedValue(new Error('Comment 500'));
+      mocks.mockClient.reportStatus.mockImplementation(async (_id, severity) => {
+        if (severity === 'error') throw new Error('Status 500');
+        return {};
+      });
+
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+        await handleInception(req, res);
+        await flush();
+
+        // The flightTracker .catch handler logs '[inception] unhandled:'
+        // with the rethrown error — verify the original batch-aborted Error
+        // surfaced unmodified.
+        const unhandledLog = consoleError.mock.calls.find(
+          (args) => typeof args[0] === 'string' && args[0].startsWith('[inception] unhandled:'),
+        );
+        expect(unhandledLog).toBeDefined();
+        expect(unhandledLog[1]).toBe(original);
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it('terminal event details include batchOutcome and timing.phases.createStudyTasks', async () => {
+      // The route reads tracer.toActivityLogDetails() into the terminal
+      // event. With U1+U2 wired, the route's tracer should have:
+      //   - batchOutcome populated (because createStudyTasks called
+      //     recordBatchOutcome before throwing)
+      //   - timing.phases.createStudyTasks populated (because endPhase
+      //     fires in the finally inside createStudyTasks)
+      //
+      // Test setup: have the createStudyTasks mock interact with the
+      // tracer the same way the real implementation does, so the route's
+      // toActivityLogDetails reflects the production shape.
+      setupHappyUpToCreate();
+      mocks.createStudyTasks.mockImplementation(async (_client, _levels, opts) => {
+        const tracer = opts.tracer;
+        if (tracer) {
+          tracer.startPhase('createStudyTasks');
+          tracer.recordBatchOutcome({ attempted: 202, created: 131, failedUnsafe: 1, notAttempted: 70 });
+          tracer.endPhase('createStudyTasks');
+        }
+        throw batchAbortedError();
+      });
+
+      const { req, res } = makeReqRes({ studyPageId: 'study-ionis' });
+      await handleInception(req, res);
+      await flush();
+
+      const terminalCall = mocks.activityLogService.logTerminalEvent.mock.calls.find(
+        ([arg]) => arg.status === 'failed',
+      );
+      expect(terminalCall).toBeDefined();
+      const details = terminalCall[0].details;
+      expect(details.batchOutcome).toEqual({
+        attempted: 202,
+        created: 131,
+        failedUnsafe: 1,
+        notAttempted: 70,
+      });
+      expect(details.timing?.phases?.createStudyTasks).toBeGreaterThanOrEqual(0);
+    });
+  });
 });
