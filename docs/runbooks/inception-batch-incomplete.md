@@ -23,16 +23,10 @@ Two paths.
 
 **A. Notion UI (fastest for ≤ ~150 tasks).** Multi-select the filtered rows, right-click → `Delete` (Notion's "Delete" archives the page; it is recoverable from Trash for 30 days). Confirm the count matches before clicking.
 
-**B. Scripted bulk-archive (for larger sets, or if UI multi-select gets slow).** From a checkout of the engine repo:
-
-```bash
-node scripts/archive-partial-study-tasks.js <studyPageId>
-```
-
-If that script doesn't exist yet, the inline equivalent — paste in a scratch file, run with `node`:
+**B. Scripted bulk-archive (for larger sets, or if UI multi-select gets slow).** Paste into a scratch file at the engine repo root and run with `node`:
 
 ```js
-// archive-study-tasks.js
+// archive-study-tasks.js — run from the engine repo root.
 import 'dotenv/config';
 import { provisionClient } from './src/notion/clients.js';
 import { config } from './src/config.js';
@@ -41,8 +35,17 @@ import { STUDY_TASKS_PROPS as ST } from './src/notion/property-names.js';
 const studyPageId = process.argv[2];
 if (!studyPageId) throw new Error('Usage: node archive-study-tasks.js <studyPageId>');
 
-const filter = { property: ST.STUDY.id, relation: { contains: studyPageId } };
-const tasks = await provisionClient.queryDatabase(config.notion.studyTasksDbId, filter, 1000);
+// Filter mirrors the runbook Step 1 query: only engine-provisioned
+// tasks (Template Source ID is not empty) — leaves PM-added manual
+// tasks alone. queryDatabase paginates internally; default page size
+// 100 (Notion's max) is sufficient.
+const filter = {
+  and: [
+    { property: ST.STUDY.id, relation: { contains: studyPageId } },
+    { property: ST.TEMPLATE_SOURCE_ID.id, rich_text: { is_not_empty: true } },
+  ],
+};
+const tasks = await provisionClient.queryDatabase(config.notion.studyTasksDbId, filter);
 console.log(`Found ${tasks.length} tasks for study ${studyPageId}`);
 
 for (const task of tasks) {
@@ -55,11 +58,17 @@ Run with `NOTION_PROVISION_TOKEN_1` set in `.env` (or `NOTION_TOKEN_1` if no pro
 
 ## Step 3 — Confirm the precondition
 
-Before re-triggering, confirm the double-inception guard sees the study as fresh:
+Before re-triggering, confirm the double-inception guard sees the study as fresh.
 
-- Re-query Study Tasks with the same filter as Step 1.
-- The `[Do Not Edit] Template Source ID is not empty` count should be `0`.
-- The page-level Trash should hold the archived tasks (in case you need to recover any).
+The guard at `src/routes/inception.js:54-67` queries by `Study.relation contains <studyPageId>` only — it does **not** filter by `[Do Not Edit] Template Source ID`. That filter is unique to this runbook (it exists so we leave PM-added manual tasks alone). Two checks:
+
+- Run the Step 1 filter (`Study.relation contains <studyPageId> AND [Do Not Edit] Template Source ID is not empty`) — the count should be `0`. Confirms the engine-provisioned partial tasks are gone.
+- Run the broader guard filter (`Study.relation contains <studyPageId>` only). If this count is also `0`, you're clear — re-trigger inception.
+- If the broader filter returns rows that the narrower filter does not, those are PM-added manual tasks (no Template Source ID). The double-inception guard will block re-run while they exist. Either:
+  1. Coordinate with the PM to temporarily archive their manual tasks, run inception, then restore them. Or
+  2. Escalate to the engine team — a one-off override of the guard is safer than running with mixed state.
+
+The page-level Trash holds the archived tasks for 30 days if anything needs to be recovered.
 
 If any partial tasks remain (e.g., archive failed mid-loop on a single task), repeat Step 2 for the survivors.
 

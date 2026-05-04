@@ -1372,7 +1372,7 @@ describe('add-task-set route', () => {
   // ────────────────────────────────────────────────────────────────────
   describe('createStudyTasks throws batch-aborted Error (U3)', () => {
     function batchAbortedError({ attempted = 12, created = 8, failedUnsafe = 1, notAttempted = 3 } = {}) {
-      const msg = `Inception batch incomplete: created ${created}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
+      const msg = `Batch incomplete: created ${created}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
       return Object.assign(new Error(msg), {
         kind: 'batch-aborted',
         attempted,
@@ -1407,7 +1407,7 @@ describe('add-task-set route', () => {
         expect.objectContaining({
           workflow: 'Add Task Set',
           status: 'failed',
-          summary: expect.stringContaining('batch incomplete'),
+          summary: expect.stringMatching(/batch incomplete/i),
         }),
       );
     });

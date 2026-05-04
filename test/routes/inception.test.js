@@ -826,7 +826,7 @@ describe('inception route', () => {
   // ────────────────────────────────────────────────────────────────────
   describe('createStudyTasks throws batch-aborted Error (U3)', () => {
     function batchAbortedError({ attempted = 202, created = 131, failedUnsafe = 1, notAttempted = 70 } = {}) {
-      const msg = `Inception batch incomplete: created ${created}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
+      const msg = `Batch incomplete: created ${created}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
       return Object.assign(new Error(msg), {
         kind: 'batch-aborted',
         attempted,
@@ -861,7 +861,7 @@ describe('inception route', () => {
         expect.objectContaining({
           workflow: 'Inception',
           status: 'failed',
-          summary: expect.stringContaining('batch incomplete'),
+          summary: expect.stringMatching(/batch incomplete/i),
           studyId: 'study-ionis',
         }),
       );

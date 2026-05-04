@@ -954,16 +954,49 @@ describe('createStudyTasks — partial-batch failure (U1)', () => {
     const levels = buildLevels(tasks);
     const pages = [
       pageFor(tasks[0]._templateId, 'prod-1'),
-      { sentinel: 'unexpected' }, // not a page (no .id with our TEMPLATE_SOURCE_ID props), not an Error, not undefined — actually it has no .id at all
+      { sentinel: 'unexpected' }, // no .id, no .properties — fails partition guard
       pageFor(tasks[2]._templateId, 'prod-3'),
     ];
-    // To make this a contract-drift case, the partition must reject this
-    // shape. A "real page" needs .id; a {sentinel:'unexpected'} object has
-    // no .id, isn't an Error, and isn't undefined. That's the drift case.
     const client = clientWithCreatePagesReturning(pages);
 
     await expect(createStudyTasks(client, levels, baseOptions))
       .rejects.toThrow(/runParallel contract drift/);
+  });
+
+  it('throws contract drift on a sentinel object that has .id but no .properties (page-shape guard)', async () => {
+    // Adversarial scenario: a future runParallel evolution returns a
+    // sentinel like `{id: 'error-sentinel', error: true}` for a partial
+    // failure. Without checking .properties, the partition would count
+    // it as a success — silently inflating totalCreated and recreating
+    // the silent-batch-abort invisibility from a different angle.
+    const tasks = tasksFor(3);
+    const levels = buildLevels(tasks);
+    const pages = [
+      pageFor(tasks[0]._templateId, 'prod-1'),
+      { id: 'error-sentinel', error: true }, // .id present but no .properties
+      pageFor(tasks[2]._templateId, 'prod-3'),
+    ];
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(createStudyTasks(client, levels, baseOptions))
+      .rejects.toThrow(/runParallel contract drift/);
+  });
+
+  it('throws contract drift when bucket counts do not sum to entries.length (array-length axis)', async () => {
+    // Plan §U1 specifies the bucket invariant: successes + failedUnsafe +
+    // notAttempted === entries.length. The per-slot guard catches
+    // unrecognized shapes; this guard catches the array-length axis —
+    // if runParallel ever returns a shorter array than entries, the
+    // partition iterates only createdPages.length times and silently
+    // undercounts. Surface as drift rather than wrong totalCreated.
+    const tasks = tasksFor(3);
+    const levels = buildLevels(tasks);
+    // Returned array shorter than entries.length (3) — only 2 elements.
+    const pages = [pageFor(tasks[0]._templateId, 'prod-1'), undefined];
+    const client = clientWithCreatePagesReturning(pages);
+
+    await expect(createStudyTasks(client, levels, baseOptions))
+      .rejects.toThrow(/runParallel contract drift.*do not sum to entries\.length/);
   });
 
   it('idMapping is populated for survivor slots (queryable from the throw)', async () => {
