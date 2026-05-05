@@ -250,46 +250,103 @@ function accumulateIdMappings(createdPages, entries, idMapping, depTracking, par
  * @returns {Promise<{ idMapping: object, totalCreated: number, depTracking: object[], parentTracking: object[] }>}
  */
 export async function createStudyTasks(client, levels, { studyPageId, contractSignDate, studyTasksDbId, existingIdMapping, extraTags = [], tracer } = {}) {
+  // startPhase is inside the try so endPhase always fires for any throw
+  // path — including pre-batch throws (missing contractSignDate, parseDate
+  // failure, buildTaskBody throws). Without this, _activePhases would
+  // retain an unclosed entry and the failure-path Activity Log entry
+  // would silently drop timing.phases.createStudyTasks.
   if (tracer) tracer.startPhase('createStudyTasks');
-
-  // Defense in depth — callers (inception, add-task-set) should have already
-  // aborted on empty Contract Sign Date, but refuse to anchor against
-  // undefined/null here so future misbehaving callers fail loud instead of
-  // silently computing NaN dates (parseDate(null) returns null without
-  // throwing, so guard truthiness FIRST, parse SECOND).
-  if (!contractSignDate) {
-    throw new Error('createStudyTasks: contractSignDate is required');
-  }
-  const anchorDate = parseDate(contractSignDate);
+  let totalCreated = 0;
   const idMapping = { ...(existingIdMapping || {}) };
   const depTracking = [];
   const parentTracking = [];
-  const tasks = (levels || []).flatMap(({ tasks: levelTasks = [] }) => levelTasks);
-  const entries = [];
+  try {
+    // Defense in depth — callers (inception, add-task-set) should have already
+    // aborted on empty Contract Sign Date, but refuse to anchor against
+    // undefined/null here so future misbehaving callers fail loud instead of
+    // silently computing NaN dates (parseDate(null) returns null without
+    // throwing, so guard truthiness FIRST, parse SECOND).
+    if (!contractSignDate) {
+      throw new Error('createStudyTasks: contractSignDate is required');
+    }
+    const anchorDate = parseDate(contractSignDate);
+    const tasks = (levels || []).flatMap(({ tasks: levelTasks = [] }) => levelTasks);
+    const entries = [];
 
-  for (const task of tasks) {
-    const entry = buildTaskBody(task, {
-      anchorDate,
-      studyPageId,
-      studyTasksDbId,
-      idMapping,
-      extraTags,
-    });
-    if (entry) entries.push(entry);
+    for (const task of tasks) {
+      const entry = buildTaskBody(task, {
+        anchorDate,
+        studyPageId,
+        studyTasksDbId,
+        idMapping,
+        extraTags,
+      });
+      if (entry) entries.push(entry);
+    }
+
+    if (entries.length > 0) {
+      const createdPages = await createBatch(client, entries, { tracer });
+      // runParallel returns a mixed array. Partition into three buckets:
+      // page objects, Error instances (worker rejected — narrow-retry
+      // suppression on non-idempotent unsafe error), and `undefined`
+      // (worker never picked up the slot before abort).
+      let failedUnsafe = 0;
+      let notAttempted = 0;
+      const successes = [];
+      for (const slot of createdPages) {
+        if (slot instanceof Error) {
+          failedUnsafe += 1;
+        } else if (slot === undefined) {
+          notAttempted += 1;
+        } else if (slot && typeof slot === 'object' && slot.id && slot.properties) {
+          successes.push(slot);
+        } else {
+          // Per-slot contract drift: runParallel's contract is
+          // "page object | Error | undefined" per src/notion/client.js
+          // :153-201. A real page object always carries `.id` AND
+          // `.properties`; checking both rejects sentinel objects like
+          // `{id, error: true}` that would otherwise be miscounted as
+          // success and silently recreate this fix's invisibility.
+          throw new Error(
+            `runParallel contract drift: createPages returned an unrecognized slot shape (${typeof slot}). Update create-tasks.js partition logic.`,
+          );
+        }
+      }
+      // Array-length contract drift: if runParallel returns fewer slots
+      // than entries, the per-slot loop iterates only createdPages.length
+      // times and the buckets undercount. Surface as drift rather than
+      // silently producing a wrong totalCreated.
+      if (successes.length + failedUnsafe + notAttempted !== entries.length) {
+        throw new Error(
+          `runParallel contract drift: bucket counts (${successes.length + failedUnsafe + notAttempted}) do not sum to entries.length (${entries.length}).`,
+        );
+      }
+      accumulateIdMappings(successes, entries, idMapping, depTracking, parentTracking);
+      totalCreated = successes.length;
+
+      if (failedUnsafe > 0 || notAttempted > 0) {
+        const attempted = entries.length;
+        if (tracer) tracer.recordBatchOutcome({ attempted, created: totalCreated, failedUnsafe, notAttempted });
+        // Operator-facing summary; ≤180 chars to fit inception.js:291
+        // slicing. Workflow prefix comes from the route catch ("Inception
+        // failed:" / "Add Task Set failed:") — keep this string workflow-
+        // agnostic so add-task-set partial-failures don't point operators
+        // at an inception-titled summary that would lead them to archive
+        // a working study.
+        const msg = `Batch incomplete: created ${totalCreated}/${attempted} (${failedUnsafe} failed transient, ${notAttempted} not attempted). Archive partial tasks and re-run (see runbook).`;
+        throw Object.assign(new Error(msg), {
+          kind: 'batch-aborted',
+          attempted,
+          created: totalCreated,
+          failedUnsafe,
+          notAttempted,
+          idMapping,
+        });
+      }
+    }
+  } finally {
+    if (tracer) tracer.endPhase('createStudyTasks');
   }
-
-  let totalCreated = 0;
-  if (entries.length > 0) {
-    const createdPages = await createBatch(client, entries, { tracer });
-    // createdPages may contain Error instances (narrow-retry suppressed
-    // or other post-flight failures) or undefined (batch aborted before
-    // this slot was picked up). Only count real page objects.
-    const successes = createdPages.filter((p) => p && !(p instanceof Error));
-    accumulateIdMappings(successes, entries, idMapping, depTracking, parentTracking);
-    totalCreated = successes.length;
-  }
-
-  if (tracer) tracer.endPhase('createStudyTasks');
 
   return {
     idMapping,

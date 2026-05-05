@@ -177,6 +177,83 @@ describe('ActivityLogService', () => {
     expect(bodyText).not.toContain('Narrow retry suppressed');
   });
 
+  it('renders batchOutcome line with all four counts when present (U2)', async () => {
+    // The batch-incomplete line gives operators an at-a-glance breakdown
+    // of how many tasks landed vs. were lost in the abort, without
+    // forcing them into the JSON details block.
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Inception',
+      status: 'failed',
+      summary: 'Batch incomplete: created 131/202',
+      details: {
+        batchOutcome: { attempted: 202, created: 131, failedUnsafe: 1, notAttempted: 70 },
+      },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    // Find the bullet block(s) specifically — the JSON details block
+    // also contains "131"/"202", so substring counts on the whole body
+    // would not pin "exactly one bullet line" the way the plan requires.
+    const bullets = children.filter((c) => c.type === 'bulleted_list_item');
+    const bulletText = bullets
+      .map((c) => c.bulleted_list_item.rich_text.map((rt) => rt.text.content).join(''))
+      .join('\n');
+    expect(bulletText).toMatch(/Batch incomplete: created 131 of 202/);
+    expect(bulletText).toMatch(/1 failed transient/);
+    expect(bulletText).toMatch(/70 not attempted/);
+    // Pin "exactly one bullet" — defends against accidental double-render
+    // if the body builder is ever extended with a second batchOutcome
+    // surface.
+    expect((bulletText.match(/Batch incomplete: created/g) || []).length).toBe(1);
+  });
+
+  it('omits batchOutcome line when not present (U2)', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'Cascade complete',
+      details: { timing: { totalMs: 50 } },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const children = payload.children || [];
+    const bulletText = children
+      .filter((c) => c.type === 'bulleted_list_item')
+      .map((c) => c.bulleted_list_item.rich_text.map((rt) => rt.text.content).join(''))
+      .join('\n');
+    expect(bulletText).not.toMatch(/Batch incomplete/);
+  });
+
+  it('omits batchOutcome line when all counts are zero (gate parity with narrowRetrySuppressed)', async () => {
+    // Defense in depth: even if a caller hand-builds details.batchOutcome
+    // with zero failure counts, the body builder must not render a
+    // misleading "Batch incomplete: created 5 of 5" line. Tracer's
+    // toActivityLogDetails() already gates on this; the body builder
+    // mirrors the gate so any future caller bypass surfaces correctly.
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Inception',
+      status: 'success',
+      summary: 'Inception complete',
+      details: {
+        batchOutcome: { attempted: 5, created: 5, failedUnsafe: 0, notAttempted: 0 },
+      },
+    });
+
+    const payload = notionClient.request.mock.calls[0][2];
+    const bulletText = (payload.children || [])
+      .filter((c) => c.type === 'bulleted_list_item')
+      .map((c) => c.bulleted_list_item.rich_text.map((rt) => rt.text.content).join(''))
+      .join('\n');
+    expect(bulletText).not.toMatch(/Batch incomplete/);
+  });
+
   // Defensive retry — upstream may set triggeredByUserId to a bot id while
   // editedByBot stays false (e.g. webhook source.user_id is a bot integration,
   // or last_edited_by.type is missing). When that slips through, Notion 400s

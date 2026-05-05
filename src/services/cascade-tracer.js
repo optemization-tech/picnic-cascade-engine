@@ -17,6 +17,7 @@ export class CascadeTracer {
     this.metadata = new Map();
     this.retries = [];
     this.narrowRetrySuppressedCount = 0;
+    this.batchOutcome = null;
     this._activePhases = new Map();
   }
 
@@ -56,6 +57,18 @@ export class CascadeTracer {
    */
   recordNarrowRetrySuppressed() {
     this.narrowRetrySuppressedCount += 1;
+  }
+
+  /**
+   * Record the outcome of a parallel page-creation batch. Only the latest
+   * call wins — for inception there's one batch, for add-task-set there
+   * are at most two and the last one is the operator-facing one.
+   *
+   * Surfaces in the Activity Log body as `batchOutcome` only when
+   * failedUnsafe > 0 || notAttempted > 0 (see toActivityLogDetails).
+   */
+  recordBatchOutcome({ attempted, created, failedUnsafe, notAttempted }) {
+    this.batchOutcome = { attempted, created, failedUnsafe, notAttempted };
   }
 
   toJSON() {
@@ -99,6 +112,15 @@ export class CascadeTracer {
     // log clean so the signal, when present, is meaningful.
     if (this.narrowRetrySuppressedCount > 0) {
       details.narrowRetrySuppressed = this.narrowRetrySuppressedCount;
+    }
+    // Emit batchOutcome only when something is wrong — same "emit only on
+    // signal" pattern as narrowRetrySuppressed. A fully-successful batch
+    // does not need to clutter the Activity Log entry.
+    if (
+      this.batchOutcome &&
+      (this.batchOutcome.failedUnsafe > 0 || this.batchOutcome.notAttempted > 0)
+    ) {
+      details.batchOutcome = { ...this.batchOutcome };
     }
     return details;
   }

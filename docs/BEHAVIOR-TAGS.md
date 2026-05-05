@@ -92,7 +92,12 @@ Route (`processDepEdit` in `src/routes/dep-edit.js`):
 Engine helper (`computeStatusRollup`):
 - `BEH-STATUS-ROLLUP-PARTIAL-DONE`: When at least one child status is `Done` (or `N/A`) but not all children are complete and none are `In Progress`, the helper returns `In Progress` instead of `Not Started`. Both route branches in `src/routes/status-rollup.js` (parent-direct snap-back and subtask-triggered roll-up) inherit this rule via the shared helper.
 
-## 7) Current Known Gaps
+## 7) Inception / Add-Task-Set Provisioning
+
+`createStudyTasks` (`src/provisioning/create-tasks.js`):
+- `BEH-INCEPTION-BATCH-INCOMPLETE`: When the `runParallel` `createPages` batch returns any `Error` slot (failedUnsafe — worker-rejected) or any `undefined` slot (notAttempted — un-picked-up before abort), `createStudyTasks` throws a structured Error with `kind: 'batch-aborted'` and own properties `attempted`, `created`, `failedUnsafe`, `notAttempted`, `idMapping`. Both inception and add-task-set routes' existing catch blocks log a `failed` Activity Log entry, post a study comment, and reset Import Mode in `finally`. `tracer.recordBatchOutcome(...)` populates the operator-facing breakdown into `details.batchOutcome` (gated on `failedUnsafe > 0 || notAttempted > 0`); the activity-log body renders one bullet line — `Batch incomplete: created X of Y (Z failed transient, W not attempted — runParallel abort).`. A bucket-invariant guard throws `runParallel contract drift:` if `createPages` returns an unrecognized slot shape, forcing future contract evolution to fail loud rather than recreate silent invisibility. Recovery procedure: `docs/runbooks/inception-batch-incomplete.md`.
+
+## 8) Current Known Gaps
 
 - V1 parent `case-a` now drags connected dependencies with shifted subtasks, but it still infers a single delta from the parent envelope. It does not yet classify parent edits into distinct start-left, end-left, and drag modes.
 - V2 still has no `parentMode`. Its parent fan-out recomputes direct subtask offsets from the moved parent's start date and does not drag dependency-connected tasks beyond those subtasks.

@@ -616,47 +616,49 @@ async function processAddTaskSet(req) {
     console.error('[add-task-set] processing failed:', error);
     console.log(tracer.toConsoleLog());
 
-    try {
-      await Promise.all([
-        notionClient.reportStatus(
-          studyPageId,
-          'error',
-          `Add Task Set failed: ${String(error.message || error).slice(0, 200)}`,
-          { tracer },
-        ),
-        activityLogService.logTerminalEvent({
-          workflow: 'Add Task Set',
-          status: 'failed',
-          triggerType: 'Automation',
-          triggeredByUserId,
-          editedByBot,
-          executionId: tracer.cascadeId,
-          timestamp: new Date().toISOString(),
-          cascadeMode: 'N/A',
-          sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
-          studyId: studyPageId,
-          summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
-          details: {
-            buttonType,
-            error: {
-              errorCode: error.code || null,
-              errorMessage: String(error.message || error).slice(0, 400),
-              phase: 'add-task-set',
-            },
-            ...(tracer.toActivityLogDetails()),
+    // Each call has its own .catch — under a Notion brownout (the
+    // dominant trigger condition for partial-failure here), one
+    // rejecting call must not short-circuit Promise.all and silently
+    // drop the others. The trio is independently resilient.
+    await Promise.all([
+      notionClient.reportStatus(
+        studyPageId,
+        'error',
+        `Add Task Set failed: ${String(error.message || error).slice(0, 200)}`,
+        { tracer },
+      ).catch(() => {}),
+      activityLogService.logTerminalEvent({
+        workflow: 'Add Task Set',
+        status: 'failed',
+        triggerType: 'Automation',
+        triggeredByUserId,
+        editedByBot,
+        executionId: tracer.cascadeId,
+        timestamp: new Date().toISOString(),
+        cascadeMode: 'N/A',
+        sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
+        studyId: studyPageId,
+        summary: `Add Task Set failed: ${String(error.message || error).slice(0, 180)}`,
+        details: {
+          buttonType,
+          error: {
+            errorCode: error.code || null,
+            errorMessage: String(error.message || error).slice(0, 400),
+            phase: 'add-task-set',
           },
-        }),
-        studyCommentService.postComment({
-          workflow: 'Add Task Set',
-          status: 'failed',
-          studyId: studyPageId,
-          sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
-          triggeredByUserId,
-          editedByBot,
-          summary: `Failed to add ${buttonType} tasks: ${String(error.message || error).slice(0, 180)}`,
-        }).catch(() => {}),
-      ]);
-    } catch { /* don't mask original error */ }
+          ...(tracer.toActivityLogDetails()),
+        },
+      }).catch(() => {}),
+      studyCommentService.postComment({
+        workflow: 'Add Task Set',
+        status: 'failed',
+        studyId: studyPageId,
+        sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
+        triggeredByUserId,
+        editedByBot,
+        summary: `Failed to add ${buttonType} tasks: ${String(error.message || error).slice(0, 180)}`,
+      }).catch(() => {}),
+    ]);
 
     throw error;
   } finally {

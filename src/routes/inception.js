@@ -271,37 +271,41 @@ async function processInception(body) {
     console.error('[inception] processing failed:', error);
     console.log(tracer.toConsoleLog());
 
-    try {
-      await Promise.all([
-        notionClient.reportStatus(
-          studyPageId,
-          'error',
-          `Inception failed: ${String(error.message || error).slice(0, 200)}`,
-          { tracer },
-        ),
-        activityLogService.logTerminalEvent({
-          workflow: 'Inception',
-          status: 'failed',
-          triggerType: 'Automation',
-          triggeredByUserId,
-          editedByBot,
-          executionId: tracer.cascadeId,
-          sourceTaskName: studyName || null,
-          studyId: studyPageId,
-          summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
-          details: { ...(tracer.toActivityLogDetails()) },
-        }),
-        studyCommentService.postComment({
-          workflow: 'Inception',
-          status: 'failed',
-          studyId: studyPageId,
-          sourceTaskName: studyName || null,
-          triggeredByUserId,
-          editedByBot,
-          summary: `Study setup failed: ${String(error.message || error).slice(0, 180)}`,
-        }).catch(() => {}),
-      ]);
-    } catch { /* don't mask original error */ }
+    // Each call has its own .catch — under a Notion brownout (the
+    // dominant trigger condition for partial-failure here), one
+    // rejecting call must not short-circuit Promise.all and silently
+    // drop the others. With per-call catches the wrapping Promise.all
+    // never rejects, so the trio is independently resilient and the
+    // original batch-aborted Error rethrows unmodified below.
+    await Promise.all([
+      notionClient.reportStatus(
+        studyPageId,
+        'error',
+        `Inception failed: ${String(error.message || error).slice(0, 200)}`,
+        { tracer },
+      ).catch(() => {}),
+      activityLogService.logTerminalEvent({
+        workflow: 'Inception',
+        status: 'failed',
+        triggerType: 'Automation',
+        triggeredByUserId,
+        editedByBot,
+        executionId: tracer.cascadeId,
+        sourceTaskName: studyName || null,
+        studyId: studyPageId,
+        summary: `Inception failed: ${String(error.message || error).slice(0, 180)}`,
+        details: { ...(tracer.toActivityLogDetails()) },
+      }).catch(() => {}),
+      studyCommentService.postComment({
+        workflow: 'Inception',
+        status: 'failed',
+        studyId: studyPageId,
+        sourceTaskName: studyName || null,
+        triggeredByUserId,
+        editedByBot,
+        summary: `Study setup failed: ${String(error.message || error).slice(0, 180)}`,
+      }).catch(() => {}),
+    ]);
 
     throw error;
   } finally {
