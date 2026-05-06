@@ -334,6 +334,10 @@ export async function clearAuditRows({ exportedId, deps }) {
       await sleep(cfg.throttleMs);
     }
   }
+  // U10/R14: always emit a final progress event so the dispatcher can print
+  // the `0/0\n` line (or N/N) — preserves pre-polish parity for the empty
+  // dirty-list case where the loop didn't iterate at all.
+  onProgress({ type: 'clear-audit-progress', patched, total: dirty.length, final: true });
   return { name: 'clearAudit', status: 'ok', rowsScanned: dirty.length, rowsCleared: patched };
 }
 
@@ -657,7 +661,11 @@ async function runMain() {
         writeLine(`  rows to clear: ${evt.rows}`);
         break;
       case 'clear-audit-progress':
-        if (evt.patched === evt.total) {
+        // U10/R14: `final: true` event always emits the closing N/N line
+        // (matters for the empty-dirty-list case where loop didn't iterate).
+        if (evt.final) {
+          writeRaw(`    ${evt.patched}/${evt.total}\n`);
+        } else if (evt.patched === evt.total) {
           writeRaw(`    ${evt.patched}/${evt.total}\n`);
         } else if (evt.patched % 10 === 0) {
           writeRaw(`    ${evt.patched}/${evt.total}\r`);
