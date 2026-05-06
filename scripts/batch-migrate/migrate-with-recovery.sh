@@ -17,6 +17,9 @@
 # Exit codes:
 #   0 = clean migration (with or without auto-recovery)
 #   1 = recovery failed or unrecoverable orchestrator error
+#   2 = check-inception returned an inconclusive/transient signal — investigate
+#       (e.g., network 5xx during the check; do NOT auto-recover on transient
+#       errors per R2 — the recovery is destructive)
 
 set -uo pipefail
 
@@ -70,6 +73,13 @@ case $CHECK_EXIT in
       echo "Migrator re-fire failed" >&2
       exit 1
     fi
+    ;;
+  4)
+    # R2: check-inception reports transient/inconclusive (network 5xx, timeout,
+    # ECONNRESET). DO NOT trigger destructive recovery. Operator should retry
+    # the check after the network blip clears.
+    echo "⚠ check-inception inconclusive (transient/network) — do NOT auto-recover; retry the check" >&2
+    exit 2
     ;;
   *)
     echo "check-inception returned exit $CHECK_EXIT — investigate" >&2
