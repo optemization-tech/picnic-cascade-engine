@@ -24,6 +24,13 @@ Optional:
 - Override token:
   - add `--token <notion_token>`
 
+## Operations
+
+When something goes wrong with a study, check `docs/runbooks/`:
+
+- [`docs/runbooks/inception-batch-incomplete.md`](docs/runbooks/inception-batch-incomplete.md) — inception's runParallel aborted mid-batch (some tasks created, others missing entirely). Archive partial + re-fire.
+- [`docs/runbooks/missing-task-content.md`](docs/runbooks/missing-task-content.md) — tasks created OK but body content missing on a small number of pages (≤10). Targeted block-copy repair via `scripts/repair-task-blocks.js`.
+
 ## Property-Names Validator
 
 `npm run check:property-names` pings the live Notion DB schemas (Study Tasks, Studies, Study Blueprint, Activity Log) and asserts every `*_PROPS` constant in `src/notion/property-names.js` resolves to a real property with the same `.name` and expected type. After Meg renames a property in the Notion UI, this script flags the constants that need their `.name` field updated. Workspace sanity guard at script start asserts each DB title matches the expected title, so a misconfigured `NOTION_TOKEN_1` can't silently false-pass. Exit 0 on full match; exit 1 with a stderr drift report otherwise. Engine reads/writes/filters now key by property `.id` so they're rename-immune at runtime — the validator is the sanity net for the `.name` fields, which are documentation hygiene only post-D2b.
