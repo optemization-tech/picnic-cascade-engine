@@ -161,9 +161,18 @@ async function processUndoCascade(payload) {
   }
 }
 
-function parseUndoPayload(payload) {
+// Exported so the cascade-queue front-door bot-author gate can read
+// `editedByBot` off the parsed result, and so unit tests can verify the
+// stricter button-click semantics. Plan:
+// docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1 step 5).
+export function parseUndoPayload(payload) {
   const studyId = payload?.data?.studyId || payload?.studyId || payload?.data?.id || payload?.source?.id;
-  return { skip: false, taskId: '__undo__', studyId };
+  // Stricter definition than the standard parseWebhookPayload: a button click
+  // carries source.user_id (the actual clicker), and we must NOT classify that
+  // as a bot edit even when last_edited_by.type === 'bot' on the underlying
+  // page. Mirrors the existing inline check inside processUndoCascade (line 25).
+  const editedByBot = !payload?.source?.user_id && payload?.data?.last_edited_by?.type === 'bot';
+  return { skip: false, taskId: '__undo__', studyId, editedByBot };
 }
 
 export async function handleUndoCascade(req, res) {

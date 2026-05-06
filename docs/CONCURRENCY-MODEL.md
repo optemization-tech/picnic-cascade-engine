@@ -19,12 +19,13 @@ The cascade engine processes Notion webhook automations on a single Node.js serv
 **File:** `src/services/cascade-queue.js`
 **Used by:** `date-cascade`, `undo-cascade`
 
-Two-level locking:
+Three levels of suppression:
+
+**Level 0 — Bot-author front-door drop (PR #101):**
+Before any debounce timer is set, `cascadeQueue.enqueue()` checks `parsed.editedByBot === true`. Bot-authored webhooks (engine echoes, future re-fires from external bot integrations) are dropped immediately with a `cascade_bot_echo_dropped` log event. The drop is unconditional — it does not require a prior debounce timer for the task. This protects the queue's resource budget during bursts such as Inception's 200+ task PATCHes. The same gate covers the `try/catch` parse-error path via an inline `!source.user_id && last_edited_by.type === 'bot'` check on the raw payload (preserves button-click semantics so a real user undo press whose parser throws is not silenced). See `docs/solutions/cascade-queue-gate-position.md` for the design rationale.
 
 **Level 1 — Per-task debounce (5 seconds):**
-When a webhook arrives for a task, a 5-second timer starts (configurable via `CASCADE_DEBOUNCE_MS`). If another webhook arrives for the *same task* within the window:
-- If `editedByBot` is true (echo from the engine itself): webhook is silently dropped
-- If `editedByBot` is false (real user edit): the timer resets and the payload is replaced with the newer one
+When a non-bot webhook passes the front-door gate, a 5-second timer starts (configurable via `CASCADE_DEBOUNCE_MS`). If another webhook arrives for the *same task* within the window, the timer resets and the payload is replaced with the newer one.
 
 After the debounce fires, the payload is enqueued to the study's FIFO queue.
 
