@@ -104,20 +104,44 @@ export async function retrieveDb(databaseId, opts) {
   return request('GET', `/v1/databases/${databaseId}`, { ...opts, version: MOVE_VERSION });
 }
 
-/** Query a database, paginating until exhausted. Returns the full list. */
+/**
+ * Query a database, paginating until exhausted. Returns the full list.
+ *
+ * Retries from scratch on cursor invalidation (Notion can invalidate cursors
+ * mid-pagination under concurrent load — see PR #96 GSK SLE BEACON incident
+ * and the engine's parallel implementation at src/notion/client.js#queryDatabase).
+ * Throws if all retries are exhausted; never returns partial results, since
+ * callers would misinterpret silent undercount as "the dataset is small."
+ */
 export async function queryDb(databaseId, { filter, sorts } = {}, opts) {
-  const all = [];
-  let cursor;
-  do {
-    const body = { page_size: 100 };
-    if (filter) body.filter = filter;
-    if (sorts) body.sorts = sorts;
-    if (cursor) body.start_cursor = cursor;
-    const resp = await request('POST', `/v1/databases/${databaseId}/query`, { ...opts, body });
-    all.push(...(resp.results || []));
-    cursor = resp.has_more ? resp.next_cursor : null;
-  } while (cursor);
-  return all;
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const all = [];
+    let cursor;
+    let cursorFailed = false;
+    do {
+      const body = { page_size: 100 };
+      if (filter) body.filter = filter;
+      if (sorts) body.sorts = sorts;
+      if (cursor) body.start_cursor = cursor;
+      try {
+        const resp = await request('POST', `/v1/databases/${databaseId}/query`, { ...opts, body });
+        all.push(...(resp.results || []));
+        cursor = resp.has_more ? resp.next_cursor : null;
+      } catch (err) {
+        if (cursor && err.body && err.body.includes('start_cursor')) {
+          if (attempt < maxRetries) {
+            console.warn(`[notion] cursor invalidated after ${all.length} results (attempt ${attempt + 1}/${maxRetries + 1}), retrying from scratch`);
+          }
+          cursorFailed = true;
+          break;
+        }
+        throw err;
+      }
+    } while (cursor);
+    if (!cursorFailed) return all;
+  }
+  throw new Error(`[notion] queryDb cursor retries exhausted for db ${databaseId}`);
 }
 
 export async function search(query, opts) {
