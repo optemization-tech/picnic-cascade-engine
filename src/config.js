@@ -26,6 +26,26 @@ function collectTokensRequired(prefix = 'NOTION_TOKEN') {
   return tokens;
 }
 
+// Production safety: WEBHOOK_SECRET is load-bearing for cascade integrity.
+// The bot-authored gate at cascadeQueue.enqueue() suppresses incoming
+// webhooks based on a payload field (data.last_edited_by.type), which is
+// attacker-controlled if the auth boundary doesn't hold. The webhook auth
+// middleware (src/middleware/webhook-auth.js:16) is permissive when
+// WEBHOOK_SECRET is unset — fine for local dev / tests, dangerous in
+// production. Fail fast at boot rather than ship a silently unauthenticated
+// production deploy where an attacker could craft last_edited_by.type='bot'
+// to silence cascades for any task.
+// Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1 step 6).
+if (process.env.NODE_ENV === 'production' && !process.env.WEBHOOK_SECRET) {
+  throw new Error(
+    'WEBHOOK_SECRET must be set when NODE_ENV=production. ' +
+    'The cascade-queue bot-authored gate is load-bearing for cascade integrity; ' +
+    'without WEBHOOK_SECRET, src/middleware/webhook-auth.js skips auth and an ' +
+    'unauthenticated caller could craft last_edited_by.type=bot to silence ' +
+    'cascades for any task.'
+  );
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
