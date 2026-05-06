@@ -237,6 +237,43 @@ describe('date-cascade route safety', () => {
     expect(queuedCalls).toHaveLength(0);
   });
 
+  it('exits processDateCascade early on bot-echo with no Notion side effects', async () => {
+    // Defense-in-depth: if a bot-echo bypasses the cascade-queue front-door
+    // gate (e.g., a future code path that calls processDateCascade directly
+    // without going through cascadeQueue.enqueue), processDateCascade must
+    // still short-circuit before touching Notion. Mirrors processDepEdit:129.
+    // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md
+    // (U1 step 4).
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      newStart: '2026-04-06',
+      newEnd: '2026-04-06',
+      refStart: '2026-04-03',
+      refEnd: '2026-04-03',
+      startDelta: 3,  // non-zero — would normally cascade
+      endDelta: 3,
+      editedByBot: true,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
+    expect(mocks.classify).not.toHaveBeenCalled();
+    expect(mocks.runCascade).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+  });
+
   it('skips "Cascade queued" when studyId is missing (prevents stuck banner)', async () => {
     // Without a studyId, processDateCascade returns at the missing_study
     // guard with no follow-up reportStatus -- leaving "queued" stuck on

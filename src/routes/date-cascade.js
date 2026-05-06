@@ -190,6 +190,25 @@ async function processDateCascade(payload) {
   const parsed = normalizeWeekendSourceDates(rawParsed);
   if (parsed.skip) return;
 
+  // Defense-in-depth: drop bot-authored payloads before any work. The
+  // cascade-queue front-door gate already filters these for queue-fed
+  // paths; this in-handler check protects direct-call paths and matches
+  // processDepEdit:129's symmetric guard. Without this, a bot-authored
+  // payload with non-zero delta and Import Mode=false (very plausible —
+  // Import Mode flips off as soon as inception's finally block runs while
+  // backlogged Notion webhooks are still flushing) would bypass both
+  // zero_delta_skip and import_mode_skip and run a real cascade.
+  // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1 step 4).
+  if (parsed.editedByBot) {
+    console.log(JSON.stringify({
+      event: 'date_cascade_bot_skip',
+      taskId: parsed.taskId,
+      taskName: parsed.taskName,
+      studyId: parsed.studyId,
+    }));
+    return;
+  }
+
   const tracer = new CascadeTracer(parsed.executionId);
   tracer.set('task_name', parsed.taskName);
   tracer.set('task_id', parsed.taskId);
