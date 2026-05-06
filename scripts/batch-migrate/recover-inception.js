@@ -503,7 +503,7 @@ export async function run({ studyKey, deps }) {
         exportedRowId: exportedId,
         productionStudyId: prodId,
         alreadySuccess: true,
-        state: 'already-success',
+        state: 'already_success',
       },
     };
   }
