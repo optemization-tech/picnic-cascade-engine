@@ -35,15 +35,26 @@ function collectTokensRequired(prefix = 'NOTION_TOKEN') {
 // production. Fail fast at boot rather than ship a silently unauthenticated
 // production deploy where an attacker could craft last_edited_by.type='bot'
 // to silence cascades for any task.
+//
+// Strength check: trim and require ≥16 chars so an accidental whitespace-only
+// secret (`' '`), a sentinel like `'changeme'`, or a 1-2-char placeholder
+// can't satisfy the assertion. 16 chars is roughly 96 bits of entropy when
+// random and aligns with HMAC-secret hygiene minimums.
+//
 // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1 step 6).
-if (process.env.NODE_ENV === 'production' && !process.env.WEBHOOK_SECRET) {
-  throw new Error(
-    'WEBHOOK_SECRET must be set when NODE_ENV=production. ' +
-    'The cascade-queue bot-authored gate is load-bearing for cascade integrity; ' +
-    'without WEBHOOK_SECRET, src/middleware/webhook-auth.js skips auth and an ' +
-    'unauthenticated caller could craft last_edited_by.type=bot to silence ' +
-    'cascades for any task.'
-  );
+const MIN_WEBHOOK_SECRET_LENGTH = 16;
+if (process.env.NODE_ENV === 'production') {
+  const trimmedSecret = process.env.WEBHOOK_SECRET?.trim();
+  if (!trimmedSecret || trimmedSecret.length < MIN_WEBHOOK_SECRET_LENGTH) {
+    throw new Error(
+      `WEBHOOK_SECRET must be set to a value of at least ${MIN_WEBHOOK_SECRET_LENGTH} ` +
+      'characters (after trim) when NODE_ENV=production. The cascade-queue ' +
+      'bot-authored gate is load-bearing for cascade integrity; without a ' +
+      'real WEBHOOK_SECRET, src/middleware/webhook-auth.js skips auth and an ' +
+      'unauthenticated caller could craft last_edited_by.type=bot to silence ' +
+      'cascades for any task.'
+    );
+  }
 }
 
 export const config = {

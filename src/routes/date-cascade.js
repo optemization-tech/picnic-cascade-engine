@@ -199,7 +199,7 @@ async function processDateCascade(payload) {
   // backlogged Notion webhooks are still flushing) would bypass both
   // zero_delta_skip and import_mode_skip and run a real cascade.
   // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1 step 4).
-  if (parsed.editedByBot) {
+  if (parsed.editedByBot === true) {
     console.log(JSON.stringify({
       event: 'date_cascade_bot_skip',
       taskId: parsed.taskId,

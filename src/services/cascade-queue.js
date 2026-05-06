@@ -19,21 +19,39 @@ export class CascadeQueue {
     let parsed;
     try {
       parsed = parseFn(payload);
-    } catch {
+    } catch (err) {
       // Parse-error bypass: if the payload looks bot-authored, suppress it
       // without running processFn. Otherwise fall through to processFn so
       // the route's own guard chain can handle the malformed payload.
+      //
+      // Use parseUndoPayload's stricter rule (`!source.user_id && type==='bot'`)
+      // so a button-click webhook with a bot-edited underlying page does NOT
+      // get silently dropped here when its parser throws. This matters most
+      // for the undo route (button-only) — losing its processFn call also
+      // loses the Import Mode disable side-effect on the no-undo-available
+      // path, which can leave a study in Import Mode if the parser throws
+      // during a real recovery click.
+      //
       // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1).
-      if (payload?.data?.last_edited_by?.type === 'bot') {
+      const isBotPayload = !payload?.source?.user_id
+        && payload?.data?.last_edited_by?.type === 'bot';
+      if (isBotPayload) {
         console.log(JSON.stringify({
           event: 'cascade_bot_echo_dropped',
           reason: 'parse_error_bot_payload',
         }));
         return;
       }
-      console.log(JSON.stringify({ event: 'debounce_bypass', reason: 'parse_error' }));
-      void processFn(payload).catch((err) =>
-        console.error('[cascade-queue] processFn failed:', err),
+      // Surface the parser error so a future Notion API shape change isn't
+      // silently swallowed. The catch is now load-bearing for the bot bypass
+      // decision above; logging the error preserves diagnostic signal.
+      console.log(JSON.stringify({
+        event: 'debounce_bypass',
+        reason: 'parse_error',
+        error: String(err?.message || err).slice(0, 200),
+      }));
+      void processFn(payload).catch((processErr) =>
+        console.error('[cascade-queue] processFn failed:', processErr),
       );
       return;
     }
@@ -44,15 +62,17 @@ export class CascadeQueue {
     // bot-authored cascade webhooks) before they reserve a debounce timer
     // or queue slot. Runs ahead of the parse-skip check on purpose: the
     // gate is strictly cheaper (never invokes processFn). Defense-in-depth
-    // gates inside processDateCascade / processDepEdit / processUndoCascade
-    // remain in place for direct-call paths.
+    // gates remain in place for direct-call paths inside processDateCascade
+    // and processDepEdit (processUndoCascade gates inline at line 25 only
+    // for activity logging — front-door gate is the primary protection
+    // for that route).
     // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1).
     if (parsed.editedByBot === true) {
       console.log(JSON.stringify({
         event: 'cascade_bot_echo_dropped',
-        taskId,
-        taskName,
-        studyId,
+        taskId: taskId || null,
+        taskName: taskName || null,
+        studyId: studyId || null,
       }));
       return;
     }

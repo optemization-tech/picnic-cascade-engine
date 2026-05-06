@@ -437,6 +437,29 @@ describe('CascadeQueue', () => {
     expect(processFn).toHaveBeenCalledTimes(1);
   });
 
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('button-click undo with bot-typed last_edited_by still falls through when parse throws', async () => {
+    // The catch block must NOT silence button clicks just because the
+    // underlying page's last edit happened to be a bot. Mirrors the stricter
+    // rule used by parseUndoPayload (`!source.user_id && type === 'bot'`).
+    // Without this carve-out, a real user undo press whose parser throws
+    // would silently drop, leaving Import Mode stuck on the study.
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = vi.fn(() => { throw new Error('parse failure'); });
+
+    queue.enqueue(
+      {
+        source: { user_id: 'real-user-123' },
+        data: { last_edited_by: { type: 'bot' } },
+      },
+      parseFn,
+      processFn,
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processFn).toHaveBeenCalledTimes(1);
+  });
+
   it('getStats reflects current state', () => {
     const parseFn = makeParseFn();
     const processFn = vi.fn().mockResolvedValue(undefined);

@@ -290,11 +290,12 @@ All `/webhook/*` endpoints require a shared-secret header. `GET /health` is exem
 - Middleware: `src/middleware/webhook-auth.js`
 - Registration: `app.use('/webhook', webhookAuth)` in `src/server.js` — covers all 7 webhook endpoints (`/date-cascade`, `/status-rollup`, `/inception`, `/add-task-set`, `/copy-blocks`, `/deletion`, `/undo-cascade`)
 - Comparison: `crypto.timingSafeEqual` on equal-length buffers; unequal lengths reject without a timing oracle
-- Unset env var → fail-open (auth disabled; local-dev convenience; startup log prints `Auth: disabled`)
+- `NODE_ENV != 'production'` + unset env var → fail-open (auth disabled; local-dev convenience; startup log prints `Auth: disabled`)
+- `NODE_ENV = 'production'` + unset/whitespace/short env var → **fail-CLOSED at boot.** `src/config.js` throws at module load. The "short" threshold is 16 chars after trim, so a whitespace-only value, sentinel like `'changeme'`, or 1-2-char placeholder is rejected. Added in PR #101 alongside the cascade-queue front-door bot-author gate, which made the auth boundary load-bearing for cascade integrity (a spoofed `last_edited_by.type='bot'` payload behind a missing secret would silence cascades for any task).
 - Set env var + missing or wrong header → `401 {"error":"Unauthorized"}`
 - Set env var + correct header → request proceeds
 
-Production: `WEBHOOK_SECRET` is set on Railway (`picnic-cascade-engine-production`). All 6 Notion automation webhooks (date change, status change, Activate Plan, Add Task Set, Nuke/Delete, Undo Cascade) carry the matching `x-webhook-secret` header as of 2026-04-12.
+Production: `WEBHOOK_SECRET` is set on Railway (`picnic-cascade-engine-production`). All 6 Notion automation webhooks (date change, status change, Activate Plan, Add Task Set, Nuke/Delete, Undo Cascade) carry the matching `x-webhook-secret` header as of 2026-04-12. Operators rotating the secret must update the Railway env var **and** the Notion automation headers in the same change window — a mismatched pair fails fast at boot (after restart) instead of silently dropping traffic.
 
 ### 8) Graceful Shutdown
 
@@ -528,7 +529,7 @@ Previously the dispatch ran `pullLeftUpstream` only, producing downstream gaps w
 
 New operational sections 7, 8, and 9 added to this document. Changes:
 
-- **Webhook authentication** (new Section 7): `x-webhook-secret` header + `WEBHOOK_SECRET` env var + `timingSafeEqual` comparison. Fail-open when env var unset for local dev. `GET /health` exempt. Production cutover: 2026-04-12, all 6 Notion automations updated.
+- **Webhook authentication** (new Section 7): `x-webhook-secret` header + `WEBHOOK_SECRET` env var + `timingSafeEqual` comparison. Fail-open when env var unset for local dev only — `NODE_ENV=production` requires a ≥16-char secret and fails fast at boot otherwise (PR #101, after the cascade-queue bot-author gate made the auth boundary load-bearing). `GET /health` exempt. Production cutover: 2026-04-12, all 6 Notion automations updated.
 - **Graceful shutdown** (new Section 8): `SIGTERM`/`SIGINT` handler drains `CascadeQueue` + `FlightTracker` in parallel with an 8 s cap; Railway sends `SIGKILL` after ~10 s. `FlightTracker` tracks fire-and-forget webhook handlers so in-flight work is not lost during Railway redeploys.
 - **Startup Import Mode sweep** (new Section 9): async IIFE after `app.listen()` clears stuck `[Do Not Edit] Import Mode = true` studies. Safety net for crashes/OOMs that bypassed graceful shutdown.
 
