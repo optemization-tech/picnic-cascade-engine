@@ -165,7 +165,7 @@ export async function run({ studyKey, deps }) {
         inceptionStatus: null,
         inceptionSummary: null,
         createdTime: null,
-        state: 'no-exported-row',
+        state: 'no_exported_row',
         error: { code: 'no_exported_row', message: `No Exported Studies row found for "${study.name}"` },
       },
     };
@@ -186,7 +186,7 @@ export async function run({ studyKey, deps }) {
         inceptionStatus: null,
         inceptionSummary: null,
         createdTime: null,
-        state: 'no-production-study',
+        state: 'no_production_study',
       },
     };
   }
@@ -214,7 +214,7 @@ export async function run({ studyKey, deps }) {
         inceptionStatus: null,
         inceptionSummary: null,
         createdTime: null,
-        state: 'no-entry',
+        state: 'no_entry',
       },
     };
   }
@@ -223,11 +223,17 @@ export async function run({ studyKey, deps }) {
   const summary = entry.properties['Summary']?.rich_text?.map((r) => r.plain_text).join('') || '';
   const created = (entry.properties['Created time']?.created_time || entry.created_time || '').substring(0, 19);
 
+  // R5: state enum is exhaustive — In Progress / Unknown / Cancelled get
+  // distinct snake_case tokens. compose-envelope's outcome derivation honors
+  // the distinction (in-flight states map to `inconclusive` when orch is clean,
+  // `failed` when orch failed — see R18 / Q5 conditional rule).
   let exitCode;
   let state;
   if (status === 'Success') { exitCode = 0; state = 'success'; }
   else if (status === 'Failed') { exitCode = 1; state = 'failed'; }
-  else { exitCode = 2; state = 'other'; }
+  else if (status === 'In Progress') { exitCode = 2; state = 'in_progress'; }
+  else if (status === 'Cancelled') { exitCode = 2; state = 'cancelled'; }
+  else { exitCode = 2; state = 'unknown'; } // includes 'Unknown' and any other Notion-emitted token
 
   return {
     exitCode,
@@ -309,27 +315,31 @@ async function runMain() {
   if (format === 'json') {
     process.stdout.write(JSON.stringify(result) + '\n');
   } else if (format === 'status') {
-    // Backwards-compatible single-token output.
+    // Backwards-compatible single-token output. Tokens map snake_case state
+    // to human-readable surface; --format=status output is preserved verbatim
+    // even though internal state tokens were renamed.
     const tokenByState = {
       'success': result.inceptionStatus || 'Success',
       'failed': result.inceptionStatus || 'Failed',
-      'other': result.inceptionStatus || 'Unknown',
-      'no-entry': 'NoEntry',
-      'no-exported-row': 'NoExportedRow',
-      'no-production-study': 'NoProductionStudy',
+      'in_progress': result.inceptionStatus || 'InProgress',
+      'unknown': result.inceptionStatus || 'Unknown',
+      'cancelled': result.inceptionStatus || 'Cancelled',
+      'no_entry': 'NoEntry',
+      'no_exported_row': 'NoExportedRow',
+      'no_production_study': 'NoProductionStudy',
     };
-    if (result.state === 'no-exported-row') {
+    if (result.state === 'no_exported_row') {
       console.error(result.error?.message || `No Exported Studies row found for "${result.studyName}"`);
     } else {
       console.log(tokenByState[result.state] || result.state);
     }
   } else {
     // Human format — preserves prior byte-identical output for the success path.
-    if (result.state === 'no-exported-row') {
+    if (result.state === 'no_exported_row') {
       console.error(result.error?.message || `No Exported Studies row found for "${result.studyName}"`);
-    } else if (result.state === 'no-production-study') {
+    } else if (result.state === 'no_production_study') {
       console.log(`No Production Study yet for "${result.studyName}" (Exported row: ${result.exportedRowId})`);
-    } else if (result.state === 'no-entry') {
+    } else if (result.state === 'no_entry') {
       console.log(`No Inception entry found for "${result.studyName}" (Production Study: ${result.productionStudyId})`);
     } else {
       console.log(`Study:            ${result.studyName}`);

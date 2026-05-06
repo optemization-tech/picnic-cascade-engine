@@ -90,7 +90,7 @@ describe('check-inception run()', () => {
 
     const { exitCode, result } = await run({ studyKey: STUDY_KEY, deps: { notionFetch } });
     expect(exitCode).toBe(2);
-    expect(result.state).toBe('no-entry');
+    expect(result.state).toBe('no_entry');
     expect(result.inceptionStatus).toBeNull();
     expect(result.productionStudyId).toBe(PROD_ID);
   });
@@ -104,7 +104,7 @@ describe('check-inception run()', () => {
 
     const { exitCode, result } = await run({ studyKey: STUDY_KEY, deps: { notionFetch } });
     expect(exitCode).toBe(2);
-    expect(result.state).toBe('no-production-study');
+    expect(result.state).toBe('no_production_study');
     expect(result.productionStudyId).toBeNull();
     // Notion should only have been queried once (no AL query needed)
     expect(notionFetch.calls).toHaveLength(1);
@@ -118,7 +118,7 @@ describe('check-inception run()', () => {
     const { exitCode, result } = await run({ studyKey: STUDY_KEY, deps: { notionFetch } });
     expect(exitCode).toBe(2);
     expect(result.ok).toBe(false);
-    expect(result.state).toBe('no-exported-row');
+    expect(result.state).toBe('no_exported_row');
     expect(result.error.code).toBe('no_exported_row');
     expect(result.studyName).toBe(STUDY_NAME);
   });
