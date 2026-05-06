@@ -20,6 +20,17 @@ export class CascadeQueue {
     try {
       parsed = parseFn(payload);
     } catch {
+      // Parse-error bypass: if the payload looks bot-authored, suppress it
+      // without running processFn. Otherwise fall through to processFn so
+      // the route's own guard chain can handle the malformed payload.
+      // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1).
+      if (payload?.data?.last_edited_by?.type === 'bot') {
+        console.log(JSON.stringify({
+          event: 'cascade_bot_echo_dropped',
+          reason: 'parse_error_bot_payload',
+        }));
+        return;
+      }
       console.log(JSON.stringify({ event: 'debounce_bypass', reason: 'parse_error' }));
       void processFn(payload).catch((err) =>
         console.error('[cascade-queue] processFn failed:', err),
@@ -28,6 +39,23 @@ export class CascadeQueue {
     }
 
     const { taskId, studyId, taskName } = parsed;
+
+    // Front-door bot-author gate. Drops engine echoes (and any other
+    // bot-authored cascade webhooks) before they reserve a debounce timer
+    // or queue slot. Runs ahead of the parse-skip check on purpose: the
+    // gate is strictly cheaper (never invokes processFn). Defense-in-depth
+    // gates inside processDateCascade / processDepEdit / processUndoCascade
+    // remain in place for direct-call paths.
+    // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1).
+    if (parsed.editedByBot === true) {
+      console.log(JSON.stringify({
+        event: 'cascade_bot_echo_dropped',
+        taskId,
+        taskName,
+        studyId,
+      }));
+      return;
+    }
 
     // Fall through for unparseable or skip payloads — let processDateCascade's guard chain handle them
     if (parsed.skip || !taskId || !studyId) {
@@ -39,14 +67,11 @@ export class CascadeQueue {
       return;
     }
 
-    // Cancel existing debounce timer for this task
+    // Cancel existing debounce timer for this task. (The pre-fix inner-branch
+    // bot-echo skip is unreachable now — bot-authored payloads are dropped at
+    // the front-door gate above before this point.)
     const existing = this._debounce.get(taskId);
     if (existing) {
-      if (parsed.editedByBot) {
-        // Bot-edited webhook = cascade echo. Don't replace the user's original edit.
-        console.log(JSON.stringify({ event: 'debounce_echo_ignored', taskId, taskName, studyId }));
-        return;
-      }
       clearTimeout(existing.timer);
       console.log(JSON.stringify({ event: 'debounce_replaced', taskId, taskName, studyId }));
     } else {

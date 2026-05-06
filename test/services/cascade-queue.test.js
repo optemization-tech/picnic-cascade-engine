@@ -306,7 +306,11 @@ describe('CascadeQueue', () => {
   });
 
   // @behavior BEH-DEBOUNCE-ECHO
-  it('drops consecutive bot echoes — only first enters buffer', async () => {
+  it('drops consecutive bot echoes — none enter buffer', async () => {
+    // Pre-fix behavior: the first echo set a debounce timer (no `existing`
+    // entry yet), and only echoes 2+ hit the inner-branch skip. Post-fix:
+    // the front-door gate at enqueue() drops every bot-authored payload
+    // before any timer is set, so processFn is never called.
     const processFn = vi.fn().mockResolvedValue(undefined);
     const parseFn = makeParseFn();
 
@@ -314,16 +318,20 @@ describe('CascadeQueue', () => {
     queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-2', editedByBot: true }, parseFn, processFn);
     queue.enqueue({ taskId: 'task-1', studyId: 'study-1', v: 'echo-3', editedByBot: true }, parseFn, processFn);
 
+    expect(queue._debounce.size).toBe(0);
+
     await vi.advanceTimersByTimeAsync(5000);
 
-    expect(processFn).toHaveBeenCalledTimes(1);
-    expect(processFn).toHaveBeenCalledWith(
-      expect.objectContaining({ v: 'echo-1' }),
-    );
+    expect(processFn).not.toHaveBeenCalled();
   });
 
   // @behavior BEH-DEBOUNCE-ECHO
-  it('user webhook replaces a bot webhook in the debounce buffer', async () => {
+  it('user webhook proceeds normally after a bot is dropped at the door', async () => {
+    // Pre-fix: bot enters buffer first, user replaces it on second call.
+    // Post-fix: bot is dropped at the front door (never enters the buffer),
+    // so the user webhook arrives at an empty buffer and proceeds normally —
+    // there is no "replacement" because there was nothing in the buffer to
+    // replace. End-state assertion (user fires, bot doesn't) is unchanged.
     const processFn = vi.fn().mockResolvedValue(undefined);
     const parseFn = makeParseFn();
 
@@ -336,6 +344,97 @@ describe('CascadeQueue', () => {
     expect(processFn).toHaveBeenCalledWith(
       expect.objectContaining({ v: 'user-edit' }),
     );
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('drops bot-authored webhook at the front door — never enters debounce buffer', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    queue.enqueue(
+      { taskId: 'task-1', studyId: 'study-1', editedByBot: true },
+      parseFn,
+      processFn,
+    );
+
+    expect(queue._debounce.size).toBe(0);
+    expect(queue._studyLocks.size).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(processFn).not.toHaveBeenCalled();
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('drops 100 bot-authored webhooks across distinct tasks — queue stays empty', async () => {
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = makeParseFn();
+
+    for (let i = 0; i < 100; i++) {
+      queue.enqueue(
+        { taskId: `task-${i}`, studyId: 'study-1', editedByBot: true },
+        parseFn,
+        processFn,
+      );
+    }
+
+    expect(queue._debounce.size).toBe(0);
+    expect(queue._studyLocks.size).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(processFn).not.toHaveBeenCalled();
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('bot-skip takes precedence over parse-skip when both apply', async () => {
+    // Decision rationale: bot-skip first is strictly cheaper. parse-skip
+    // calls processFn(payload) directly via the debounce_bypass path; bot-skip
+    // never invokes processFn at all.
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = vi.fn(() => ({
+      skip: true,
+      taskId: 'task-1',
+      studyId: 'study-1',
+      editedByBot: true,
+    }));
+
+    queue.enqueue({ taskId: 'task-1' }, parseFn, processFn);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processFn).not.toHaveBeenCalled();
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('drops bot-authored payload when parseFn throws (inline payload check in catch)', async () => {
+    // Closes the parse-error bypass: without this, a malformed bot-authored
+    // payload would reach processFn(payload) directly via the catch block.
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = vi.fn(() => { throw new Error('parse failure'); });
+
+    queue.enqueue(
+      { data: { last_edited_by: { type: 'bot' } } },
+      parseFn,
+      processFn,
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processFn).not.toHaveBeenCalled();
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('non-bot payload that throws on parse still falls through to processFn', async () => {
+    // Regression guard: parse-error bypass must remain functional for
+    // legitimate user payloads that happen to fail parsing.
+    const processFn = vi.fn().mockResolvedValue(undefined);
+    const parseFn = vi.fn(() => { throw new Error('parse failure'); });
+
+    queue.enqueue(
+      { data: { last_edited_by: { type: 'person' } } },
+      parseFn,
+      processFn,
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(processFn).toHaveBeenCalledTimes(1);
   });
 
   it('getStats reflects current state', () => {
