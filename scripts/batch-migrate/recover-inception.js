@@ -74,18 +74,43 @@ async function notion(path, body = null, method = null) {
   return res.json();
 }
 
-async function queryAll(ds, filter) {
-  const all = []; let cursor = undefined;
-  while (true) {
-    const body = { filter, page_size: 100 };
-    if (cursor) body.start_cursor = cursor;
-    const j = await notion(`/v1/data_sources/${ds}/query`, body);
-    if (!j.results) throw new Error(`query error: ${JSON.stringify(j)}`);
-    all.push(...j.results);
-    if (!j.has_more) break;
-    cursor = j.next_cursor;
+// See scripts/batch-migrate/notion.js queryDb for the canonical cursor-retry
+// pattern. We don't import that helper because it targets the legacy
+// /v1/databases/{id}/query endpoint at Notion-Version 2022-06-28; this script
+// uses /v1/data_sources/{id}/query at Notion-Version 2025-09-03.
+function isCursorInvalidation(j) {
+  return j?.object === 'error'
+    && j?.code === 'validation_error'
+    && /cursor/i.test(j?.message || '');
+}
+
+async function queryAll(ds, filter, { maxAttempts = 3 } = {}) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const all = [];
+    let cursor = undefined;
+    let cursorInvalidated = false;
+    while (true) {
+      const body = { filter, page_size: 100 };
+      if (cursor) body.start_cursor = cursor;
+      const j = await notion(`/v1/data_sources/${ds}/query`, body);
+      if (isCursorInvalidation(j)) {
+        // Cursor went stale mid-pagination (cascade was being mutated by another
+        // process — exactly the GSK SLE BEACON failure mode). Restart from page 1.
+        console.error(`[recover-inception] cursor invalidated after ${all.length} results (attempt ${attempt}/${maxAttempts}), retrying from scratch`);
+        cursorInvalidated = true;
+        break;
+      }
+      if (!j.results) throw new Error(`query error: ${JSON.stringify(j)}`);
+      all.push(...j.results);
+      if (!j.has_more) return all;
+      cursor = j.next_cursor;
+    }
+    if (!cursorInvalidated) return all; // shouldn't happen — defensive
+    // Cursor invalidated — outer loop continues to next attempt
   }
-  return all;
+  const err = new Error(`cursor retries exhausted (${maxAttempts} attempts)`);
+  err.code = 'cursor_exhausted';
+  throw err;
 }
 
 async function patchPage(id, properties) {
