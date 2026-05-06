@@ -4,9 +4,9 @@
  * skipped or failed for a small number of pages (≤ 10 by default).
  *
  * Two-phase invocation:
- *   --diagnose (default) — read-only; lists tasks whose body is empty but
- *     whose Blueprint template has content, plus known-broken-skip + empty-
- *     template-skip categories for transparency.
+ *   (default) — diagnose only, read-only; lists tasks whose body is empty
+ *     but whose Blueprint template has content, plus known-broken-skip +
+ *     empty-template-skip categories for transparency.
  *   --apply — toggles study Import Mode, calls copyBlocks(idMapping) for the
  *     repair subset, writes one Activity Log entry, clears Import Mode.
  *
@@ -75,15 +75,11 @@ function getFlag(name) {
 // Returns true if children exist, false if empty or error (caller decides).
 // ──────────────────────────────────────────────────────────────────────────
 async function hasAnyChildren(client, blockId) {
-  try {
-    const res = await client.request('GET', `/blocks/${blockId}/children?page_size=1`);
-    return Array.isArray(res?.results) && res.results.length > 0;
-  } catch (err) {
-    // Probe failures (404, 400) are surfaced to the caller for explicit handling
-    // — diagnose maps unprobeable templates to known-broken-skip when their id
-    // is on the skip-list, else escalates as an unexpected error.
-    throw err;
-  }
+  // Probe failures (404, 400) propagate to the caller for explicit handling
+  // — diagnose maps unprobeable templates to known-broken-skip when their id
+  // is on the skip-list, else escalates as an unexpected error.
+  const res = await client.request('GET', `/blocks/${blockId}/children?page_size=1`);
+  return Array.isArray(res?.results) && res.results.length > 0;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -124,7 +120,13 @@ export async function diagnose({ client, studyPageId, studyTasksDbId, knownBroke
     const templateId = findById(task, STUDY_TASKS_PROPS.TEMPLATE_SOURCE_ID)?.rich_text?.[0]?.plain_text;
     if (!templateId) continue; // shouldn't happen given filter, defensive
 
-    const taskHasContent = await hasAnyChildren(client, task.id);
+    let taskHasContent;
+    try {
+      taskHasContent = await hasAnyChildren(client, task.id);
+    } catch (err) {
+      probeErrors.push({ taskId: task.id, templateId, taskName, error: String(err?.message || err).slice(0, 200) });
+      continue;
+    }
     if (taskHasContent) {
       presentOk++;
       continue;
@@ -172,35 +174,74 @@ export async function diagnose({ client, studyPageId, studyTasksDbId, knownBroke
 // Import Mode in finally, write Activity Log entry.
 // ──────────────────────────────────────────────────────────────────────────
 export async function apply({ client, studyPageId, studyName, repairList, activityLogService, executionId, copyBlocksFn = copyBlocks }) {
-  // Toggle Import Mode on
-  await client.request('PATCH', `/pages/${studyPageId}`, {
-    properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: true } },
-  });
-
+  // importModeArm: only attempt the OFF PATCH in finally if the ON PATCH succeeded.
+  // Mirrors src/migration/migrate-study-service.js sentinel pattern.
+  let importModeArm = false;
   let copyResult = null;
   let runError = null;
+  let cleanupError = null;
+  let alResult = null;
+
   try {
-    const idMapping = Object.fromEntries(repairList.map(({ taskId, templateId }) => [templateId, taskId]));
-    copyResult = await copyBlocksFn(client, idMapping, { studyPageId, studyName });
+    await client.request('PATCH', `/pages/${studyPageId}`, {
+      properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: true } },
+    });
+    importModeArm = true;
+
+    // copyBlocks idMapping is `Record<templateId, productionId>` — duplicates would
+    // collapse via last-write-wins. Group repairList by templateId so duplicates
+    // (e.g., Repeat-Delivery clones sharing one Blueprint template) are each repaired
+    // via a separate copyBlocks call. For ≤10 tasks this is fine; we lose the
+    // synced-block cache reuse across calls, but the cache is per-call to begin with.
+    const taskIdsByTemplateId = new Map();
+    for (const { taskId, templateId } of repairList) {
+      if (!taskIdsByTemplateId.has(templateId)) taskIdsByTemplateId.set(templateId, []);
+      taskIdsByTemplateId.get(templateId).push(taskId);
+    }
+
+    const aggregate = { blocksWrittenCount: 0, pagesProcessed: 0, pagesSkipped: 0 };
+    for (const [templateId, taskIds] of taskIdsByTemplateId) {
+      for (const taskId of taskIds) {
+        const result = await copyBlocksFn(client, { [templateId]: taskId }, { studyPageId, studyName });
+        aggregate.blocksWrittenCount += result?.blocksWrittenCount ?? 0;
+        aggregate.pagesProcessed += result?.pagesProcessed ?? 0;
+        aggregate.pagesSkipped += result?.pagesSkipped ?? 0;
+      }
+    }
+    copyResult = aggregate;
   } catch (err) {
     runError = err;
     console.error('[repair-task-blocks] copyBlocks threw:', err?.message || err);
   } finally {
-    try {
-      await client.request('PATCH', `/pages/${studyPageId}`, {
-        properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false } },
-      });
-    } catch (err) {
-      console.error('[repair-task-blocks] failed to clear Import Mode:', err?.message || err);
+    if (importModeArm) {
+      try {
+        await client.request('PATCH', `/pages/${studyPageId}`, {
+          properties: { [STUDIES_PROPS.IMPORT_MODE.id]: { checkbox: false } },
+        });
+      } catch (err) {
+        cleanupError = err;
+        console.error('[repair-task-blocks] failed to clear Import Mode (study left STUCK):', err?.message || err);
+      }
     }
   }
 
-  const status = runError ? 'failed' : 'success';
+  // Status honesty: any non-clean outcome (copyBlocks throw, finally PATCH-off
+  // failure, or pagesSkipped > 0 with copyBlocks no-throw) is `failed`. Operators
+  // running --apply on a small list expect every page to land; partial outcome
+  // must be visible as failure so they don't move on.
+  const pagesSkipped = copyResult?.pagesSkipped ?? 0;
+  const partialFailure = !runError && pagesSkipped > 0;
+  const status = (runError || cleanupError || partialFailure) ? 'failed' : 'success';
+
   const summary = runError
     ? `Manual block repair failed: ${String(runError.message || runError).slice(0, 180)}`
-    : `Manual block repair: ${copyResult?.pagesProcessed ?? 0} pages processed, ${copyResult?.blocksWrittenCount ?? 0} blocks written, ${copyResult?.pagesSkipped ?? 0} skipped (of ${repairList.length} attempted)`;
+    : cleanupError
+      ? `Manual block repair completed but Import Mode clear failed (study STUCK at TRUE): ${String(cleanupError.message || cleanupError).slice(0, 120)}`
+      : partialFailure
+        ? `Manual block repair partial: ${copyResult?.pagesProcessed ?? 0} of ${repairList.length} pages succeeded, ${pagesSkipped} skipped (see copy_blocks_page_error logs for per-page reasons)`
+        : `Manual block repair: ${copyResult?.pagesProcessed ?? 0} pages processed, ${copyResult?.blocksWrittenCount ?? 0} blocks written (all ${repairList.length} attempted succeeded)`;
 
-  await activityLogService.logTerminalEvent({
+  alResult = await activityLogService.logTerminalEvent({
     workflow: 'Copy Blocks',
     status,
     triggerType: 'Manual',
@@ -213,7 +254,7 @@ export async function apply({ client, studyPageId, studyName, repairList, activi
     details: {
       blocksWrittenCount: copyResult?.blocksWrittenCount ?? 0,
       pagesProcessed: copyResult?.pagesProcessed ?? 0,
-      pagesSkipped: copyResult?.pagesSkipped ?? 0,
+      pagesSkipped,
       attempted: repairList.length,
       attemptedTaskIds: repairList.map((r) => r.taskId),
       script: 'repair-task-blocks',
@@ -223,10 +264,17 @@ export async function apply({ client, studyPageId, studyName, repairList, activi
           phase: 'copyBlocks',
         },
       } : {}),
+      ...(cleanupError ? {
+        cleanupError: {
+          errorMessage: String(cleanupError.message || cleanupError).slice(0, 400),
+          phase: 'importModeClearOff',
+          impact: 'study left with Import Mode = true; manual reset required',
+        },
+      } : {}),
     },
   });
 
-  return { copyResult, runError };
+  return { copyResult, runError, cleanupError, partialFailure, alResult };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -234,12 +282,12 @@ export async function apply({ client, studyPageId, studyName, repairList, activi
 // imported by tests.
 // ──────────────────────────────────────────────────────────────────────────
 const isMain = import.meta.url === `file://${process.argv[1]}`;
-if (!isMain) {
-  // Importer (e.g. test file). Stop module-side effects here; tests use the
-  // exported diagnose/apply functions.
-} else {
-await runMain();
+if (isMain) {
+  await runMain();
 }
+// Importers (e.g. test files) stop here; tests use the exported diagnose/apply
+// functions and never invoke runMain — runMain owns CLI side effects (process.exit,
+// stdin prompt, env loading) that should never fire from a unit test.
 
 async function runMain() {
 // Lazy CLI-only imports so tests don't pull dotenv / live config.
@@ -251,10 +299,16 @@ const { ActivityLogService } = await import('../src/services/activity-log.js');
 const studyPageId = getArg('study');
 const applyFlag = getFlag('apply');
 const yesFlag = getFlag('yes');
-const max = parseInt(getArg('max', String(DEFAULT_MAX)), 10);
+const maxArg = getArg('max', String(DEFAULT_MAX));
+const max = parseInt(typeof maxArg === 'string' ? maxArg : String(DEFAULT_MAX), 10);
 
-if (!studyPageId) {
-  console.error('Usage: node scripts/repair-task-blocks.js --study <pageId> [--apply] [--max <n>] [--yes]');
+// getArg returns boolean `true` if the flag has no value (e.g. `--study --apply` —
+// the next arg is itself a flag). Reject both missing and non-string values so the
+// usage error fires here instead of downstream "Study page not found" against
+// `/pages/true`.
+if (!studyPageId || typeof studyPageId !== 'string') {
+  console.error('Usage: --study requires a value (the Study page ID).');
+  console.error('       node scripts/repair-task-blocks.js --study <pageId> [--apply] [--max <n>] [--yes]');
   process.exit(3);
 }
 if (!Number.isFinite(max) || max <= 0) {
@@ -273,12 +327,27 @@ console.log(`Study: ${studyPageId}`);
 console.log(`Max per run: ${max}`);
 console.log(`Execution ID: ${executionId}\n`);
 
-// Pre-flight: fetch study, check Import Mode, resolve name
+// Pre-flight: fetch study, verify it's a Studies-DB page, check Import Mode, resolve name
 let studyPage;
 try {
   studyPage = await provisionClient.request('GET', `/pages/${studyPageId}`);
 } catch (err) {
   console.error(`Study page not found: ${err?.message || err}`);
+  process.exit(3);
+}
+
+// Workspace-scoped bot tokens resolve any page the integration can see — including
+// Study Tasks, Blueprint, and unrelated pages. Reject anything not in the Studies DB
+// before any further work so a UUID typo doesn't silently land on the wrong page.
+const studyParentDb = studyPage?.parent?.database_id;
+// Notion API returns parent.database_id without dashes, but property-names IDs
+// can be either format depending on source — normalize both sides for comparison.
+const normalize = (id) => String(id || '').replace(/-/g, '').toLowerCase();
+if (!studyParentDb || normalize(studyParentDb) !== normalize(config.notion.studiesDbId)) {
+  console.error(`[abort] --study target is not a Studies-DB page.`);
+  console.error(`  Page parent.database_id: ${studyParentDb || '(unknown)'}`);
+  console.error(`  Expected Studies DB:     ${config.notion.studiesDbId}`);
+  console.error(`  This script only operates on Studies; pass a Study page ID, not a Task or Blueprint page.`);
   process.exit(3);
 }
 
@@ -342,15 +411,19 @@ if (result.repairList.length > max) {
   console.error('  This is intentional safety: large failure rates suggest a systemic issue.');
   console.error('  Options:');
   console.error('    (a) Investigate the Activity Log + Railway logs for inception failures.');
-  console.error('    (b) For Migration Asana studies: use scripts/batch-migrate/recover-inception.js.');
-  console.error('    (c) For Playgrounds: archive partial tasks per docs/runbooks/inception-batch-incomplete.md');
+  console.error('    (b) Archive partial tasks per docs/runbooks/inception-batch-incomplete.md');
   console.error('         + manual /webhook/inception re-fire.');
-  console.error('    (d) Override --max only with engineering review.');
+  console.error('    (c) Override --max only with engineering review.');
   process.exit(1);
 }
 
 // Confirmation prompt
 if (!yesFlag) {
+  if (!process.stdin.isTTY) {
+    console.error(`\n[abort] --apply requires interactive confirmation but stdin is not a TTY.`);
+    console.error('  Pass --yes to skip the prompt for non-interactive use (cron, CI, agents).');
+    process.exit(3);
+  }
   console.log(`\nAbout to repair ${result.repairList.length} task body(ies) on study "${studyName}".`);
   console.log(`This will toggle Import Mode, call copyBlocks, and write an Activity Log entry.`);
   const ok = await confirm('Continue? [y/N] ');
@@ -366,7 +439,7 @@ const activityLogService = new ActivityLogService({
   notionClient: provisionClient,
   activityLogDbId: config.notion.activityLogDbId,
 });
-const { copyResult, runError } = await apply({
+const { copyResult, runError, cleanupError, partialFailure, alResult } = await apply({
   client: provisionClient,
   studyPageId,
   studyName,
@@ -375,16 +448,46 @@ const { copyResult, runError } = await apply({
   executionId,
 });
 
-if (runError) {
-  console.error(`\n[error] Repair partial: ${runError?.message || runError}`);
+const pagesProcessed = copyResult?.pagesProcessed ?? 0;
+const pagesSkipped = copyResult?.pagesSkipped ?? 0;
+const blocksWritten = copyResult?.blocksWrittenCount ?? 0;
+const alLogged = alResult?.logged === true;
+
+if (runError || cleanupError || partialFailure) {
+  console.error(`\nRepair did NOT complete cleanly:`);
+  console.error(`  Pages processed:       ${pagesProcessed} of ${result.repairList.length}`);
+  console.error(`  Blocks written:        ${blocksWritten}`);
+  console.error(`  Pages skipped:         ${pagesSkipped}`);
+  if (runError) {
+    console.error(`  copyBlocks error:      ${runError?.message || runError}`);
+  }
+  if (cleanupError) {
+    console.error(`  Import Mode clear:     FAILED — study left at Import Mode = true`);
+    console.error(`                         ${cleanupError?.message || cleanupError}`);
+    console.error(`                         Manually clear via Notion UI before re-running.`);
+  }
+  if (partialFailure) {
+    console.error(`  Per-page reasons:      see 'copy_blocks_page_error' lines in stdout above`);
+  }
+  if (alLogged) {
+    console.error(`  Activity Log entry:    written (Workflow: Copy Blocks, Status: Failed)\n`);
+  } else {
+    console.error(`  Activity Log entry:    FAILED to write — ${alResult?.reason || 'unknown'}`);
+    console.error(`                         Audit trail incomplete; check Railway logs.\n`);
+  }
   process.exit(1);
 }
 
 console.log(`\nRepair complete:`);
-console.log(`  Pages processed:       ${copyResult?.pagesProcessed ?? 0}`);
-console.log(`  Blocks written:        ${copyResult?.blocksWrittenCount ?? 0}`);
-console.log(`  Pages skipped:         ${copyResult?.pagesSkipped ?? 0}`);
-console.log(`  Activity Log entry:    written (Workflow: Copy Blocks, Trigger: Manual)\n`);
+console.log(`  Pages processed:       ${pagesProcessed}`);
+console.log(`  Blocks written:        ${blocksWritten}`);
+console.log(`  Pages skipped:         ${pagesSkipped}`);
+if (alLogged) {
+  console.log(`  Activity Log entry:    written (Workflow: Copy Blocks, Status: Success)\n`);
+} else {
+  console.log(`  Activity Log entry:    FAILED to write — ${alResult?.reason || 'unknown'}\n`);
+  console.log(`                         (repair itself succeeded; audit trail is incomplete)`);
+}
 
 process.exit(0);
 }

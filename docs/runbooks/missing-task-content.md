@@ -38,9 +38,8 @@ Activity Log shows partial inception state for the study?
 │
 └── More than ~10 affected tasks per study
        → repair-task-blocks.js's hard gate refuses the run.
-         For Migration Asana studies: scripts/batch-migrate/recover-inception.js.
-         For Playgrounds: archive partial via inception-batch-incomplete.md
-                           + manual /webhook/inception re-fire.
+         Archive partial tasks via inception-batch-incomplete.md
+         + manual /webhook/inception re-fire.
 ```
 
 ---

@@ -272,10 +272,150 @@ describe('apply', () => {
     expect(logEvent.details.error.errorMessage).toContain('copyBlocks crashed');
   });
 
-  it('builds idMapping correctly for multiple tasks', async () => {
+  it('reports failed status when copyBlocks no-throws but pagesSkipped > 0 (partial failure)', async () => {
     const client = mockClient();
     const fakeAL = fakeActivityLog();
-    const fakeCopyBlocks = vi.fn(async () => ({ blocksWrittenCount: 0, pagesProcessed: 3, pagesSkipped: 0 }));
+    const fakeCopyBlocks = vi.fn(async () => ({
+      blocksWrittenCount: 0,
+      pagesProcessed: 0,
+      pagesSkipped: 1,
+    }));
+
+    const { runError, partialFailure } = await apply({
+      client,
+      studyPageId: STUDY_ID,
+      studyName: 'Study A',
+      repairList: [{ taskId: 'task-1', templateId: 'tpl-1', taskName: 'T' }],
+      activityLogService: fakeAL,
+      executionId: 'exec-1',
+      copyBlocksFn: fakeCopyBlocks,
+    });
+
+    // copyBlocks did NOT throw, but every page was skipped — script must treat as failure
+    expect(runError).toBeNull();
+    expect(partialFailure).toBe(true);
+
+    const logEvent = fakeAL.logTerminalEvent.mock.calls[0][0];
+    expect(logEvent.status).toBe('failed');
+    expect(logEvent.summary).toContain('partial');
+  });
+
+  it('reports failed status + cleanupError when finally PATCH-off fails after copyBlocks succeeded', async () => {
+    const client = mockClient({ patchErrors: { [STUDY_ID]: null } });
+    // Fail only the SECOND PATCH (Import Mode -> false). The first PATCH (-> true)
+    // must still succeed so importModeArm is set; then copyBlocks succeeds; then
+    // the cleanup PATCH fails. Use a counter on the mock.
+    let patchCount = 0;
+    client.request = vi.fn(async (method, path, body) => {
+      client.calls.request.push({ method, path, body });
+      if (method === 'PATCH' && path === `/pages/${STUDY_ID}`) {
+        patchCount++;
+        if (patchCount === 2) throw new Error('Import Mode clear failed');
+        return { id: STUDY_ID };
+      }
+      return {};
+    });
+
+    const fakeAL = fakeActivityLog();
+    const fakeCopyBlocks = vi.fn(async () => ({
+      blocksWrittenCount: 5,
+      pagesProcessed: 1,
+      pagesSkipped: 0,
+    }));
+
+    const { runError, cleanupError } = await apply({
+      client,
+      studyPageId: STUDY_ID,
+      studyName: 'Study A',
+      repairList: [{ taskId: 'task-1', templateId: 'tpl-1', taskName: 'T' }],
+      activityLogService: fakeAL,
+      executionId: 'exec-1',
+      copyBlocksFn: fakeCopyBlocks,
+    });
+
+    expect(runError).toBeNull();
+    expect(cleanupError?.message).toBe('Import Mode clear failed');
+
+    // Activity Log MUST still be written, AND status MUST be 'failed' (not 'success')
+    // because the study is left at Import Mode = true.
+    expect(fakeAL.logTerminalEvent).toHaveBeenCalledOnce();
+    const logEvent = fakeAL.logTerminalEvent.mock.calls[0][0];
+    expect(logEvent.status).toBe('failed');
+    expect(logEvent.summary).toContain('STUCK');
+    expect(logEvent.details.cleanupError.errorMessage).toContain('Import Mode clear failed');
+  });
+
+  it('does NOT call PATCH-off when initial PATCH-on fails (importModeArm pattern)', async () => {
+    let patchCount = 0;
+    const client = mockClient();
+    client.request = vi.fn(async (method, path, body) => {
+      client.calls.request.push({ method, path, body });
+      if (method === 'PATCH' && path === `/pages/${STUDY_ID}`) {
+        patchCount++;
+        // Fail the FIRST PATCH (Import Mode -> true). Cleanup PATCH must NOT fire.
+        if (patchCount === 1) throw new Error('PATCH ON failed');
+        return { id: STUDY_ID };
+      }
+      return {};
+    });
+
+    const fakeAL = fakeActivityLog();
+    const fakeCopyBlocks = vi.fn();
+
+    const { runError } = await apply({
+      client,
+      studyPageId: STUDY_ID,
+      studyName: 'Study A',
+      repairList: [{ taskId: 'task-1', templateId: 'tpl-1', taskName: 'T' }],
+      activityLogService: fakeAL,
+      executionId: 'exec-1',
+      copyBlocksFn: fakeCopyBlocks,
+    });
+
+    expect(runError?.message).toBe('PATCH ON failed');
+    expect(fakeCopyBlocks).not.toHaveBeenCalled();
+    // Only ONE PATCH should have fired (the failed ON); no cleanup PATCH
+    expect(patchCount).toBe(1);
+  });
+
+  it('handles duplicate templateIds in repairList by calling copyBlocks once per pair', async () => {
+    const client = mockClient();
+    const fakeAL = fakeActivityLog();
+    const fakeCopyBlocks = vi.fn(async () => ({
+      blocksWrittenCount: 3,
+      pagesProcessed: 1,
+      pagesSkipped: 0,
+    }));
+
+    const { copyResult } = await apply({
+      client,
+      studyPageId: STUDY_ID,
+      studyName: 'Study A',
+      // Two tasks share the same templateId (e.g., Repeat Delivery clones)
+      repairList: [
+        { taskId: 'task-A', templateId: 'tpl-shared', taskName: 'A' },
+        { taskId: 'task-B', templateId: 'tpl-shared', taskName: 'B' },
+      ],
+      activityLogService: fakeAL,
+      executionId: 'exec-1',
+      copyBlocksFn: fakeCopyBlocks,
+    });
+
+    // copyBlocks called TWICE — once per (templateId, taskId) pair
+    expect(fakeCopyBlocks).toHaveBeenCalledTimes(2);
+    const calls = fakeCopyBlocks.mock.calls.map(([, idMapping]) => idMapping);
+    expect(calls).toContainEqual({ 'tpl-shared': 'task-A' });
+    expect(calls).toContainEqual({ 'tpl-shared': 'task-B' });
+
+    // Aggregate counts add up across calls
+    expect(copyResult.blocksWrittenCount).toBe(6); // 3 + 3
+    expect(copyResult.pagesProcessed).toBe(2);
+  });
+
+  it('calls copyBlocks once per (templateId, taskId) pair', async () => {
+    const client = mockClient();
+    const fakeAL = fakeActivityLog();
+    const fakeCopyBlocks = vi.fn(async () => ({ blocksWrittenCount: 0, pagesProcessed: 1, pagesSkipped: 0 }));
 
     await apply({
       client,
@@ -291,17 +431,19 @@ describe('apply', () => {
       copyBlocksFn: fakeCopyBlocks,
     });
 
-    const [, idMapping] = fakeCopyBlocks.mock.calls[0];
-    expect(idMapping).toEqual({
-      'tpl-a': 'task-a',
-      'tpl-b': 'task-b',
-      'tpl-c': 'task-c',
-    });
+    // Three unique pairs -> three calls (no batching since duplicate-templateId
+    // case requires per-pair calls anyway).
+    expect(fakeCopyBlocks).toHaveBeenCalledTimes(3);
+    const idMappings = fakeCopyBlocks.mock.calls.map(([, m]) => m);
+    expect(idMappings).toContainEqual({ 'tpl-a': 'task-a' });
+    expect(idMappings).toContainEqual({ 'tpl-b': 'task-b' });
+    expect(idMappings).toContainEqual({ 'tpl-c': 'task-c' });
   });
 
-  it('records attemptedTaskIds in Activity Log details', async () => {
+  it('records attemptedTaskIds in Activity Log details and aggregates per-pair counts', async () => {
     const client = mockClient();
     const fakeAL = fakeActivityLog();
+    // Each call returns 1 written + 1 skipped → for 2 tasks, totals double.
     const fakeCopyBlocks = vi.fn(async () => ({ blocksWrittenCount: 1, pagesProcessed: 1, pagesSkipped: 1 }));
 
     await apply({
@@ -319,6 +461,9 @@ describe('apply', () => {
 
     const logEvent = fakeAL.logTerminalEvent.mock.calls[0][0];
     expect(logEvent.details.attemptedTaskIds).toEqual(['task-a', 'task-b']);
-    expect(logEvent.details.pagesSkipped).toBe(1);
+    // 2 calls × 1 each = 2 aggregate
+    expect(logEvent.details.pagesSkipped).toBe(2);
+    expect(logEvent.details.pagesProcessed).toBe(2);
+    expect(logEvent.details.blocksWrittenCount).toBe(2);
   });
 });
