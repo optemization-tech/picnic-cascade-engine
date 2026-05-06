@@ -55,7 +55,7 @@ vi.mock('../../src/services/cascade-queue.js', () => ({
   },
 }));
 
-import { handleUndoCascade } from '../../src/routes/undo-cascade.js';
+import { handleUndoCascade, parseUndoPayload } from '../../src/routes/undo-cascade.js';
 import {
   STUDY_TASKS_PROPS as ST,
   STUDIES_PROPS as S,
@@ -338,5 +338,64 @@ describe('undo-cascade route', () => {
     expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'no_action' }),
     );
+  });
+});
+
+describe('parseUndoPayload', () => {
+  // The cascade-queue front-door bot-author gate keys on parsed.editedByBot.
+  // parseUndoPayload must surface that field so undo-cascade benefits from
+  // the gate. The route's stricter definition (button click → not bot, even
+  // if last_edited_by.type === 'bot') must be preserved so legitimate undo
+  // button presses are not silenced.
+  // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1 step 5).
+
+  it('returns editedByBot=true when payload.data.last_edited_by.type === "bot" and no source.user_id', () => {
+    const parsed = parseUndoPayload({
+      data: {
+        studyId: 'study-1',
+        last_edited_by: { type: 'bot' },
+      },
+    });
+    expect(parsed.editedByBot).toBe(true);
+    expect(parsed.studyId).toBe('study-1');
+    expect(parsed.taskId).toBe('__undo__');
+    expect(parsed.skip).toBe(false);
+  });
+
+  it('returns editedByBot=false when source.user_id is present (button click — not a bot edit)', () => {
+    // Even though last_edited_by.type === 'bot', a button click carries
+    // source.user_id (the actual clicker), so this is a legitimate undo.
+    const parsed = parseUndoPayload({
+      source: { user_id: 'user-123' },
+      data: {
+        studyId: 'study-1',
+        last_edited_by: { type: 'bot' },
+      },
+    });
+    expect(parsed.editedByBot).toBe(false);
+  });
+
+  it('returns editedByBot=false when last_edited_by.type !== "bot"', () => {
+    const parsed = parseUndoPayload({
+      data: {
+        studyId: 'study-1',
+        last_edited_by: { type: 'person' },
+      },
+    });
+    expect(parsed.editedByBot).toBe(false);
+  });
+
+  it('returns editedByBot=false when last_edited_by is missing', () => {
+    const parsed = parseUndoPayload({ data: { studyId: 'study-1' } });
+    expect(parsed.editedByBot).toBe(false);
+  });
+
+  it('still returns the existing studyId/taskId/skip fields unchanged', () => {
+    const parsed = parseUndoPayload({ studyId: 'study-2' });
+    expect(parsed).toMatchObject({
+      skip: false,
+      taskId: '__undo__',
+      studyId: 'study-2',
+    });
   });
 });
