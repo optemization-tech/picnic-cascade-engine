@@ -503,6 +503,19 @@ async function consolidateMigratedTasks(study, ctx) {
   }
   process.stdout.write('\n');
   ok(`PATCHed ${patched} rows with Study relation`);
+
+  // Verification: re-query Asana Exported Tasks for rows linked to this study
+  // and warn if the count diverges from what we just patched. Catches silent
+  // pagination loss in queryDb (see PR #96 GSK SLE BEACON incident).
+  const verify = await queryDb(
+    ENGINE_CONFIG.asanaExportedTasksDbId,
+    { filter: { property: ENGINE_CONFIG.exportedTaskStudyPropName, relation: { contains: ctx.exportedStudyRowId } } },
+    { token: opts.token },
+  );
+  if (verify.length !== patched) {
+    warn(`Phase 5 verification mismatch: PATCHed ${patched}, but ${verify.length} rows linked. Re-running Phase 5 may be needed.`);
+  }
+
   ctx.consolidatedCount = toMove.length;
 }
 
