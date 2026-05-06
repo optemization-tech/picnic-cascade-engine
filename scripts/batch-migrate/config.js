@@ -20,6 +20,8 @@
  */
 
 import { groupATransform } from './transforms/group-a.js';
+import { pfizerHemeATransform } from './transforms/group-b-pfizer-heme-a.js';
+import { calliditasStartDateTransform } from './transforms/group-b-calliditas-start-date.js';
 
 export const STUDIES = [
   {
@@ -84,6 +86,165 @@ export const STUDIES = [
     perStudyMigratedDbId: '34d23867-60c2-81fa-b227-d899e465e1c6',
     contractSignDate: null,
     transform: groupATransform, // PLACEHOLDER
+  },
+
+  // ─── Group C — added 2026-05-05 ─────────────────────────────────────────
+  // Neurocrine CAH CAHtalog: superset ops tracker — 371 rows, 48 Section
+  // options, no `Milestone` select, no `Date Completed`, no `Workstream`.
+  // Tem confirmed (2026-05-05): default 202-task Blueprint is the target;
+  // PMs reconcile Status/Dates manually. Phase 6 (Migrator) will halt at
+  // §6a alias-miss in dry-run gate (no `Milestone` select on source) — that
+  // is the expected outcome; engine fail-louds and writes nothing.
+  // Recommendation doc:
+  //   /Users/Temirlan/optemization-tech/picnic-health/.claude/plans/neurocrine-cahtalog-recommendation.md
+  {
+    key: 'neurocrine-cah-cahtalog',
+    name: 'Neurocrine CAH CAHtalog',
+    group: 'C',
+    perStudyMigratedDbId: '34d23867-60c2-8184-b918-ec295b6145d3',
+    contractSignDate: '2021-07-29',
+    transform: groupATransform, // No transform needed — Migrator halts before any per-row logic; Inception + Carryover use defaults.
+  },
+
+  // ─── Group A — second wave (added 2026-05-05) ───────────────────────────
+  // 12 studies pending after the Apr 30 batch. All Group A (direct carryover
+  // compatible). Contract Sign Dates auto-resolve from Exported Studies row's
+  // Contract Start Date — pre-flight 2026-05-05 confirmed all set.
+  {
+    key: 'astrazeneca-attr-opus-w',
+    name: 'AstraZeneca ATTR Opus-W',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-8166-a407-f1e09fbd865d',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'astrazeneca-ebc-001',
+    name: 'AstraZeneca eBC 001',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-81fd-a1aa-d8d0ab341ac5',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'biogen-fa-aries',
+    name: 'Biogen FA ARIES',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-815c-add1-cedbca9b7d64',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'bms-cancer-ltfu',
+    name: 'BMS Cancer LTFU',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-8197-8f27-d59ef106e170',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'gilead-pbc-001',
+    name: 'Gilead PBC 001',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-8169-be96-cb874ddad854',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'gilead-pbc-affirm',
+    name: 'Gilead PBC AFFIRM',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-81f7-a70a-cf99d27782d9',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'gilead-pbc-assure',
+    name: 'Gilead PBC ASSURE',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-8143-8bad-f44599e3cad9',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'gsk-sle-beacon',
+    name: 'GSK SLE BEACON',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-81b0-a840-c79d5651ddb0',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'harvard-cancer-neer',
+    name: 'Harvard Cancer NEER',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-81ed-ae91-f1febf7c7eab',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'neurocrine-cah-cahscade',
+    name: 'Neurocrine CAH CAHSCADE',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-8128-98e6-fc8fbab4335f',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'pfizer-ebc-001',
+    name: 'Pfizer eBC 001',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-8124-841e-f2e61e74859f',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'wylder-asmd-accelerate',
+    name: 'Wylder Nation Foundation ASMD Accelerate',
+    group: 'A',
+    perStudyMigratedDbId: '34d23867-60c2-8178-810f-c847c2fbb3f3',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+
+  // ─── Group B — added 2026-05-05 ─────────────────────────────────────────
+  // pfizer: Task Type Tags rich_text→multi_select.
+  // biomarin: schema audit shows both Task Type Tags + Start Date already
+  //   match dest; effectively Group A. Spot-check rows post dry-run before live.
+  // calliditas: Start Date rich_text→date.
+  {
+    key: 'pfizer-heme-a-001',
+    name: 'Pfizer Heme A 001',
+    group: 'B',
+    perStudyMigratedDbId: '34d23867-60c2-816e-83f3-f84fa9e7c34a',
+    contractSignDate: null,
+    transform: pfizerHemeATransform,
+  },
+  {
+    key: 'biomarin-vista-002',
+    name: 'Biomarin Achon VISTA 002',
+    group: 'B',
+    perStudyMigratedDbId: '34d23867-60c2-8161-9b36-daf2d915c20c',
+    contractSignDate: null,
+    transform: groupATransform,
+  },
+  {
+    key: 'calliditas-igan-perform',
+    name: 'Calliditas IgAN PERFORM',
+    group: 'B',
+    perStudyMigratedDbId: '34d23867-60c2-8130-b59a-f0777df0cf67',
+    contractSignDate: null,
+    transform: calliditasStartDateTransform,
+  },
+
+  // ─── Sanofi CIDP ORBIT-CIDP — added 2026-05-05 (Meg request) ────────────
+  {
+    key: 'sanofi-cidp-orbit-cidp',
+    name: 'Sanofi CIDP ORBIT-CIDP',
+    group: 'A',
+    perStudyMigratedDbId: '35723867-60c2-80e4-a524-d1bf6c458c66',
+    contractSignDate: null, // auto-resolves from Exported Studies row's Contract Start Date (2024-11-19)
+    transform: groupATransform, // canonical Group A schema; no transform needed
   },
 ];
 
