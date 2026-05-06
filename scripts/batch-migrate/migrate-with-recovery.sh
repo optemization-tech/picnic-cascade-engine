@@ -4,6 +4,7 @@
 #
 # Usage:
 #   ./scripts/batch-migrate/migrate-with-recovery.sh <study-key>
+#   ./scripts/batch-migrate/migrate-with-recovery.sh <study-key> --json
 #
 # Behavior:
 #   1. Run the orchestrator (full pipeline: create Production Study → Inception
@@ -14,69 +15,175 @@
 #      --skip-create-study --skip-inception.
 #   4. Print a single-line summary.
 #
+# --json mode:
+#   - All human banners go to stderr.
+#   - Helpers (check-inception, recover-inception) are invoked with --json;
+#     their stdout (JSON) is captured into env vars and merged into a single
+#     envelope by scripts/batch-migrate/compose-envelope.js.
+#   - Final stdout is one JSON object with schemaVersion: 1 and outcome field.
+#
 # Exit codes:
 #   0 = clean migration (with or without auto-recovery)
 #   1 = recovery failed or unrecoverable orchestrator error
 
 set -uo pipefail
 
-if [ -z "${1:-}" ]; then
-  echo "Usage: $0 <study-key>" >&2
+JSON_MODE=false
+STUDY=""
+for arg in "$@"; do
+  case "$arg" in
+    --json) JSON_MODE=true ;;
+    --*)    echo "Unknown flag: $arg" >&2; exit 1 ;;
+    *)      if [ -z "$STUDY" ]; then STUDY="$arg"; fi ;;
+  esac
+done
+
+if [ -z "$STUDY" ]; then
+  if [ "$JSON_MODE" = true ]; then
+    echo '{"schemaVersion":1,"ok":false,"error":{"code":"usage","message":"<study-key> is required"}}'
+  else
+    echo "Usage: $0 <study-key> [--json]" >&2
+  fi
   exit 1
 fi
-STUDY=$1
 
 cd "$(dirname "$0")/../.." || exit 1  # cd to engine repo root
 
-echo
-echo "================================================================"
-echo "  migrate-with-recovery: $STUDY  ($(date -u +%H:%M:%S)Z)"
-echo "================================================================"
+# In JSON mode banners go to stderr; in default mode they go to stdout (existing behavior).
+banner() {
+  if [ "$JSON_MODE" = true ]; then
+    echo "$@" >&2
+  else
+    echo "$@"
+  fi
+}
 
-# Step 1: orchestrator (full pipeline)
-echo
-echo "[1/3] Run orchestrator (full pipeline)"
-node scripts/batch-migrate/batch-migrate.js --study "$STUDY"
-ORCH_EXIT=$?
-if [ $ORCH_EXIT -ne 0 ]; then
+banner ""
+banner "================================================================"
+banner "  migrate-with-recovery: $STUDY  ($(date -u +%H:%M:%S)Z)"
+banner "================================================================"
+
+# ─── Step 1: orchestrator ─────────────────────────────────────────────────
+banner ""
+banner "[1/3] Run orchestrator (full pipeline)"
+
+if [ "$JSON_MODE" = true ]; then
+  # Capture orchestrator stdout+stderr; keep last 20 lines as tail. batch-migrate.js
+  # itself doesn't support --json, so we treat its output as opaque.
+  ORCH_OUTPUT=$(node scripts/batch-migrate/batch-migrate.js --study "$STUDY" 2>&1)
+  ORCH_EXIT=$?
+  ORCH_TAIL=$(printf '%s' "$ORCH_OUTPUT" | tail -n 20)
+else
+  node scripts/batch-migrate/batch-migrate.js --study "$STUDY"
+  ORCH_EXIT=$?
+  ORCH_TAIL=""
+fi
+
+if [ $ORCH_EXIT -ne 0 ] && [ "$JSON_MODE" = false ]; then
   echo "Orchestrator failed with exit $ORCH_EXIT" >&2
   exit 1
 fi
 
-# Step 2: check Inception Activity Log
-echo
-echo "[2/3] Check Activity Log for Inception status"
-node scripts/batch-migrate/check-inception.js --study "$STUDY"
-CHECK_EXIT=$?
+# ─── Step 2: check Inception Activity Log ─────────────────────────────────
+banner ""
+banner "[2/3] Check Activity Log for Inception status"
+
+if [ "$JSON_MODE" = true ]; then
+  CHECK_JSON=$(node scripts/batch-migrate/check-inception.js --study "$STUDY" --json 2>/dev/null)
+  CHECK_EXIT=$?
+else
+  node scripts/batch-migrate/check-inception.js --study "$STUDY"
+  CHECK_EXIT=$?
+  CHECK_JSON=""
+fi
+
+# ─── Decide whether to recover ────────────────────────────────────────────
+RECOVERY_JSON=""
+REMIG_EXIT=""
+REMIG_TAIL=""
+FINAL_CHECK_JSON=""
 
 case $CHECK_EXIT in
   0)
-    echo "✓ Inception Success — no recovery needed"
+    banner "✓ Inception Success — no recovery needed"
     ;;
   1)
-    echo "⚠ Inception Failed (Batch incomplete) — running recovery..."
-    echo
-    echo "[3/3] Recover (runbook procedure)"
-    node scripts/batch-migrate/recover-inception.js --study "$STUDY"
-    REC_EXIT=$?
-    if [ $REC_EXIT -ne 0 ]; then
-      echo "Recovery failed with exit $REC_EXIT — escalate" >&2
-      exit 1
+    banner "⚠ Inception Failed (Batch incomplete) — running recovery..."
+    banner ""
+    banner "[3/3] Recover (runbook procedure)"
+
+    if [ "$JSON_MODE" = true ]; then
+      RECOVERY_JSON=$(node scripts/batch-migrate/recover-inception.js --study "$STUDY" --json 2>/dev/null)
+      REC_EXIT=$?
+    else
+      node scripts/batch-migrate/recover-inception.js --study "$STUDY"
+      REC_EXIT=$?
     fi
-    echo
-    echo "[3b] Re-fire Migrator on full cascade state"
-    node scripts/batch-migrate/batch-migrate.js --study "$STUDY" --skip-create-study --skip-inception
-    if [ $? -ne 0 ]; then
-      echo "Migrator re-fire failed" >&2
-      exit 1
+
+    if [ $REC_EXIT -ne 0 ]; then
+      if [ "$JSON_MODE" = false ]; then
+        echo "Recovery failed with exit $REC_EXIT — escalate" >&2
+        exit 1
+      fi
+      # JSON mode: continue to compose envelope so caller sees the failure shape.
+    else
+      banner ""
+      banner "[3b] Re-fire Migrator on full cascade state"
+
+      if [ "$JSON_MODE" = true ]; then
+        REMIG_OUTPUT=$(node scripts/batch-migrate/batch-migrate.js --study "$STUDY" --skip-create-study --skip-inception 2>&1)
+        REMIG_EXIT=$?
+        REMIG_TAIL=$(printf '%s' "$REMIG_OUTPUT" | tail -n 20)
+      else
+        node scripts/batch-migrate/batch-migrate.js --study "$STUDY" --skip-create-study --skip-inception
+        REMIG_EXIT=$?
+      fi
+
+      if [ "$REMIG_EXIT" != "0" ] && [ "$JSON_MODE" = false ]; then
+        echo "Migrator re-fire failed" >&2
+        exit 1
+      fi
+
+      # Post-recovery final check (JSON mode only — default mode already shows
+      # operator the pipeline output and exits cleanly above).
+      if [ "$JSON_MODE" = true ]; then
+        FINAL_CHECK_JSON=$(node scripts/batch-migrate/check-inception.js --study "$STUDY" --json 2>/dev/null)
+      fi
     fi
     ;;
   *)
-    echo "check-inception returned exit $CHECK_EXIT — investigate" >&2
-    exit 1
+    if [ "$JSON_MODE" = false ]; then
+      echo "check-inception returned exit $CHECK_EXIT — investigate" >&2
+      exit 1
+    fi
+    # JSON mode: fall through, envelope captures CHECK_JSON state.
     ;;
 esac
 
-echo
-echo "✓ $STUDY complete  ($(date -u +%H:%M:%S)Z)"
+# ─── JSON mode: compose envelope ──────────────────────────────────────────
+if [ "$JSON_MODE" = true ]; then
+  STUDY="$STUDY" \
+  ORCH_EXIT_CODE="$ORCH_EXIT" \
+  ORCH_TAIL="$ORCH_TAIL" \
+  CHECK_JSON="$CHECK_JSON" \
+  RECOVERY_JSON="$RECOVERY_JSON" \
+  REMIG_EXIT_CODE="$REMIG_EXIT" \
+  REMIG_TAIL="$REMIG_TAIL" \
+  FINAL_CHECK_JSON="$FINAL_CHECK_JSON" \
+  node scripts/batch-migrate/compose-envelope.js
+  COMPOSE_EXIT=$?
+  if [ $COMPOSE_EXIT -ne 0 ]; then
+    # compose-envelope.js writes its own fallback JSON on failure, so we just
+    # forward its exit code.
+    exit $COMPOSE_EXIT
+  fi
+
+  # Decide overall script exit based on outcome — matches non-JSON semantics.
+  if [ $ORCH_EXIT -ne 0 ] && [ -z "$RECOVERY_JSON" ]; then exit 1; fi
+  if [ -n "$RECOVERY_JSON" ] && [ "$REMIG_EXIT" != "0" ]; then exit 1; fi
+  exit 0
+fi
+
+banner ""
+banner "✓ $STUDY complete  ($(date -u +%H:%M:%S)Z)"
 exit 0
