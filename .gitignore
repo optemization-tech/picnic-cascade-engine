@@ -8,3 +8,4 @@ node_modules/
 # resources/ is a pre-code-era engagement folder that predates this repo.
 pulse-log/
 resources/
+.env.bak.*
