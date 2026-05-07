@@ -193,6 +193,25 @@ describe('StudyCommentService', () => {
       expect(mentionIds).toEqual(['user-a', 'user-b', 'user-c']);
     });
 
+    it('skips presser-prepend when mentionable:false even if editedByBot:false (U2)', async () => {
+      mockConfig.comment.errorMentionIds = ['user-a'];
+      const { service, notionClient } = makeService();
+
+      await service.postComment(baseEvent({
+        triggeredByUserId: 'bot-integration-id',
+        editedByBot: false,
+        mentionable: false,
+      }));
+
+      const payload = notionClient.request.mock.calls[0][2];
+      const mentionIds = payload.rich_text
+        .filter(r => r.type === 'mention')
+        .map(r => r.mention.user.id);
+      // Only configured mention (user-a); bot-integration-id must NOT appear.
+      expect(mentionIds).toEqual(['user-a']);
+      expect(mentionIds).not.toContain('bot-integration-id');
+    });
+
     it('skips presser-prepend when editedByBot=true', async () => {
       mockConfig.comment.errorMentionIds = ['user-a', 'user-b'];
       const { service, notionClient } = makeService();

@@ -15,7 +15,12 @@ function buildRichText(event) {
   //      IDs.
   //   4. Filter falsy entries defensively.
   const rawIds = [];
-  if (event.triggeredByUserId && !event.editedByBot) {
+  // Prefer event.mentionable when present; fall back to legacy flags so caller
+  // routes don't need updating until U3-U4 land.
+  const isMentionable = event.mentionable != null
+    ? event.mentionable
+    : (!!event.triggeredByUserId && !event.editedByBot);
+  if (isMentionable) {
     rawIds.push(event.triggeredByUserId);
   }
   rawIds.push(...config.comment.errorMentionIds);

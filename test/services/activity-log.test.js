@@ -142,6 +142,26 @@ describe('ActivityLogService', () => {
     expect(payload.properties[AL.TESTED_BY.id]).toBeUndefined();
   });
 
+  it('omits Tested by when mentionable:false overrides editedByBot:false (U2)', async () => {
+    // mentionable=false takes precedence over the legacy guard even when editedByBot is false.
+    // This is the U2 migration contract: explicit mentionable:false means no people write.
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Date Cascade',
+      status: 'success',
+      summary: 'ok',
+      triggeredByUserId: 'bot-integration-id',
+      editedByBot: false,
+      mentionable: false,
+      details: {},
+    });
+
+    expect(notionClient.request).toHaveBeenCalledTimes(1);
+    const payload = notionClient.request.mock.calls[0][2];
+    expect(payload.properties[AL.TESTED_BY.id]).toBeUndefined();
+  });
+
   it('renders narrowRetrySuppressed line in body when present', async () => {
     const { service, notionClient } = makeService();
 
