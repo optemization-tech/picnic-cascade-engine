@@ -162,4 +162,47 @@ describe('check-inception run()', () => {
     expect(alCall.body.filter.and[1].select.equals).toBe('Inception');
     expect(alCall.body.sorts[0].direction).toBe('descending');
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // U9 — In-flight state coverage (R5 / PR C). The 'other' state was
+  // retired in PR B; verify each replacement token (in_progress / unknown
+  // / cancelled) is emitted correctly per the Activity Log Status name.
+  // ────────────────────────────────────────────────────────────────────
+  it('returns state in_progress with exit 2 when Activity Log shows In Progress', async () => {
+    const notionFetch = makeNotionFetch({
+      'POST /v1/data_sources/cb785052': () => ({ results: [exportedStudiesRow()] }),
+      'POST /v1/data_sources/ba423867': () => ({ results: [activityLogEntry({ status: 'In Progress' })] }),
+    });
+
+    const { exitCode, result } = await run({ studyKey: STUDY_KEY, deps: { notionFetch } });
+    expect(exitCode).toBe(2);
+    expect(result.state).toBe('in_progress');
+    expect(result.inceptionStatus).toBe('In Progress');
+    expect(result.ok).toBe(true); // not an error — just inconclusive
+  });
+
+  it('returns state cancelled with exit 2 when Activity Log shows Cancelled', async () => {
+    const notionFetch = makeNotionFetch({
+      'POST /v1/data_sources/cb785052': () => ({ results: [exportedStudiesRow()] }),
+      'POST /v1/data_sources/ba423867': () => ({ results: [activityLogEntry({ status: 'Cancelled' })] }),
+    });
+
+    const { exitCode, result } = await run({ studyKey: STUDY_KEY, deps: { notionFetch } });
+    expect(exitCode).toBe(2);
+    expect(result.state).toBe('cancelled');
+    expect(result.inceptionStatus).toBe('Cancelled');
+  });
+
+  it('returns state unknown with exit 2 for any other Activity Log status', async () => {
+    const notionFetch = makeNotionFetch({
+      'POST /v1/data_sources/cb785052': () => ({ results: [exportedStudiesRow()] }),
+      'POST /v1/data_sources/ba423867': () => ({ results: [activityLogEntry({ status: 'PartialRetry' })] }),
+    });
+
+    const { exitCode, result } = await run({ studyKey: STUDY_KEY, deps: { notionFetch } });
+    expect(exitCode).toBe(2);
+    expect(result.state).toBe('unknown');
+    // inceptionStatus preserves the raw Notion value for diagnostics
+    expect(result.inceptionStatus).toBe('PartialRetry');
+  });
 });
