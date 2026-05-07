@@ -129,8 +129,18 @@ case $CHECK_EXIT in
       REC_EXIT=$?
     fi
 
-    if [ $REC_EXIT -ne 0 ] && [ $REC_EXIT -ne 2 ]; then
-      # exit 2 = alreadySuccess (no work needed); not a failure
+    if [ $REC_EXIT -eq 4 ]; then
+      # R2 mirror for recover-inception: transient/network. DO NOT escalate.
+      # Operator should retry recovery after the network blip clears.
+      # (Code review #9, P1 — wrapper case-statement asymmetry.)
+      if [ "$JSON_MODE" = false ]; then
+        echo "⚠ recover-inception inconclusive (transient/network) — do NOT escalate; retry recovery" >&2
+        exit 2
+      fi
+      # JSON mode: fall through, envelope captures RECOVERY_JSON state.
+    elif [ $REC_EXIT -ne 0 ] && [ $REC_EXIT -ne 2 ]; then
+      # exit 2 = alreadySuccess (no work needed); not a failure.
+      # exit 4 was handled above; everything else is a real failure.
       if [ "$JSON_MODE" = false ]; then
         echo "Recovery failed with exit $REC_EXIT — escalate" >&2
         exit 1
@@ -181,15 +191,19 @@ esac
 
 # ─── JSON mode: compose envelope ──────────────────────────────────────────
 if [ "$JSON_MODE" = true ]; then
-  STUDY="$STUDY" \
-  ORCH_EXIT_CODE="$ORCH_EXIT" \
-  ORCH_TAIL="$ORCH_TAIL" \
-  CHECK_JSON="$CHECK_JSON" \
-  RECOVERY_JSON="$RECOVERY_JSON" \
-  REMIG_EXIT_CODE="$REMIG_EXIT" \
-  REMIG_TAIL="$REMIG_TAIL" \
-  FINAL_CHECK_JSON="$FINAL_CHECK_JSON" \
-  ENVELOPE_JSON=$(node scripts/batch-migrate/compose-envelope.js)
+  # Critical: env-var assignments MUST be inside the $() subshell so they
+  # are exported to the `node` invocation. Writing them as `STUDY=... \
+  # ENVELOPE_JSON=$(...)` would scope them to the parent shell only — node
+  # would see process.env.STUDY === undefined. (Code review #1, P0.)
+  ENVELOPE_JSON=$(STUDY="$STUDY" \
+    ORCH_EXIT_CODE="$ORCH_EXIT" \
+    ORCH_TAIL="$ORCH_TAIL" \
+    CHECK_JSON="$CHECK_JSON" \
+    RECOVERY_JSON="$RECOVERY_JSON" \
+    REMIG_EXIT_CODE="$REMIG_EXIT" \
+    REMIG_TAIL="$REMIG_TAIL" \
+    FINAL_CHECK_JSON="$FINAL_CHECK_JSON" \
+    node scripts/batch-migrate/compose-envelope.js)
   COMPOSE_EXIT=$?
 
   if [ $COMPOSE_EXIT -ne 0 ]; then
@@ -201,11 +215,20 @@ if [ "$JSON_MODE" = true ]; then
   # Emit envelope to stdout. Read envelope.exitCode (R15 — single source of
   # truth, no parallel shell logic).
   printf '%s\n' "$ENVELOPE_JSON"
+  # Defensive ${...:-1} fallback: if envelope is empty/null/malformed, default
+  # to exit 1 rather than `exit ""` which produces 'numeric argument required'
+  # → exit 255 (code review #5, P1). The node -e wraps in try/catch so a
+  # JSON.parse error emits "1" instead of crashing.
   ENVELOPE_EXIT=$(printf '%s' "$ENVELOPE_JSON" | node -e "
-    const env = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-    process.stdout.write(String(env.exitCode ?? 1));
+    try {
+      const raw = require('fs').readFileSync(0, 'utf8');
+      const env = raw.trim() === '' ? {} : JSON.parse(raw);
+      process.stdout.write(String(env.exitCode ?? 1));
+    } catch (err) {
+      process.stdout.write('1');
+    }
   ")
-  exit "$ENVELOPE_EXIT"
+  exit "${ENVELOPE_EXIT:-1}"
 fi
 
 banner ""

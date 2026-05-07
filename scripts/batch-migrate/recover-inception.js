@@ -77,24 +77,31 @@ function getFlag(name) {
 
 // ──────────────────────────────────────────────────────────────────────────
 // Error classification (R8). See check-inception.js for parallel logic.
+//
+// Code review fixes:
+//   #4: 401/403 detection uses err.status only — regex on message text
+//       false-positives on 5xx with substring like "request id e4f7-401-abcd".
+//   #6: cursor_exhausted → exit 4 (transient class) so wrapper retries
+//       instead of escalating.
 // ──────────────────────────────────────────────────────────────────────────
 function classifyError(err) {
   const message = String(err?.message || err || '');
-  if (err?.status === 401 || err?.status === 403 || /\b401\b|\b403\b/.test(message)) {
-    return 'auth_error';
-  }
+  if (err?.status === 401 || err?.status === 403) return 'auth_error';
   if (err?.status >= 400 && err?.status < 500) return 'notion_api';
-  if (/\b4\d\d\b/.test(message) && !/\b5\d\d\b/.test(message)) return 'notion_api';
   if (err?.code === 'cursor_exhausted') return 'cursor_exhausted';
-  if (err?.name === 'TimeoutError' || err?.name === 'AbortError'
-    || /\bECONN(RESET|REFUSED|ABORTED)\b|\btimeout\b|\bnetwork\b|\b5\d\d\b|\bfetch failed\b/i.test(message)) {
+  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') return 'transient';
+  if (err?.status >= 500) return 'transient';
+  if (/\bECONN(RESET|REFUSED|ABORTED)\b|\bnetwork\b|\bfetch failed\b/i.test(message)) {
     return 'transient';
   }
   return 'unknown';
 }
 
 function classifyExitCode(category) {
-  return category === 'transient' ? 4 : 1;
+  // cursor_exhausted is genuinely transient (Notion mutation rate during
+  // query). Wrapper retry is the right response, not destructive escalation.
+  // (Code review #6, P1.)
+  return (category === 'transient' || category === 'cursor_exhausted') ? 4 : 1;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -117,8 +124,14 @@ function makeDefaultNotionFetch(token, { maxRetries = 2, retryBaseMs = 5000, tim
         };
         if (body) opts.body = JSON.stringify(body);
         const res = await fetch(`https://api.notion.com${path}`, opts);
-        if (res.status >= 500 && attempt < maxRetries) {
-          await new Promise((r) => setTimeout(r, retryBaseMs * (attempt + 1)));
+        // Retry 5xx + 429 (rate limit). Code review #8 — sibling notion.js
+        // honors retry-after on 429.
+        if ((res.status >= 500 || res.status === 429) && attempt < maxRetries) {
+          const retryAfter = parseInt(res.headers.get('retry-after') || '', 10);
+          const sleepMs = Number.isFinite(retryAfter) && retryAfter > 0
+            ? Math.min(retryAfter * 1000, 30000)
+            : retryBaseMs * (attempt + 1);
+          await new Promise((r) => setTimeout(r, sleepMs));
           continue;
         }
         if (res.status === 401 || res.status === 403) {
@@ -126,15 +139,26 @@ function makeDefaultNotionFetch(token, { maxRetries = 2, retryBaseMs = 5000, tim
           err.status = res.status;
           throw err;
         }
-        // PATCH errors surface text for clearer diagnostics
-        if (method === 'PATCH' && !res.ok) {
+        // Final-attempt 5xx/429: throw with err.status so classifyError sees
+        // it as transient. Code review #3, P1 — without this, the response
+        // body is returned unthrown and the caller sees `j.results === undefined`.
+        if (res.status >= 500 || res.status === 429) {
+          const err = new Error(`${method} ${path} ${res.status}: retry budget exhausted`);
+          err.status = res.status;
+          throw err;
+        }
+        // Other 4xx: throw with status for classifyError → notion_api.
+        if (res.status >= 400) {
           const txt = await res.text().catch(() => '');
-          throw new Error(`PATCH ${path} ${res.status}: ${txt}`);
+          const err = new Error(`${method} ${path} ${res.status}: ${txt}`);
+          err.status = res.status;
+          throw err;
         }
         return res.json();
       } catch (err) {
         lastErr = err;
         const transient = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+          || err?.status >= 500 || err?.status === 429
           || /ECONN(RESET|REFUSED|ABORTED)|fetch failed|network/i.test(String(err?.message || ''));
         if (transient && attempt < maxRetries) {
           await new Promise((r) => setTimeout(r, retryBaseMs * (attempt + 1)));
@@ -279,7 +303,9 @@ export async function fireDeletionAndPoll({ prodId, deps }) {
       };
     }
   }
-  return { name: 'deletion', status: 'failed', error: { code: 'deletion_unknown', message: 'loop fell through' } };
+  // Unreachable: the for-loop above either returns ok on count==0 or fails on
+  // i===maxIterations. Code review #22: removed the deletion_unknown fallback
+  // (was undocumented, dead code).
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -620,7 +646,10 @@ async function runMain() {
     process.exit(3);
   };
 
-  if (!studyKey) failUsage('usage', 'Usage: node recover-inception.js --study <key> [--json]');
+  // Code review #18: reject boolean `true` from getArg (--study with no value).
+  if (!studyKey || typeof studyKey !== 'string') {
+    failUsage('usage', 'Usage: node recover-inception.js --study <key> [--json]');
+  }
   if (!TOKEN) failUsage('config', 'NOTION_TOKEN_1 not set');
   if (!SECRET) failUsage('config', 'WEBHOOK_SECRET not set');
 
@@ -703,11 +732,18 @@ async function runMain() {
   } catch (err) {
     // R3: uncaught throws → JSON envelope, never silent.
     const code = classifyError(err);
+    // Code review #2 mirror: emit `state: 'inconclusive'` on transient throws
+    // so compose-envelope can route to outcome=`inconclusive`/exit 2 instead
+    // of failing through to outcome=`failed`/exit 1.
+    const state = (code === 'transient' || code === 'cursor_exhausted')
+      ? 'inconclusive'
+      : null;
     const envelope = {
       schemaVersion: SCHEMA_VERSION,
       ok: false,
       study: studyKey,
       error: { code, message: String(err?.message || err).slice(0, 400) },
+      ...(state ? { state } : {}),
     };
     if (jsonMode) {
       process.stdout.write(JSON.stringify(envelope) + '\n');

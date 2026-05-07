@@ -370,4 +370,67 @@ describe('composeEnvelope', () => {
     expect(env.exitCode).toBe(1);
     expect(env.recoveryPerformed).toBe(true);
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Code review fixes (post-PR-A/B/C review)
+  // ────────────────────────────────────────────────────────────────────
+  it('maps transient check error (no state field) → outcome=inconclusive (review #2/#11)', () => {
+    // Emulates the actual envelope shape emitted by check-inception's runMain
+    // catch on a transient error: no `state` field, just error.code=transient.
+    // Pre-fix: deriveOutcome's tautological fallback returned 'failed'.
+    // Post-fix: error.code-aware fallback returns 'inconclusive'.
+    const checkTransientNoState = JSON.stringify({
+      schemaVersion: 1,
+      ok: false,
+      study: STUDY,
+      error: { code: 'transient', message: 'fetch failed' },
+    });
+    const env = composeEnvelope({
+      study: STUDY,
+      orchExitCode: 0,
+      orchTail: '...',
+      checkJson: checkTransientNoState,
+    });
+    expect(env.outcome).toBe('inconclusive');
+    expect(env.exitCode).toBe(2);
+  });
+
+  it('maps cursor_exhausted check error (no state field) → outcome=inconclusive', () => {
+    const checkCursorNoState = JSON.stringify({
+      schemaVersion: 1,
+      ok: false,
+      study: STUDY,
+      error: { code: 'cursor_exhausted', message: 'cursor retries exhausted' },
+    });
+    const env = composeEnvelope({
+      study: STUDY,
+      orchExitCode: 0,
+      orchTail: '...',
+      checkJson: checkCursorNoState,
+    });
+    expect(env.outcome).toBe('inconclusive');
+    expect(env.exitCode).toBe(2);
+  });
+
+  it('falls back to outcome=inconclusive for unknown/missing state when orch OK (defensive)', () => {
+    const env = composeEnvelope({
+      study: STUDY,
+      orchExitCode: 0,
+      orchTail: '...',
+      checkJson: JSON.stringify({ schemaVersion: 1, ok: true, study: STUDY }), // no state
+    });
+    expect(env.outcome).toBe('inconclusive');
+    expect(env.exitCode).toBe(2);
+  });
+
+  it('falls back to outcome=failed for unknown/missing state when orch failed (orch dominates)', () => {
+    const env = composeEnvelope({
+      study: STUDY,
+      orchExitCode: 1,
+      orchTail: '...',
+      checkJson: JSON.stringify({ schemaVersion: 1, ok: true, study: STUDY }), // no state
+    });
+    expect(env.outcome).toBe('failed');
+    expect(env.exitCode).toBe(1);
+  });
 });

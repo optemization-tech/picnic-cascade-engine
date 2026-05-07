@@ -130,7 +130,14 @@ export function deriveOutcome({ orchExitCode, check, recovery, finalCheck, recov
   if (isFailedState(state)) return 'failed';
 
   // Defensive fallback — unknown/missing state.
-  return orchOk ? 'failed' : 'failed';
+  // Per code review #11: previously `orchOk ? 'failed' : 'failed'` (tautological).
+  // Use 'inconclusive' so the operator investigates rather than triggering
+  // destructive escalation on unknown state. If error.code suggests a transient
+  // failure, surface that.
+  if (check?.error?.code === 'transient' || check?.error?.code === 'cursor_exhausted') {
+    return 'inconclusive';
+  }
+  return orchOk ? 'inconclusive' : 'failed';
 }
 
 /**
