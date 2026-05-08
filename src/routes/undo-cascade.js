@@ -129,6 +129,7 @@ async function processUndoCascade(payload) {
         triggerType: 'Manual',
         triggeredByUserId,
         editedByBot,
+        mentionable,
         sourceTaskId: entry.sourceTaskId || null,
         sourceTaskName,
         cascadeMode,
@@ -145,6 +146,7 @@ async function processUndoCascade(payload) {
         sourceTaskName,
         triggeredByUserId,
         editedByBot,
+        mentionable,
         summary: `Undo failed: ${String(error.message || error).slice(0, 180)}`,
       });
     } catch { /* comment failure must not mask original error */ }
