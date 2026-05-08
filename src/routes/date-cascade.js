@@ -216,6 +216,49 @@ async function processDateCascade(payload) {
 
   if (parsed.startDelta === 0 && parsed.endDelta === 0) {
     console.log(JSON.stringify({ event: 'zero_delta_skip', cascadeId: tracer.cascadeId, taskName: parsed.taskName, taskId: parsed.taskId }));
+
+    if (parsed.mentionable === undefined) {
+      // Pre-classifier caller — classification unverified. Stay silent and
+      // emit telemetry so any missed parseWebhookPayload migration surfaces.
+      console.log(JSON.stringify({
+        event: 'webhook_actor_legacy_fallback',
+        route: 'date-cascade',
+        reason: 'mentionable_undefined',
+        triggeredByUserId: parsed.triggeredByUserId,
+        editedByBot: parsed.editedByBot,
+      }));
+      return;
+    }
+
+    if (parsed.mentionable === true) {
+      try {
+        await Promise.all([
+          logTerminalEvent({
+            parsed,
+            status: 'no_shifts',
+            summary: `No shifts: "${parsed.taskName}" — dates within tolerance (zero delta)`,
+            noActionReason: null,
+            tracer,
+          }),
+          notionClient.patchPage(parsed.taskId, {
+            [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
+              rich_text: [{
+                type: 'text',
+                text: { content: '❇️ date-cascade cascade: no change to propagate — dates within tolerance' },
+                annotations: { color: 'green_background' },
+              }],
+            },
+          }, { tracer }),
+        ]);
+      } catch (noopErr) {
+        // Isolate banner/log writes from the outer cascade catch — a transient
+        // Notion failure here must not silently die in the queue's error handler.
+        console.warn('[date-cascade] zero_delta feedback write failed:', noopErr?.message);
+      }
+    }
+    // else: engine seed (mentionable === false). Defensive fall-through.
+    // Under correct upstream classification (date-cascade.js:202's editedByBot guard
+    // already drops bots), this branch is unreachable in production.
     return;
   }
   if (isImportMode(parsed)) {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   mockClient: {
     patchPages: vi.fn(),
+    patchPage: vi.fn(),
   },
   parseWebhookPayload: vi.fn(),
   tightenSeedAndDownstream: vi.fn(),
@@ -85,6 +86,7 @@ function happyParsed(overrides = {}) {
     studyId: 'study-1',
     triggeredByUserId: 'user-1',
     editedByBot: false,
+    mentionable: false,
     hasDates: true,
     hasSubtasks: false,
     ...overrides,
@@ -169,46 +171,215 @@ describe('handleDepEdit', () => {
     });
   });
 
-  describe('no-op paths (no Activity Log noise)', () => {
-    // @behavior BEH-DEP-EDIT-ROUTE-NOOP-SILENT
-    it('skips Activity Log entirely on already-tight no-op', async () => {
-      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
-      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
-      mocks.tightenSeedAndDownstream.mockReturnValue({
+  describe('no-op paths', () => {
+    // Shared noop result factory
+    function makeNoopResult(reason = 'already-tight') {
+      return {
         subcase: 'no-op',
-        reason: 'already-tight',
+        reason,
         updates: [],
         movedTaskIds: [],
         downstreamCount: 0,
         diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+      };
+    }
+
+    describe('engine-seed defensive branch (mentionable=false)', () => {
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-SILENT
+      it('stays silent (no Activity Log, no banner) when mentionable=false', async () => {
+        // happyParsed() has mentionable: false — the defensive engine-seed path.
+        // Under correct upstream classification this branch is unreachable in
+        // production (dep-edit.js:129's editedByBot guard drops bots before here),
+        // but it is preserved as a test surface for future-proofing.
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('already-tight'));
+
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+        expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
+        expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
       });
 
-      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
-      await handleDepEdit(req, res);
-      await new Promise((r) => setImmediate(r));
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-SKIPS-ROLLUP
+      it('skips runParentSubtask entirely when subcase=no-op', async () => {
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed());
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('already-tight'));
 
-      expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
-      expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.runParentSubtask).not.toHaveBeenCalled();
+      });
     });
 
-    // @behavior BEH-DEP-EDIT-ROUTE-NOOP-SKIPS-ROLLUP
-    it('skips runParentSubtask entirely when subcase=no-op (silent path preserved)', async () => {
-      mocks.parseWebhookPayload.mockReturnValue(happyParsed());
-      mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
-      mocks.tightenSeedAndDownstream.mockReturnValue({
-        subcase: 'no-op',
-        reason: 'already-tight',
-        updates: [],
-        movedTaskIds: [],
-        downstreamCount: 0,
-        diagnostics: { cycleDetected: false, cycleTaskIds: [] },
+    describe('legacy caller branch (mentionable=undefined)', () => {
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-LEGACY-FALLBACK
+      it('stays silent and emits webhook_actor_legacy_fallback telemetry when mentionable is undefined', async () => {
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: undefined }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('already-tight'));
+
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+        expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
+        const logged = consoleSpy.mock.calls.map((c) => {
+          try { return JSON.parse(c[0]); } catch { return null; }
+        }).filter(Boolean);
+        expect(logged.some((e) => e.event === 'webhook_actor_legacy_fallback' && e.route === 'dep-edit')).toBe(true);
+        consoleSpy.mockRestore();
+      });
+    });
+
+    describe('human-seed positive feedback (mentionable=true)', () => {
+      // Helper: verify the patchPage banner color and optional text content.
+      function assertBanner(color, contentContains) {
+        const [taskId, props] = mocks.mockClient.patchPage.mock.calls[0];
+        expect(taskId).toBe('task-1');
+        const bannerProp = Object.values(props).find((p) => p.rich_text);
+        expect(bannerProp).toBeDefined();
+        expect(bannerProp.rich_text[0].annotations.color).toBe(color);
+        if (contentContains) expect(bannerProp.rich_text[0].text.content).toContain(contentContains);
+      }
+
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK
+      it('emits Activity Log entry (no_shifts) and green banner for already-tight reason', async () => {
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: true }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('already-tight'));
+        mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
+        mocks.mockClient.patchPage.mockResolvedValue({});
+
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ status: 'no_shifts', summary: expect.stringContaining('downstream already in range') }),
+        );
+        assertBanner('green_background', 'no shifts needed');
+        // runParentSubtask must NOT run — no cascade work happened
+        expect(mocks.runParentSubtask).not.toHaveBeenCalled();
       });
 
-      const { req, res } = makeReqRes({ source: { id: 'task-1' } });
-      await handleDepEdit(req, res);
-      await new Promise((r) => setImmediate(r));
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK-NO-EFFECTIVE-BLOCKERS
+      it('emits green banner and no_shifts for no-effective-blockers reason', async () => {
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: true }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('no-effective-blockers'));
+        mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
+        mocks.mockClient.patchPage.mockResolvedValue({});
 
-      expect(mocks.runParentSubtask).not.toHaveBeenCalled();
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ status: 'no_shifts' }),
+        );
+        assertBanner('green_background');
+      });
+
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK-FROZEN
+      it('emits no_action and yellow banner for seed-frozen reason', async () => {
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: true }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('seed-frozen'));
+        mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
+        mocks.mockClient.patchPage.mockResolvedValue({});
+
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: 'no_action',
+            summary: expect.stringContaining('frozen'),
+            details: expect.objectContaining({ noActionReason: 'seed_frozen' }),
+          }),
+        );
+        assertBanner('yellow_background', 'frozen task');
+      });
+
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK-SEED-NOT-FOUND
+      it('emits failed status and red banner for seed-not-found reason', async () => {
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: true }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('seed-not-found'));
+        mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
+        mocks.mockClient.patchPage.mockResolvedValue({});
+
+        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ status: 'failed' }),
+        );
+        assertBanner('red_background', 'seed task not found');
+        const logged = consoleSpy.mock.calls.map((c) => {
+          try { return JSON.parse(c[0]); } catch { return null; }
+        }).filter(Boolean);
+        expect(logged.some((e) => e.event === 'cascade_seed_not_found')).toBe(true);
+        consoleSpy.mockRestore();
+      });
+
+      // @behavior BEH-DEP-EDIT-ROUTE-NOOP-LOOP-PREVENTION
+      it('engine-seed echo after banner write stays silent (loop-prevention regression-lock)', async () => {
+        // Simulates: engine writes green banner → Notion fires webhook back →
+        // engine receives → classifier returns mentionable=false → silent return,
+        // no further writes. This pins the defensive branch as the safety net.
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: false, editedByBot: false }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('already-tight'));
+
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
+        expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+      });
+
+      it('absorbs patchPage failure in inner try/catch — Activity Log written exactly once, outer catch not triggered', async () => {
+        // Verifies M-P1-1 fix: noop Promise.all is isolated from the outer try/catch.
+        // If patchPage rejects, logTerminalEvent must have already been called once
+        // (no_shifts), and the outer catch must NOT fire a second failed entry.
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: true }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('already-tight'));
+        mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
+        mocks.mockClient.patchPage.mockRejectedValue(new Error('Notion 429'));
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        // Inner catch absorbed the error — exactly one Activity Log entry, no failure row.
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledTimes(1);
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ status: 'no_shifts' }),
+        );
+        // Outer catch must not have fired — no study comment posted.
+        expect(mocks.studyCommentService.postComment).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('[dep-edit] no-op feedback write failed'),
+          expect.any(String),
+        );
+        warnSpy.mockRestore();
+      });
     });
   });
 

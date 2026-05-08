@@ -81,6 +81,20 @@ describe('ActivityLogService', () => {
     expect(second).toBe('Failed');
   });
 
+  it('maps no_shifts to "No Shifts" for Notion status property', async () => {
+    const { service, notionClient } = makeService();
+
+    await service.logTerminalEvent({
+      workflow: 'Dep Edit Cascade',
+      status: 'no_shifts',
+      summary: 'No shifts: "Remote visits" — downstream already in range',
+      details: {},
+    });
+
+    const statusName = notionClient.request.mock.calls[0][2].properties[AL.STATUS.id].select.name;
+    expect(statusName).toBe('No Shifts');
+  });
+
   it('returns a non-throwing disabled result when db id is missing', async () => {
     const notionClient = { request: vi.fn() };
     const service = new ActivityLogService({ notionClient, activityLogDbId: null });

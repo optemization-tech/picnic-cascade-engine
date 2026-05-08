@@ -213,6 +213,7 @@ Direction semantics:
 #### 4.3 Terminal status semantics
 - `success`: Intended cascade objective completed and no safety cap residue remains.
 - `no_action`: Route completed without date movement due to valid no-op state (gates, unchanged dates, blocked mode, etc.).
+- `no_shifts`: Engine ran and determined no tasks needed shifting (dates already in range, or already tight). For human-seed edits, emits an Activity Log entry with this status and a green ❇️ Automation Reporting banner. For engine-bot seeds, stays silent (loop prevention). Distinct from `success` (no date writes landed).
 - `failed`: Execution error, or unresolved residue that violates cross-chain safety policy after cap.
 
 Do not classify a run as success only because the process completed. Status reflects cascade outcome quality, not transport/execution completion.
@@ -230,6 +231,7 @@ Alternate terminal states:
 - Error 1 (direct parent edit): queued → red "Parent date edit reverted — edit a subtask directly to shift dates and trigger cascading" (on the task) + red study-level `DIRECT_PARENT_WARNING` banner. The intermediate "Cascade started" is SUPPRESSED for this path.
 - Frozen leaf / middle-parent case-a frozen: queued → silence (no further lifecycle messages; Activity Log records `no_action` with reason `frozen_status`).
 - Zero-delta / Import Mode / bot-echo / invalid payload: NO "Cascade queued" is posted. The handler filters these before the queued write.
+- Human-seed no-op (zero delta or already-tight): queued → green ❇️ "no shifts needed — downstream already in range" or "no change to propagate — dates within tolerance" written to the task's Automation Reporting field; Activity Log records `no_shifts`. Engine-seed no-ops (mentionable=false) remain silent (loop prevention). Legacy callers (mentionable=undefined) emit telemetry and stay silent.
 - Runtime error during processing: queued → red "Cascade failed for <task>: <message>" on the task.
 
 Study-level `Automation Reporting` writes reserved for:
@@ -426,6 +428,18 @@ For every behavior change:
 5. Record decision in pulse log
 
 ## Changelog
+
+### 2026-05-07 — Human-seed no-op cascade feedback
+
+Plan: `docs/plans/2026-05-07-001-fix-human-noop-cascade-feedback-plan.md`.
+
+Before this change, when a human dragged a date on a study task and the cascade engine found no downstream shifts needed (zero delta, dates already in range, or already-tight dependency graph), the route silently returned nothing — indistinguishable from the engine not processing the edit at all.
+
+The fix forks the existing silent-noop suppression based on `parsed.mentionable` (set by `classifyWebhookActor()` from the actor-classifier PR #104): human-seed edits (`mentionable === true`) receive positive feedback — a green ❇️ Automation Reporting banner on the edited task and an Activity Log terminal event with status `no_shifts`. Engine-bot seeds (`mentionable === false`) stay silent (loop prevention preserved). Legacy pre-classifier callers (`mentionable === undefined`) emit a `webhook_actor_legacy_fallback` telemetry event and stay silent until they migrate.
+
+Affected routes: `dep-edit.js` (per-reason verdicts: already-tight/no-effective-blockers → green `no_shifts`; seed-frozen → yellow `no_action`; seed-not-found → red `failed`) and `date-cascade.js` (single green `no_shifts` verdict for zero-delta returns). `status-rollup.js` silent-idempotent sites are explicitly preserved with rationale comments (status-rollup is a background child-triggered event, not user-facing).
+
+`ActivityLogService.toStatusName()` gains the `no_shifts` → `'No Shifts'` Notion select mapping. Tags: `BEH-DEP-EDIT-ROUTE-NOOP-*`, `BEH-DATE-CASCADE-ZERO-DELTA-*`.
 
 ### 2026-05-04 — Inception silent batch-abort partial-failure made visible
 

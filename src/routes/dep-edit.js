@@ -19,6 +19,40 @@ function summarizeFailure(error) {
   return `Dep edit cascade failed: ${String(error?.message || error || 'Unknown error').slice(0, 180)}`;
 }
 
+// Per-reason banner and Activity Log shape for human-seed no-ops (R3).
+// seed-frozen and seed-not-found diverge from the success-style default.
+function noShiftsVerdict(reason, cascadeMode) {
+  if (reason === 'seed-frozen') {
+    return {
+      status: 'no_action',
+      noActionReason: 'seed_frozen',
+      bannerColor: 'yellow_background',
+      bannerText: `⚠️ ${cascadeMode} cascade: frozen task — edit not propagated; downstream cascades only fire on active leaves`,
+      summary: (taskName) => `No action: "${taskName}" is frozen — edit not propagated`,
+      errorEvent: null,
+    };
+  }
+  if (reason === 'seed-not-found') {
+    return {
+      status: 'failed',
+      noActionReason: null,
+      bannerColor: 'red_background',
+      bannerText: `❌ ${cascadeMode} cascade: seed task not found — study state may be corrupted`,
+      summary: (taskName) => `Cascade error: "${taskName}" seed not found in study task list`,
+      errorEvent: 'cascade_seed_not_found',
+    };
+  }
+  // Default: already-tight, no-effective-blockers → green success-style.
+  return {
+    status: 'no_shifts',
+    noActionReason: null,
+    bannerColor: 'green_background',
+    bannerText: `❇️ ${cascadeMode} cascade: no shifts needed — downstream already in range`,
+    summary: (taskName) => `No shifts: "${taskName}" — downstream already in range`,
+    errorEvent: null,
+  };
+}
+
 function buildActivityDetails({ parsed, result, parentResult, error, noActionReason }) {
   // Surface seed-task pre/post dates by finding the seed update inside the result.
   // Falls back to webhook payload's refStart/refEnd for the originals (which the
@@ -177,10 +211,6 @@ async function processDepEdit(payload) {
     result = tightenSeedAndDownstream({ seedTaskId: parsed.taskId, tasks: allTasks });
 
     if (result.subcase === 'no-op') {
-      // Silent no-op (matches status-rollup's silent-when-idempotent pattern).
-      // Avoids Activity Log noise for: already-tight chains, frozen seeds,
-      // seeds with no effective blockers, parent-task seeds that bypassed
-      // the Notion filter, etc.
       console.log(JSON.stringify({
         event: 'dep_edit_noop',
         taskId: parsed.taskId,
@@ -188,6 +218,59 @@ async function processDepEdit(payload) {
         studyId: parsed.studyId,
         reason: result.reason,
       }));
+
+      if (parsed.mentionable === undefined) {
+        // Pre-classifier caller — classification unverified. Stay silent and
+        // emit telemetry so any missed parseWebhookPayload migration surfaces.
+        console.log(JSON.stringify({
+          event: 'webhook_actor_legacy_fallback',
+          route: 'dep-edit',
+          reason: 'mentionable_undefined',
+          triggeredByUserId: parsed.triggeredByUserId,
+          editedByBot: parsed.editedByBot,
+        }));
+        return;
+      }
+
+      if (parsed.mentionable === true) {
+        const verdict = noShiftsVerdict(result.reason, 'dep-edit');
+        if (verdict.errorEvent) {
+          console.log(JSON.stringify({
+            event: verdict.errorEvent,
+            taskId: parsed.taskId,
+            taskName: parsed.taskName,
+            studyId: parsed.studyId,
+            reason: result.reason,
+          }));
+        }
+        try {
+          await Promise.all([
+            logTerminalEvent({
+              parsed,
+              status: verdict.status,
+              summary: verdict.summary(parsed.taskName),
+              result,
+              noActionReason: verdict.noActionReason,
+            }),
+            notionClient.patchPage(parsed.taskId, {
+              [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
+                rich_text: [{
+                  type: 'text',
+                  text: { content: verdict.bannerText },
+                  annotations: { color: verdict.bannerColor },
+                }],
+              },
+            }),
+          ]);
+        } catch (noopErr) {
+          // Isolate banner/log writes from the outer cascade catch — a transient
+          // Notion failure here must not produce a second 'failed' Activity Log row.
+          console.warn('[dep-edit] no-op feedback write failed:', noopErr?.message);
+        }
+      }
+      // else: engine seed (mentionable === false). Defensive fall-through.
+      // Under correct upstream classification (dep-edit.js:129's editedByBot guard
+      // already drops bots), this branch is unreachable in production.
       return;
     }
 
