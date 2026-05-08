@@ -3,7 +3,7 @@ title: "fix: Surface positive feedback for user-initiated no-op cascades"
 type: fix
 status: active
 date: 2026-05-07
-origin: "Surfaced 2026-05-07 in a Tem testing session as the user-visible 'engine looks broken' symptom of the post-inception incident. Companion to docs/plans/2026-04-29-002-refactor-webhook-actor-classification-plan.md (which fixes the bot-echo subset of the same incident). Tracked in that plan's Scope Boundaries → Deferred to Follow-Up Work. Status stays draft until the actor-classification plan ships U1+U3+U4 to production — implementation here depends on the `mentionable` flag flowing through the queue."
+origin: "Surfaced 2026-05-07 in a Tem testing session as the user-visible 'engine looks broken' symptom of the post-inception incident. Companion to docs/plans/2026-04-29-002-refactor-webhook-actor-classification-plan.md (which fixes the bot-echo subset of the same incident). Tracked in that plan's Scope Boundaries → Deferred to Follow-Up Work. Risk-A (AUTOMATION_REPORTING-only write loop risk) cleared 2026-05-07: Tem confirmed AUTOMATION_REPORTING is not in the Notion Study Tasks automation trigger-property filter list."
 ---
 
 # fix: Surface positive feedback for user-initiated no-op cascades
