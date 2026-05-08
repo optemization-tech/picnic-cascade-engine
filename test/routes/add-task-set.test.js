@@ -852,6 +852,32 @@ describe('add-task-set route', () => {
     );
   });
 
+  it('bot-button: mentionable=false passed to services when source.type=bot (U3)', async () => {
+    // When a bot integration presses the button (source.type explicitly 'bot'),
+    // the route must pass mentionable:false to downstream services.
+    mocks.mockClient.getPage.mockResolvedValue(mockStudyPage());
+    mocks.fetchBlueprint.mockResolvedValue([]);
+
+    const { req, res } = makeReqRes(
+      {
+        source: { user_id: 'bot-integration-id', type: 'bot' },
+        data: { id: 'study-1' },
+      },
+      { 'x-button-type': 'elite', 'x-parent-task-names': 'Elite Tasks' },
+    );
+
+    await handleAddTaskSet(req, res);
+    await flush();
+
+    // postComment receives mentionable:false — study-comment will not @-mention the bot
+    expect(mocks.studyCommentService.postComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mentionable: false,
+        editedByBot: true,
+      }),
+    );
+  });
+
   // ────────────────────────────────────────────────────────────────────
   // Aborts when study has no Contract Sign Date (fail-loud, no silent
   // "today" fallback). Post-PR-D: empty date → study-page comment + abort.

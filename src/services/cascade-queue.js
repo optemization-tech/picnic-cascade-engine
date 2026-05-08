@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 
 export class CascadeQueue {
   constructor({ debounceMs = 5000 } = {}) {
@@ -24,17 +25,16 @@ export class CascadeQueue {
       // without running processFn. Otherwise fall through to processFn so
       // the route's own guard chain can handle the malformed payload.
       //
-      // Use parseUndoPayload's stricter rule (`!source.user_id && type==='bot'`)
-      // so a button-click webhook with a bot-edited underlying page does NOT
-      // get silently dropped here when its parser throws. This matters most
-      // for the undo route (button-only) — losing its processFn call also
-      // loses the Import Mode disable side-effect on the no-undo-available
-      // path, which can leave a study in Import Mode if the parser throws
-      // during a real recovery click.
+      // Uses button-first priority (the default) so a button-click webhook
+      // with source.user_id present is classified as a human action even if
+      // last_edited_by.type is 'bot'. This preserves the undo route's
+      // Import Mode cleanup side-effect when parseFn throws during a real
+      // recovery click — the no-undo-available path still disables Import Mode.
+      // Property-change routes (date-cascade, dep-edit) have no source.user_id,
+      // so they fall to the lastEditedBy path in the classifier.
       //
       // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1).
-      const isBotPayload = !payload?.source?.user_id
-        && payload?.data?.last_edited_by?.type === 'bot';
+      const isBotPayload = classifyWebhookActor(payload, { sourcePriority: 'edit-first' }).editedByBot;
       if (isBotPayload) {
         console.log(JSON.stringify({
           event: 'cascade_bot_echo_dropped',

@@ -1041,4 +1041,48 @@ describe('inception route', () => {
       expect(details.timing?.phases?.createStudyTasks).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe('actor classification — mentionable propagation', () => {
+    beforeEach(() => {
+      mocks.mockClient.getPage.mockResolvedValue({
+        properties: {
+          [S.CONTRACT_SIGN_DATE.name]: { id: S.CONTRACT_SIGN_DATE.id, type: 'date', date: { start: '2026-01-15' } },
+          [S.STUDY_NAME.name]: { id: S.STUDY_NAME.id, type: 'title', title: [{ text: { content: 'Test Study' } }] },
+        },
+      });
+      mocks.mockClient.queryDatabase.mockResolvedValue([]);
+      mocks.fetchBlueprint.mockResolvedValue([{ id: 'bp-1', properties: {} }]);
+      mocks.buildTaskTree.mockReturnValue([]);
+      mocks.createStudyTasks.mockResolvedValue({ idMapping: { 'bp-1': 'new-1' }, totalCreated: 1, depTracking: [], parentTracking: [] });
+      mocks.wireRemainingRelations.mockResolvedValue({ parentsPatchedCount: 0, depsPatchedCount: 0 });
+      mocks.prefetchTemplateBlocks.mockResolvedValue({});
+      mocks.copyBlocks.mockResolvedValue({ blocksWrittenCount: 0, pagesProcessed: 0, pagesSkipped: 0 });
+    });
+
+    it('passes mentionable=true to activity log when source.user_id identifies a person', async () => {
+      const { req, res } = makeReqRes({
+        studyPageId: 'study-1',
+        source: { user_id: 'user-xyz', type: 'person' },
+      });
+      await handleInception(req, res);
+      await flush();
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ mentionable: true, triggeredByUserId: 'user-xyz' }),
+      );
+    });
+
+    it('passes mentionable=false to activity log when no source.user_id (bot-authored webhook)', async () => {
+      const { req, res } = makeReqRes({
+        studyPageId: 'study-1',
+        data: { last_edited_by: { id: 'bot-111', type: 'bot' } },
+      });
+      await handleInception(req, res);
+      await flush();
+
+      expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ mentionable: false, editedByBot: true }),
+      );
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { cascadeClient as notionClient, commentClient } from '../notion/clients.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { undoStore } from '../services/undo-store.js';
@@ -20,9 +21,7 @@ async function processUndoCascade(payload) {
     return;
   }
 
-  // source.user_id is the actual button clicker; data.last_edited_by is whoever last edited the page.
-  const triggeredByUserId = payload?.source?.user_id || payload?.data?.last_edited_by?.id || null;
-  const editedByBot = !payload?.source?.user_id && payload?.data?.last_edited_by?.type === 'bot';
+  const { triggeredByUserId, editedByBot, mentionable } = classifyWebhookActor(payload, { route: 'undo-cascade' });
 
   const entry = undoStore.peek(studyId);
   if (!entry) {
@@ -33,6 +32,7 @@ async function processUndoCascade(payload) {
       triggerType: 'Manual',
       triggeredByUserId,
       editedByBot,
+      mentionable,
       studyId,
       summary: 'Undo requested but no recent cascade available',
       details: { noActionReason: 'no_undo_available' },
@@ -99,6 +99,7 @@ async function processUndoCascade(payload) {
       triggerType: 'Manual',
       triggeredByUserId,
       editedByBot,
+      mentionable,
       sourceTaskId: entry.sourceTaskId || null,
       sourceTaskName,
       cascadeMode,
@@ -128,6 +129,7 @@ async function processUndoCascade(payload) {
         triggerType: 'Manual',
         triggeredByUserId,
         editedByBot,
+        mentionable,
         sourceTaskId: entry.sourceTaskId || null,
         sourceTaskName,
         cascadeMode,
@@ -144,6 +146,7 @@ async function processUndoCascade(payload) {
         sourceTaskName,
         triggeredByUserId,
         editedByBot,
+        mentionable,
         summary: `Undo failed: ${String(error.message || error).slice(0, 180)}`,
       });
     } catch { /* comment failure must not mask original error */ }
@@ -167,12 +170,8 @@ async function processUndoCascade(payload) {
 // docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1 step 5).
 export function parseUndoPayload(payload) {
   const studyId = payload?.data?.studyId || payload?.studyId || payload?.data?.id || payload?.source?.id;
-  // Stricter definition than the standard parseWebhookPayload: a button click
-  // carries source.user_id (the actual clicker), and we must NOT classify that
-  // as a bot edit even when last_edited_by.type === 'bot' on the underlying
-  // page. Mirrors the existing inline check inside processUndoCascade (line 25).
-  const editedByBot = !payload?.source?.user_id && payload?.data?.last_edited_by?.type === 'bot';
-  return { skip: false, taskId: '__undo__', studyId, editedByBot };
+  const actor = classifyWebhookActor(payload, { route: 'undo-cascade' });
+  return { skip: false, taskId: '__undo__', studyId, editedByBot: actor.editedByBot, mentionable: actor.mentionable };
 }
 
 export async function handleUndoCascade(req, res) {

@@ -37,6 +37,13 @@ describe('guards parseWebhookPayload', () => {
     expect(parsed.endDelta).toBe(0);
   });
 
+  it('includes mentionable and userType from classifier (U4)', () => {
+    const parsed = parseWebhookPayload(buildPayload());
+    expect(parsed.mentionable).toBe(true);
+    expect(parsed.userType).toBe('person');
+    expect(parsed.editedByBot).toBe(false);
+  });
+
   it('handles missing page id as skip', () => {
     const parsed = parseWebhookPayload({ body: { data: { properties: {} } } });
     expect(parsed.skip).toBe(true);
@@ -96,10 +103,27 @@ describe('guards parseWebhookPayload', () => {
   });
 
   // @behavior BEH-DEBOUNCE-ECHO
-  it('sets editedByBot false when last_edited_by is missing', () => {
+  it('sets editedByBot true when last_edited_by is missing (conservative unknown → non-person)', () => {
+    // R6 behavior-change: old Pattern B returned false (bug).
+    // New: missing last_edited_by → userType='unknown' → editedByBot=true, prevents bot-on-bot loops.
     const payload = buildPayload();
     delete payload.body.data.last_edited_by;
-    expect(parseWebhookPayload(payload).editedByBot).toBe(false);
+    expect(parseWebhookPayload(payload).editedByBot).toBe(true);
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('sets editedByBot true when last_edited_by.id present but type missing', () => {
+    // R6 behavior-change: missing type field → userType='unknown' → editedByBot=true.
+    const payload = buildPayload();
+    payload.body.data.last_edited_by = { id: 'ambiguous-id' };
+    expect(parseWebhookPayload(payload).editedByBot).toBe(true);
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('sets editedByBot true when last_edited_by.type is integration — 2026-05-07 incident fix', () => {
+    const payload = buildPayload();
+    payload.body.data.last_edited_by = { id: 'bot-integration-id', type: 'integration' };
+    expect(parseWebhookPayload(payload).editedByBot).toBe(true);
   });
 });
 

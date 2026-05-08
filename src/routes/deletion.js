@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { deletionClient as notionClient, commentClient } from '../notion/clients.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 import { deleteStudyTasks } from '../provisioning/deletion.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
@@ -18,9 +19,7 @@ async function processDeletion(body) {
     return;
   }
 
-  // source.user_id is the actual button clicker; data.last_edited_by is whoever last edited the page.
-  const triggeredByUserId = body.source?.user_id || body.data?.last_edited_by?.id || null;
-  const editedByBot = !body.source?.user_id && body.data?.last_edited_by?.type === 'bot';
+  const { triggeredByUserId, editedByBot, mentionable } = classifyWebhookActor(body, { route: 'deletion' });
 
   const tracer = new CascadeTracer();
   tracer.set('study_id', studyId);
@@ -45,6 +44,7 @@ async function processDeletion(body) {
         triggerType: 'Manual',
         triggeredByUserId,
         editedByBot,
+        mentionable,
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
@@ -81,6 +81,7 @@ async function processDeletion(body) {
           triggerType: 'Manual',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           executionId: tracer.cascadeId,
           timestamp: new Date().toISOString(),
           cascadeMode: 'N/A',
@@ -103,6 +104,7 @@ async function processDeletion(body) {
           sourceTaskName: `Study ${studyId.substring(0, 8)}`,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: `Task deletion failed: ${String(error.message || error).slice(0, 180)}`,
         }).catch(() => {}),
       ]);

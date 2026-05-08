@@ -6,6 +6,7 @@ import {
   addBusinessDays,
 } from '../utils/business-days.js';
 import { STUDY_TASKS_PROPS, findById } from '../notion/property-names.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 
 /**
  * Parse Notion webhook payload into a normalized task edit object.
@@ -93,8 +94,7 @@ export function parseWebhookPayload(payload) {
     parentTaskId: parentRel[0]?.id || null,
     hasParent: parentRel.length > 0,
     hasSubtasks: subtaskRel.length > 0,
-    triggeredByUserId: data?.last_edited_by?.id || null,
-    editedByBot: data?.last_edited_by?.type === 'bot',
+    ...classifyWebhookActor(payload, { sourcePriority: 'edit-first', route: 'guards' }),
     executionId,
     rawProperties: props,
   };

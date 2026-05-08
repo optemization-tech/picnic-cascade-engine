@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { provisionClient as notionClient, commentClient } from '../notion/clients.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 import { copyBlocks } from '../provisioning/copy-blocks.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
@@ -109,9 +110,7 @@ async function processAddTaskSet(req) {
     : [];
   const studyPageId = body.data?.id || body.studyPageId;
 
-  // source.user_id is the actual button clicker; data.last_edited_by is whoever last edited the page.
-  const triggeredByUserId = body.source?.user_id || body.data?.last_edited_by?.id || null;
-  const editedByBot = !body.source?.user_id && body.data?.last_edited_by?.type === 'bot';
+  const { triggeredByUserId, editedByBot, mentionable } = classifyWebhookActor(body, { route: 'add-task-set' });
 
   if (!studyPageId) {
     console.warn('[add-task-set] no studyPageId in payload, skipping');
@@ -205,6 +204,7 @@ async function processAddTaskSet(req) {
           triggerType: 'Automation',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           sourceTaskName: `${studyName} (${buttonType})`,
           studyId: studyPageId,
           summary: emptyDateSummary,
@@ -216,6 +216,7 @@ async function processAddTaskSet(req) {
           sourceTaskName: `${studyName} (${buttonType})`,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: emptyDateSummary,
         }).catch(() => {}),
       ]);
@@ -231,6 +232,7 @@ async function processAddTaskSet(req) {
           triggerType: 'Automation',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           sourceTaskName: `${studyName} (${buttonType})`,
           studyId: studyPageId,
           summary: 'No blueprint tasks found',
@@ -242,6 +244,7 @@ async function processAddTaskSet(req) {
           sourceTaskName: `${studyName} (${buttonType})`,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: 'No blueprint tasks found',
         }).catch(() => {}),
       ]);
@@ -267,6 +270,7 @@ async function processAddTaskSet(req) {
           triggerType: 'Automation',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           sourceTaskName: `${studyName} (${buttonType})`,
           studyId: studyPageId,
           summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
@@ -278,6 +282,7 @@ async function processAddTaskSet(req) {
           sourceTaskName: `${studyName} (${buttonType})`,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: `No matching blueprint subtree for: ${parentTaskNames.join(', ')}`,
         }).catch(() => {}),
       ]);
@@ -579,6 +584,7 @@ async function processAddTaskSet(req) {
         triggerType: 'Automation',
         triggeredByUserId,
         editedByBot,
+        mentionable,
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
@@ -633,6 +639,7 @@ async function processAddTaskSet(req) {
         triggerType: 'Automation',
         triggeredByUserId,
         editedByBot,
+        mentionable,
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
@@ -656,6 +663,7 @@ async function processAddTaskSet(req) {
         sourceTaskName: studyName ? `${studyName} (${buttonType})` : buttonType,
         triggeredByUserId,
         editedByBot,
+        mentionable,
         summary: `Failed to add ${buttonType} tasks: ${String(error.message || error).slice(0, 180)}`,
       }).catch(() => {}),
     ]);

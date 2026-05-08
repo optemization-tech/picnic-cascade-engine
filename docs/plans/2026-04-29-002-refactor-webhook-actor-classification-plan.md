@@ -1,7 +1,7 @@
 ---
 title: "refactor: Unify webhook actor classification (person vs bot) across routes and services"
 type: refactor
-status: draft
+status: completed
 date: 2026-04-29
 origin: "Meg Apr 29 002 test surfaced `[activity-log] Cannot mention bots: 33723867-…` 400; defensive retry shipped as activity-log bridge fix (this plan = Option B follow-up)"
 ---

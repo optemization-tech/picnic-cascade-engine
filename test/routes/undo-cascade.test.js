@@ -220,6 +220,44 @@ describe('undo-cascade route', () => {
     );
   });
 
+  it('passes mentionable=true when source.user_id identifies a person clicker', async () => {
+    mocks.undoStore.peek.mockReturnValue({
+      cascadeId: 'c1',
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source Task',
+      cascadeMode: 'push-right',
+      manifest: { 'task-a': { oldStart: '2026-04-01', oldEnd: '2026-04-02', newStart: '2026-04-03', newEnd: '2026-04-04' } },
+      timestamp: Date.now(),
+    });
+
+    const { req, res } = makeReqRes({
+      source: { user_id: 'user-abc123', type: 'person' },
+      data: { studyId: 'study-1' },
+    });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ mentionable: true, triggeredByUserId: 'user-abc123' }),
+    );
+  });
+
+  it('passes mentionable=false when last_edited_by type is bot', async () => {
+    mocks.undoStore.peek.mockReturnValue(null);
+
+    const { req, res } = makeReqRes({
+      data: { studyId: 'study-1', last_edited_by: { id: 'bot-xyz', type: 'bot' } },
+    });
+    await handleUndoCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ mentionable: false, editedByBot: true }),
+    );
+  });
+
   it('disables Import Mode after successful undo', async () => {
     mocks.undoStore.peek.mockReturnValue({
       cascadeId: 'c1',
@@ -385,9 +423,12 @@ describe('parseUndoPayload', () => {
     expect(parsed.editedByBot).toBe(false);
   });
 
-  it('returns editedByBot=false when last_edited_by is missing', () => {
+  it('returns editedByBot=true when last_edited_by is missing (conservative unknown → non-person)', () => {
+    // R6 behavior-change: old Pattern A returned false (bug — leaked unknown actors as non-bot).
+    // New classifier: missing last_edited_by + no source.user_id → userType='unknown' → editedByBot=true.
+    // This prevents a future bot-on-bot loop if cascade-queue's front-door gate reads this flag.
     const parsed = parseUndoPayload({ data: { studyId: 'study-1' } });
-    expect(parsed.editedByBot).toBe(false);
+    expect(parsed.editedByBot).toBe(true);
   });
 
   it('still returns the existing studyId/taskId/skip fields unchanged', () => {

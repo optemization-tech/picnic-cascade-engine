@@ -170,9 +170,13 @@ export class ActivityLogService {
 
     if (event.sourceTaskId) properties[ACTIVITY_LOG_PROPS.STUDY_TASKS.id] = { relation: [{ id: event.sourceTaskId }] };
     if (event.studyId) properties[ACTIVITY_LOG_PROPS.STUDY.id] = { relation: [{ id: event.studyId }] };
-    // 'Tested by' — only set for real person IDs. Bot/integration user IDs
-    // cause Notion 400 errors (wasting ~8s in retries with exponential backoff).
-    if (event.triggeredByUserId && !event.editedByBot) {
+    // 'Tested by' — only set for mentionable (real person) user IDs.
+    // Prefer event.mentionable when present (set by classifyWebhookActor); fall
+    // back to legacy flag derivation so caller routes don't need updating yet.
+    const isMentionable = event.mentionable != null
+      ? event.mentionable
+      : (!!event.triggeredByUserId && !event.editedByBot);
+    if (isMentionable) {
       properties[ACTIVITY_LOG_PROPS.TESTED_BY.id] = { people: [{ id: event.triggeredByUserId }] };
     }
     const totalMs = event.details?.timing?.totalMs;
