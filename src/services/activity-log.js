@@ -18,6 +18,7 @@ function toTitle(workflow, sourceTaskName) {
 function toStatusName(status) {
   if (status === 'failed') return 'Failed';
   if (status === 'no_action') return 'No Action';
+  if (status === 'no_shifts') return 'No Shifts';
   return 'Success';
 }
 
