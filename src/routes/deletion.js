@@ -81,6 +81,7 @@ async function processDeletion(body) {
           triggerType: 'Manual',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           executionId: tracer.cascadeId,
           timestamp: new Date().toISOString(),
           cascadeMode: 'N/A',
@@ -103,6 +104,7 @@ async function processDeletion(body) {
           sourceTaskName: `Study ${studyId.substring(0, 8)}`,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: `Task deletion failed: ${String(error.message || error).slice(0, 180)}`,
         }).catch(() => {}),
       ]);

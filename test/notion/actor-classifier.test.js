@@ -252,7 +252,7 @@ describe('classifyWebhookActor — telemetry (webhook_actor_misclassified)', () 
     const logged = JSON.parse(spy.mock.calls[0][0]);
     expect(logged).toMatchObject({
       event: 'webhook_actor_misclassified',
-      userId: BOT_USER_ID,
+      userId: BOT_USER_ID.slice(0, 8),
       userType: 'bot',
       route: 'inception',
       sourcePriority: 'button-first',
@@ -261,19 +261,17 @@ describe('classifyWebhookActor — telemetry (webhook_actor_misclassified)', () 
     });
   });
 
-  it('emits log line for integration type in edit-first path', () => {
+  it('does NOT emit for edit-first integration type (noise suppressed — only button-first is telemetry-worthy)', () => {
     // Legacy: !source.user_id(true) && type==='bot'(false) → false
-    // New:    userType==='integration' → editedByBot: true → disagreement
+    // New:    userType==='integration' → editedByBot: true → would disagree
+    // But R7 fix: telemetry is gated on sourcePriority === 'button-first' to prevent
+    // high-volume noise from every property-change webhook from an integration.
     const spy = vi.spyOn(console, 'log');
     classifyWebhookActor(
       editPayload({ id: BOT_USER_ID, type: 'integration' }),
       { sourcePriority: 'edit-first', knownBotIds: KNOWN_BOTS, route: 'dep-edit' },
     );
-    expect(spy).toHaveBeenCalledOnce();
-    const logged = JSON.parse(spy.mock.calls[0][0]);
-    expect(logged.event).toBe('webhook_actor_misclassified');
-    expect(logged.legacyEditedByBot).toBe(false);
-    expect(logged.newEditedByBot).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it('does NOT emit log for a real person button press', () => {

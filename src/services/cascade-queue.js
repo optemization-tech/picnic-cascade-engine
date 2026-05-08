@@ -34,7 +34,7 @@ export class CascadeQueue {
       // so they fall to the lastEditedBy path in the classifier.
       //
       // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1).
-      const isBotPayload = classifyWebhookActor(payload).editedByBot;
+      const isBotPayload = classifyWebhookActor(payload, { sourcePriority: 'edit-first' }).editedByBot;
       if (isBotPayload) {
         console.log(JSON.stringify({
           event: 'cascade_bot_echo_dropped',

@@ -21,7 +21,10 @@
  * Defaults to empty — if never populated, the allowlist path is inactive and
  * the classifier falls back to treating unknown source.user_id as 'person'.
  */
-export const KNOWN_BOT_IDS = new Set();
+const KNOWN_BOT_IDS = new Set();
+
+/** Register a known bot integration id at startup (e.g. from /v1/users/me). */
+export function registerBotId(id) { KNOWN_BOT_IDS.add(id); }
 
 /**
  * @param {object|null|undefined} payload  Raw webhook body or { body: ... } wrapper.
@@ -45,7 +48,7 @@ export function classifyWebhookActor(payload, {
   let candidate;
   let rawType;
 
-  if (sourcePriority === 'button-first' && source?.user_id) {
+  if (sourcePriority === 'button-first' && typeof source?.user_id === 'string' && source.user_id.length > 0) {
     // Button-trigger path: source.user_id is the authoritative actor.
     // Type fallback chain (in priority order):
     //   1. source.type, when Notion populates it explicitly
@@ -76,10 +79,10 @@ export function classifyWebhookActor(payload, {
   // U5 telemetry: emit when legacy Pattern A would have classified differently.
   // Legacy Pattern A: editedByBot = !source?.user_id && last_edited_by?.type === 'bot'
   const legacyEditedByBot = !source?.user_id && lastEditedBy?.type === 'bot';
-  if (legacyEditedByBot !== editedByBot) {
+  if (sourcePriority === 'button-first' && legacyEditedByBot !== editedByBot) {
     console.log(JSON.stringify({
       event: 'webhook_actor_misclassified',
-      userId,
+      userId: userId?.slice(0, 8),
       userType,
       route: route ?? 'unknown',
       sourcePriority,

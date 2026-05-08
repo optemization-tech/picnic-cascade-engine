@@ -730,6 +730,7 @@ describe('migrate-study-service', () => {
           studyCommentService,
           triggeredByUserId: null,
           editedByBot: false,
+          mentionable: false,
           studyNameFallback: null,
         },
       );
