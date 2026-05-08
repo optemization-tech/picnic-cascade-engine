@@ -79,6 +79,15 @@ async function processStatusRollup(payload) {
     const desiredStatus = mapRollupStatusToNotion(computeStatusRollup(children));
     const currentStatus = changedById[STUDY_TASKS_PROPS.STATUS.id]?.status?.name || 'Not started';
 
+    // Silent idempotent return — no Activity Log feedback for human seeds here.
+    // Rationale (R5 sweep): A user set the parent status to a value that
+    // already matches what the children compute. No change needed and the
+    // next webhook would carry an identical status, so this path is
+    // effectively self-cancelling. The user-visible change is that nothing
+    // happened to the parent — the correct outcome. Adding a banner here
+    // would suggest the engine "processed" an edit that produced no diff,
+    // which is misleading. Engine-bot echos also reach this site, making
+    // the mentionable fork unreliable without deeper classification.
     if (desiredStatus === currentStatus) return;
 
     await notionClient.patchPage(changedTask.id, {
@@ -137,6 +146,15 @@ async function processStatusRollup(payload) {
   const siblings = siblingPages.map(normalizeTask);
   const desiredStatus = mapRollupStatusToNotion(computeStatusRollup(siblings));
 
+  // Silent idempotent return — no Activity Log feedback for human seeds here.
+  // Rationale (R5 sweep): This is Branch 2 (leaf subtask → parent rollup).
+  // The trigger is a subtask status change, not a direct user edit of the
+  // parent. The parent's computed status already matches what's stored, so
+  // no write is needed. This path is engine-internal — the "actor" is the
+  // cascade system responding to a subtask event, not a user acting on the
+  // parent. Extending the feedback fork here would require pulling parsed
+  // actor context for the parent page (a different page than the changed
+  // task), adding complexity without clear user-facing benefit.
   if (desiredStatus === parentStatus) return;
 
   await notionClient.patchPage(changedTask.parentId, {
