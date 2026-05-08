@@ -27,12 +27,12 @@ const server = app.listen(config.port, () => {
   (async () => {
     // Resolve bot user IDs for all token pools so classifyWebhookActor can
     // fall back to the KNOWN_BOT_IDS allowlist when source.type is absent.
-    await registerBotIds([
+    await registerBotIds([...new Set([
       ...config.notion.tokens,
       ...config.notion.provisionTokens,
       ...config.notion.deletionTokens,
       ...config.notion.commentTokens,
-    ]);
+    ])]);
 
     // Clear stuck Import Mode from studies left ON by prior crashes/OOM/SIGKILL.
     const sweepTokens = config.notion.provisionTokens.length > 0
@@ -40,7 +40,7 @@ const server = app.listen(config.port, () => {
       : config.notion.tokens;
     const sweepClient = new NotionClient({ tokens: sweepTokens });
     await sweepStuckImportMode(sweepClient, config.notion.studiesDbId);
-  })();
+  })().catch((err) => console.error(JSON.stringify({ event: 'boot_sequence_error', error: err.message })));
 });
 
 // Graceful shutdown — drain in-flight cascade before exit

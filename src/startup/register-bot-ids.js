@@ -1,17 +1,18 @@
-import { registerBotId } from '../notion/actor-classifier.js';
+/**
+ * Startup boot step: resolves each integration token's bot user ID via
+ * GET /v1/users/me and registers it so classifyWebhookActor can fall back
+ * to the KNOWN_BOT_IDS allowlist when source.type is absent from a webhook.
+ *
+ * Runs once after app.listen() resolves. Non-blocking — the server accepts
+ * webhooks immediately. Never throws — all per-token errors are contained
+ * by Promise.allSettled.
+ */
 
-const NOTION_BASE = 'https://api.notion.com/v1';
-const NOTION_VERSION = '2022-06-28';
+import { registerBotId } from '../notion/actor-classifier.js';
+import { NOTION_BASE, NOTION_VERSION } from '../notion/client.js';
 
 /**
- * Resolve the bot user ID for each integration token by calling /v1/users/me,
- * then register each ID so classifyWebhookActor can fall back to the allowlist
- * when source.type is absent from a webhook payload.
- *
- * Non-blocking: failures for individual tokens are tolerated.
- * Never throws — all errors are contained by Promise.allSettled.
- *
- * @param {string[]} tokens  All integration tokens across all pools.
+ * @param {string[]} tokens  Deduplicated integration tokens across all pools.
  * @returns {Promise<{ registered: number, failed: number }>}
  */
 export async function registerBotIds(tokens) {
@@ -31,7 +32,8 @@ export async function registerBotIds(tokens) {
       });
       if (!response.ok) throw new Error(`/users/me returned ${response.status}`);
       const data = await response.json();
-      if (data.id) registerBotId(data.id);
+      if (!data.id) throw new Error('/users/me returned ok but response has no id field');
+      registerBotId(data.id);
       return data.id;
     }),
   );

@@ -26,7 +26,6 @@ describe('registerBotIds', () => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -88,6 +87,11 @@ describe('registerBotIds', () => {
     expect(result).toEqual({ registered: 0, failed: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(registerBotId).not.toHaveBeenCalled();
+
+    const logCall = console.log.mock.calls.find(
+      (c) => typeof c[0] === 'string' && c[0].includes('bot_ids_registered'),
+    );
+    expect(JSON.parse(logCall[0])).toEqual({ event: 'bot_ids_registered', registered: 0, failed: 0 });
   });
 
   it('counts timeout as a failure and registers remaining tokens', async () => {
@@ -100,6 +104,18 @@ describe('registerBotIds', () => {
 
     expect(result).toEqual({ registered: 1, failed: 1 });
     expect(registerBotId).toHaveBeenCalledWith('bot-2');
+  });
+
+  it('counts as failed when 200 response has no id field', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ type: 'bot' }),
+    });
+
+    const result = await registerBotIds(['token-a']);
+
+    expect(result).toEqual({ registered: 0, failed: 1 });
+    expect(registerBotId).not.toHaveBeenCalled();
   });
 
   it('calls registerBotId twice when two tokens return the same ID (Set dedup is in actor-classifier)', async () => {
