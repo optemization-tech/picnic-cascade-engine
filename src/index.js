@@ -4,6 +4,7 @@ import { cascadeQueue } from './services/cascade-queue.js';
 import { flightTracker } from './services/flight-tracker.js';
 import { NotionClient } from './notion/client.js';
 import { sweepStuckImportMode } from './startup/import-mode-sweep.js';
+import { registerBotIds } from './startup/register-bot-ids.js';
 
 const app = createServer();
 
@@ -22,13 +23,22 @@ const server = app.listen(config.port, () => {
   console.log(`  POST /webhook/undo-cascade`);
   console.log(`  GET  /health`);
 
-  // Safety net: clear stuck Import Mode from prior crashes/OOM/SIGKILL.
-  // Runs async — server accepts webhooks immediately while this completes.
+  // Startup boot sequence — runs async, server accepts webhooks immediately.
   (async () => {
-    const tokens = config.notion.provisionTokens.length > 0
+    // Resolve bot user IDs for all token pools so classifyWebhookActor can
+    // fall back to the KNOWN_BOT_IDS allowlist when source.type is absent.
+    await registerBotIds([
+      ...config.notion.tokens,
+      ...config.notion.provisionTokens,
+      ...config.notion.deletionTokens,
+      ...config.notion.commentTokens,
+    ]);
+
+    // Clear stuck Import Mode from studies left ON by prior crashes/OOM/SIGKILL.
+    const sweepTokens = config.notion.provisionTokens.length > 0
       ? config.notion.provisionTokens
       : config.notion.tokens;
-    const sweepClient = new NotionClient({ tokens });
+    const sweepClient = new NotionClient({ tokens: sweepTokens });
     await sweepStuckImportMode(sweepClient, config.notion.studiesDbId);
   })();
 });
