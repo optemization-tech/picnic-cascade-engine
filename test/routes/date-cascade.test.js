@@ -211,6 +211,42 @@ describe('date-cascade route safety', () => {
     expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
+  it('absorbs patchPage failure in inner try/catch on zero delta — Activity Log written once, no silent queue swallow', async () => {
+    // Verifies M-P1-2 fix: zero_delta Promise.all is wrapped in its own try/catch.
+    // A transient patchPage rejection must not escape to the queue's error handler.
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'task-1',
+      taskName: 'Task 1',
+      studyId: 'study-1',
+      startDelta: 0,
+      endDelta: 0,
+      mentionable: true,
+      triggeredByUserId: 'user-1',
+      editedByBot: false,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.mockClient.patchPage.mockRejectedValue(new Error('Notion 429'));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    // logTerminalEvent resolved before patchPage rejected — exactly one entry.
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledTimes(1);
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'no_shifts' }),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[date-cascade] zero_delta feedback write failed'),
+      expect.any(String),
+    );
+    warnSpy.mockRestore();
+  });
+
   it('snaps a weekend source edit forward before classification and patching', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,

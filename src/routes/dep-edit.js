@@ -243,24 +243,30 @@ async function processDepEdit(payload) {
             reason: result.reason,
           }));
         }
-        await Promise.all([
-          logTerminalEvent({
-            parsed,
-            status: verdict.status,
-            summary: verdict.summary(parsed.taskName),
-            result,
-            noActionReason: verdict.noActionReason,
-          }),
-          notionClient.patchPage(parsed.taskId, {
-            [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
-              rich_text: [{
-                type: 'text',
-                text: { content: verdict.bannerText },
-                annotations: { color: verdict.bannerColor },
-              }],
-            },
-          }),
-        ]);
+        try {
+          await Promise.all([
+            logTerminalEvent({
+              parsed,
+              status: verdict.status,
+              summary: verdict.summary(parsed.taskName),
+              result,
+              noActionReason: verdict.noActionReason,
+            }),
+            notionClient.patchPage(parsed.taskId, {
+              [STUDY_TASKS_PROPS.AUTOMATION_REPORTING.id]: {
+                rich_text: [{
+                  type: 'text',
+                  text: { content: verdict.bannerText },
+                  annotations: { color: verdict.bannerColor },
+                }],
+              },
+            }),
+          ]);
+        } catch (noopErr) {
+          // Isolate banner/log writes from the outer cascade catch — a transient
+          // Notion failure here must not produce a second 'failed' Activity Log row.
+          console.warn('[dep-edit] no-op feedback write failed:', noopErr?.message);
+        }
       }
       // else: engine seed (mentionable === false). Defensive fall-through.
       // Under correct upstream classification (dep-edit.js:129's editedByBot guard

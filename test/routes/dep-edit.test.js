@@ -302,7 +302,11 @@ describe('handleDepEdit', () => {
         await new Promise((r) => setImmediate(r));
 
         expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
-          expect.objectContaining({ status: 'no_action', summary: expect.stringContaining('frozen') }),
+          expect.objectContaining({
+            status: 'no_action',
+            summary: expect.stringContaining('frozen'),
+            details: expect.objectContaining({ noActionReason: 'seed_frozen' }),
+          }),
         );
         assertBanner('yellow_background', 'frozen task');
       });
@@ -346,6 +350,35 @@ describe('handleDepEdit', () => {
 
         expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
         expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+      });
+
+      it('absorbs patchPage failure in inner try/catch — Activity Log written exactly once, outer catch not triggered', async () => {
+        // Verifies M-P1-1 fix: noop Promise.all is isolated from the outer try/catch.
+        // If patchPage rejects, logTerminalEvent must have already been called once
+        // (no_shifts), and the outer catch must NOT fire a second failed entry.
+        mocks.parseWebhookPayload.mockReturnValue(happyParsed({ mentionable: true }));
+        mocks.queryStudyTasks.mockResolvedValue([{ id: 'task-1' }]);
+        mocks.tightenSeedAndDownstream.mockReturnValue(makeNoopResult('already-tight'));
+        mocks.activityLogService.logTerminalEvent.mockResolvedValue({ logged: true });
+        mocks.mockClient.patchPage.mockRejectedValue(new Error('Notion 429'));
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const { req, res } = makeReqRes({ source: { id: 'task-1' } });
+        await handleDepEdit(req, res);
+        await new Promise((r) => setImmediate(r));
+
+        // Inner catch absorbed the error — exactly one Activity Log entry, no failure row.
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledTimes(1);
+        expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ status: 'no_shifts' }),
+        );
+        // Outer catch must not have fired — no study comment posted.
+        expect(mocks.studyCommentService.postComment).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('[dep-edit] no-op feedback write failed'),
+          expect.any(String),
+        );
+        warnSpy.mockRestore();
       });
     });
   });

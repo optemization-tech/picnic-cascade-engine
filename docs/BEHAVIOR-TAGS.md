@@ -37,6 +37,10 @@ For the behavior contract itself (governance matrix, cross-chain algorithm, chan
 - `BEH-GUARD-IMPORT-MODE`: Route guards skip cascades while Import Mode is active.
 - `BEH-DEBOUNCE-ECHO`: The cascade queue treats bot echo webhooks as debounced noise instead of user edits.
 - `BEH-AUTOMATION-REPORTING`: Success, failure, and no-action outcomes are surfaced consistently in automation reporting and activity logs.
+- `BEH-DATE-CASCADE-ZERO-DELTA-SILENT-ENGINE-SEED`: On zero-delta webhooks (`startDelta === 0 && endDelta === 0`) with `mentionable: false` (engine-seed defensive path), `processDateCascade` returns without any write — loop-prevention.
+- `BEH-DATE-CASCADE-ZERO-DELTA-LEGACY-FALLBACK`: On zero-delta with `mentionable: undefined` (pre-classifier caller), the route stays silent and emits `webhook_actor_legacy_fallback` telemetry — no banner, no Activity Log write.
+- `BEH-DATE-CASCADE-ZERO-DELTA-HUMAN-FEEDBACK`: On zero-delta with `mentionable: true` (human seed), the route writes a green `❇️` `AUTOMATION_REPORTING` banner and logs a `no_shifts` Activity Log entry. No study task query is performed.
+- `BEH-DATE-CASCADE-ZERO-DELTA-LOOP-PREVENTION`: An engine-seed echo on zero-delta (`mentionable: false`, `editedByBot: false`) reaches the defensive else-branch and returns without any write — prevents a banner-write feedback loop.
 
 ## 5) Dep-Edit Cascade
 
@@ -66,7 +70,7 @@ Engine helper (`tightenSeedAndDownstream`):
 Route (`processDepEdit` in `src/routes/dep-edit.js`):
 - `BEH-DEP-EDIT-ROUTE-VIOLATION`: Webhook → cascade runs → `patchPages` writes the seed and downstream → Activity Log records `cascadeMode: 'dep-edit'` with `details.subcase: 'violation'`.
 - `BEH-DEP-EDIT-ROUTE-GAP`: Same flow as violation but `details.subcase: 'gap'`.
-- `BEH-DEP-EDIT-ROUTE-NOOP-SILENT`: When the helper returns `subcase: 'no-op'`, the route writes nothing and skips Activity Log entirely (avoids noise on idempotent triggers).
+- `BEH-DEP-EDIT-ROUTE-NOOP-SILENT`: When the helper returns `subcase: 'no-op'` and `parsed.mentionable` is `false` (engine-seed defensive path), the route writes nothing and skips Activity Log (loop-prevention; under correct upstream classification this branch is unreachable in production). Human-seed no-ops (`mentionable: true`) instead emit a green banner and `no_shifts` Activity Log entry — see BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK.
 - `BEH-DEP-EDIT-ROUTE-EDITED-BY-BOT`: `parsed.editedByBot === true` short-circuits before any Notion read or Activity Log write (defense-in-depth alongside Notion automation filter and `cascadeQueue` echo guard).
 - `BEH-DEP-EDIT-ROUTE-NO-DATES`: `parsed.hasDates === false` short-circuits.
 - `BEH-DEP-EDIT-ROUTE-PARENT-TASK`: `parsed.hasSubtasks === true` short-circuits (parent-task exclusion at the route layer).
@@ -84,6 +88,12 @@ Route (`processDepEdit` in `src/routes/dep-edit.js`):
 - `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-FAILURE-CONTEXT`: When `patchPages` throws after `tightenSeedAndDownstream` and `runParentSubtask` have computed updates, the failure-path Activity Log row preserves rollup context (`rollUpCount`, `rollUpTaskIds`) alongside the cascade context.
 - `BEH-DEP-EDIT-ROUTE-PARENT-ROLLUP-HELPER-THROWS`: When `runParentSubtask` itself throws (e.g., malformed taskById), `parentResult` stays null but the failure-path Activity Log row still preserves the leaf cascade context (`subcase`, `movement.movedTaskIds`, `movement.updatedCount: leaf only`). `patchPages` is not called.
 - `BEH-DEP-EDIT-ROUTE-NOOP-SKIPS-ROLLUP`: When `subcase === 'no-op'`, the route returns silently before invoking `runParentSubtask` (preserves the no-Activity-Log-noise property and avoids redundant work).
+- `BEH-DEP-EDIT-ROUTE-NOOP-LEGACY-FALLBACK`: When `parsed.mentionable === undefined` (pre-classifier caller), the no-op branch stays silent and emits a `webhook_actor_legacy_fallback` telemetry event — no banner, no Activity Log write.
+- `BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK`: When `parsed.mentionable === true` and `result.reason` is `already-tight` or `no-effective-blockers`, the route writes a green `❇️` `AUTOMATION_REPORTING` banner and logs a `no_shifts` Activity Log entry. `runParentSubtask` is not called.
+- `BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK-NO-EFFECTIVE-BLOCKERS`: Same as BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK — distinct tag for the `no-effective-blockers` reason code so traceability links to its dedicated test.
+- `BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK-FROZEN`: When `parsed.mentionable === true` and `result.reason === 'seed-frozen'`, the route writes a yellow `⚠️` banner and logs a `no_action` Activity Log entry with `noActionReason: 'seed_frozen'`.
+- `BEH-DEP-EDIT-ROUTE-NOOP-HUMAN-FEEDBACK-SEED-NOT-FOUND`: When `parsed.mentionable === true` and `result.reason === 'seed-not-found'`, the route writes a red `❌` banner, emits a `cascade_seed_not_found` log event, and logs a `failed` Activity Log entry.
+- `BEH-DEP-EDIT-ROUTE-NOOP-LOOP-PREVENTION`: An engine-seed echo arriving after a banner write (`mentionable: false`, `editedByBot: false`) reaches the defensive `mentionable === false` else-branch and returns without any write — preventing a feedback loop.
 - `BEH-DEP-EDIT-PARENT-ROLLUP-INTEGRATION`: End-to-end with real `tightenSeedAndDownstream` + `runParentSubtask`: a manually-inserted task-set parent rolls up to span its now-shifted subtasks after a Blocked-by edit on a leaf (Meg Apr 30 repro).
 - `BEH-DEP-EDIT-PARENT-ROLLUP-NO-PARENT`: Top-level leaves (no `parentId`) emit no parent updates from the cascade-roll-up pass.
 
