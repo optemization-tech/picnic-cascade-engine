@@ -1,4 +1,5 @@
 import { provisionClient as notionClient, commentClient } from '../notion/clients.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 import { MIGRATED_STUDIES_PROP } from '../migration/constants.js';
 import { relationIds } from '../migration/extract.js';
 import { StudyCommentService } from '../services/study-comment.js';
@@ -31,8 +32,7 @@ async function processMigrateStudy(body) {
     console.warn('[migrate-study] no exportedStudyPageId in payload, skipping');
     return;
   }
-  const triggeredByUserId = body?.source?.user_id || body?.data?.last_edited_by?.id || null;
-  const editedByBot = !body?.source?.user_id && body?.data?.last_edited_by?.type === 'bot';
+  const { triggeredByUserId, editedByBot, mentionable } = classifyWebhookActor(body, { route: 'migrate-study' });
 
   const tracer = new CascadeTracer();
   tracer.set('workflow', 'Migrate Study');
@@ -44,6 +44,7 @@ async function processMigrateStudy(body) {
       studyCommentService,
       triggeredByUserId,
       editedByBot,
+      mentionable,
       studyNameFallback: null,
     });
   } finally {

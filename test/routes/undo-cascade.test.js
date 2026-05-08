@@ -385,9 +385,12 @@ describe('parseUndoPayload', () => {
     expect(parsed.editedByBot).toBe(false);
   });
 
-  it('returns editedByBot=false when last_edited_by is missing', () => {
+  it('returns editedByBot=true when last_edited_by is missing (conservative unknown → non-person)', () => {
+    // R6 behavior-change: old Pattern A returned false (bug — leaked unknown actors as non-bot).
+    // New classifier: missing last_edited_by + no source.user_id → userType='unknown' → editedByBot=true.
+    // This prevents a future bot-on-bot loop if cascade-queue's front-door gate reads this flag.
     const parsed = parseUndoPayload({ data: { studyId: 'study-1' } });
-    expect(parsed.editedByBot).toBe(false);
+    expect(parsed.editedByBot).toBe(true);
   });
 
   it('still returns the existing studyId/taskId/skip fields unchanged', () => {

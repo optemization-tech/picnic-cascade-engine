@@ -469,6 +469,7 @@ export async function runMigrateStudyPipeline(body, notionClient, {
   studyCommentService,
   triggeredByUserId,
   editedByBot,
+  mentionable,
   studyNameFallback,
 }) {
   const exportedStudyPageId = body?.data?.id || body?.exportedStudyPageId || body?.studyPageId;
@@ -542,6 +543,7 @@ export async function runMigrateStudyPipeline(body, notionClient, {
           sourceTaskName: studyName,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: `Migrate Study aborted: ${summaryText}`,
         })
         .catch((commentErr) =>

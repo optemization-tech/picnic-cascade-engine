@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { provisionClient as notionClient, commentClient } from '../notion/clients.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 import { ActivityLogService } from '../services/activity-log.js';
 import { StudyCommentService } from '../services/study-comment.js';
 import { CascadeTracer } from '../services/cascade-tracer.js';
@@ -23,9 +24,7 @@ async function processInception(body) {
     return;
   }
 
-  // source.user_id is the actual button clicker; data.last_edited_by is whoever last edited the page.
-  const triggeredByUserId = body?.source?.user_id || body?.data?.last_edited_by?.id || null;
-  const editedByBot = !body?.source?.user_id && body?.data?.last_edited_by?.type === 'bot';
+  const { triggeredByUserId, editedByBot, mentionable } = classifyWebhookActor(body, { route: 'inception' });
 
   const tracer = new CascadeTracer();
   tracer.set('workflow', 'Inception');
@@ -96,6 +95,7 @@ async function processInception(body) {
           triggerType: 'Automation',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           sourceTaskName: studyName,
           studyId: studyPageId,
           summary: emptyDateSummary,
@@ -107,6 +107,7 @@ async function processInception(body) {
           sourceTaskName: studyName,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: emptyDateSummary,
         }).catch(() => {}),
       ]);
@@ -122,6 +123,7 @@ async function processInception(body) {
           triggerType: 'Automation',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           sourceTaskName: studyName,
           studyId: studyPageId,
           summary: 'Study already has tasks — double-inception blocked',
@@ -133,6 +135,7 @@ async function processInception(body) {
           sourceTaskName: studyName,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: 'Study already has tasks — double-inception blocked',
         }).catch(() => {}),
       ]);
@@ -153,6 +156,7 @@ async function processInception(body) {
           triggerType: 'Automation',
           triggeredByUserId,
           editedByBot,
+          mentionable,
           sourceTaskName: studyName,
           studyId: studyPageId,
           summary: 'No blueprint tasks found',
@@ -164,6 +168,7 @@ async function processInception(body) {
           sourceTaskName: studyName,
           triggeredByUserId,
           editedByBot,
+          mentionable,
           summary: 'No blueprint tasks found',
         }).catch(() => {}),
       ]);
@@ -242,6 +247,7 @@ async function processInception(body) {
         triggerType: 'Automation',
         triggeredByUserId,
         editedByBot,
+        mentionable,
         executionId: tracer.cascadeId,
         timestamp: new Date().toISOString(),
         cascadeMode: 'N/A',
@@ -290,6 +296,7 @@ async function processInception(body) {
         triggerType: 'Automation',
         triggeredByUserId,
         editedByBot,
+        mentionable,
         executionId: tracer.cascadeId,
         sourceTaskName: studyName || null,
         studyId: studyPageId,
@@ -303,6 +310,7 @@ async function processInception(body) {
         sourceTaskName: studyName || null,
         triggeredByUserId,
         editedByBot,
+        mentionable,
         summary: `Study setup failed: ${String(error.message || error).slice(0, 180)}`,
       }).catch(() => {}),
     ]);

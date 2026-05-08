@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { classifyWebhookActor } from '../notion/actor-classifier.js';
 
 export class CascadeQueue {
   constructor({ debounceMs = 5000 } = {}) {
@@ -33,8 +34,9 @@ export class CascadeQueue {
       // during a real recovery click.
       //
       // Plan: docs/plans/2026-05-06-002-fix-cascade-queue-bot-author-gate-plan.md (U1).
-      const isBotPayload = !payload?.source?.user_id
-        && payload?.data?.last_edited_by?.type === 'bot';
+      // Use button-first (default) so button-click payloads are never silently
+      // dropped here — they fall through to processFn which has its own guards.
+      const isBotPayload = classifyWebhookActor(payload).editedByBot;
       if (isBotPayload) {
         console.log(JSON.stringify({
           event: 'cascade_bot_echo_dropped',
