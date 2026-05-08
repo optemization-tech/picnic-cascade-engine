@@ -94,7 +94,8 @@ describe('date-cascade route safety', () => {
     mocks.studyCommentService.postComment.mockResolvedValue({ posted: true });
   });
 
-  it('returns early on zero delta without side effects', async () => {
+  // @behavior BEH-DATE-CASCADE-ZERO-DELTA-SILENT-ENGINE-SEED
+  it('stays silent (no Activity Log, no banner) on zero delta when mentionable=false (engine-seed defensive path)', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
       taskId: 'task-1',
@@ -102,6 +103,7 @@ describe('date-cascade route safety', () => {
       studyId: 'study-1',
       startDelta: 0,
       endDelta: 0,
+      mentionable: false,
     });
     mocks.isImportMode.mockReturnValue(false);
     mocks.isFrozen.mockReturnValue(false);
@@ -115,6 +117,97 @@ describe('date-cascade route safety', () => {
     expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
     expect(mocks.mockClient.reportStatus).not.toHaveBeenCalled();
     expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
+    expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+  });
+
+  // @behavior BEH-DATE-CASCADE-ZERO-DELTA-LEGACY-FALLBACK
+  it('stays silent and emits webhook_actor_legacy_fallback when mentionable is undefined (legacy caller)', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'task-1',
+      taskName: 'Task 1',
+      studyId: 'study-1',
+      startDelta: 0,
+      endDelta: 0,
+      mentionable: undefined,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
+    const logged = consoleSpy.mock.calls.map((c) => {
+      try { return JSON.parse(c[0]); } catch { return null; }
+    }).filter(Boolean);
+    expect(logged.some((e) => e.event === 'webhook_actor_legacy_fallback' && e.route === 'date-cascade')).toBe(true);
+    consoleSpy.mockRestore();
+  });
+
+  // @behavior BEH-DATE-CASCADE-ZERO-DELTA-HUMAN-FEEDBACK
+  it('emits Activity Log entry (no_shifts) and green banner on zero delta when mentionable=true (human-seed)', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'task-1',
+      taskName: 'Task 1',
+      studyId: 'study-1',
+      startDelta: 0,
+      endDelta: 0,
+      mentionable: true,
+      triggeredByUserId: 'user-1',
+      editedByBot: false,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.mockClient.patchPage.mockResolvedValue({});
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'no_shifts',
+        summary: expect.stringContaining('dates within tolerance'),
+      }),
+    );
+    const [taskId, props] = mocks.mockClient.patchPage.mock.calls[0];
+    expect(taskId).toBe('task-1');
+    const bannerProp = Object.values(props).find((p) => p.rich_text);
+    expect(bannerProp.rich_text[0].annotations.color).toBe('green_background');
+    expect(bannerProp.rich_text[0].text.content).toContain('no change to propagate');
+    expect(mocks.queryStudyTasks).not.toHaveBeenCalled();
+  });
+
+  // @behavior BEH-DATE-CASCADE-ZERO-DELTA-LOOP-PREVENTION
+  it('engine-seed echo on zero delta stays silent (loop-prevention regression-lock)', async () => {
+    // After engine writes banner, Notion fires webhook back; classifier returns
+    // mentionable=false; zero_delta_skip runs; no further writes.
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'task-1',
+      taskName: 'Task 1',
+      studyId: 'study-1',
+      startDelta: 0,
+      endDelta: 0,
+      mentionable: false,
+      editedByBot: false,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.mockClient.patchPage).not.toHaveBeenCalled();
     expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalled();
   });
 
