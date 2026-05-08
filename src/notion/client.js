@@ -2,8 +2,8 @@ import { buildReportingText } from '../utils/reporting.js';
 import { classifyIdempotency } from './idempotency-classifier.js';
 import { classifyNotionError } from './error-classifier.js';
 
-const NOTION_BASE = 'https://api.notion.com/v1';
-const NOTION_VERSION = '2022-06-28';
+export const NOTION_BASE = 'https://api.notion.com/v1';
+export const NOTION_VERSION = '2022-06-28';
 const DEFAULT_WORKERS_PER_TOKEN = 3;
 
 function sleep(ms) {
