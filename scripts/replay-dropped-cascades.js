@@ -308,28 +308,94 @@ export async function diagnoseStudy({ client, studyTasksDbId, studyPageId, study
 
 export async function applyComponentReplay({
   component,
+  seedTask,
   studyPageId,
   studyName,
   engineUrl,
   webhookSecret,
   actorUserId,
   fetchImpl = fetch,
+  pollImpl,
+  pollTimeoutMs = DEFAULT_POLL_TIMEOUT_MS,
+  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
 }) {
   const { seedTaskId, seedTaskName, skipped } = component;
   if (skipped) {
-    return { seedTaskId: null, seedTaskName: null, outcome: 'skipped', reason: skipped };
+    return { seedTaskId: null, seedTaskName: null, studyPageId, studyName, outcome: 'skipped', reason: skipped };
   }
   if (!seedTaskId) {
-    return { seedTaskId: null, seedTaskName: null, outcome: 'skipped', reason: 'no_seed' };
+    return { seedTaskId: null, seedTaskName: null, studyPageId, studyName, outcome: 'skipped', reason: 'no_seed' };
+  }
+  if (!seedTask) {
+    // Defensive guard: caller is expected to pass the live task fetched via
+    // client.getPage(). If null/undefined arrives (e.g., seed was archived
+    // between diagnose and apply), surface as failed rather than producing
+    // a malformed payload.
+    return { seedTaskId, seedTaskName, studyPageId, studyName, outcome: 'engine_error', body: 'seed task not found (archived or 404)' };
   }
 
-  // The component report from diagnoseStudy doesn't carry the full task
-  // object — caller re-fetches via the client and passes the live task
-  // here. Synthesize uses the task ref directly.
-  const payload = synthesizeWebhookPayload(component.seedTask, actorUserId);
+  const payload = synthesizeWebhookPayload(seedTask, actorUserId);
   const resp = await postWebhook({ engineUrl, secret: webhookSecret, payload, fetchImpl });
   const classified = classifyWebhookResponse(resp);
 
+  // For non-applied outcomes, return immediately — no terminal status to poll.
+  if (classified.kind !== 'applied') {
+    return {
+      seedTaskId,
+      seedTaskName,
+      studyPageId,
+      studyName,
+      outcome: classified.kind,
+      httpStatus: resp.status,
+      body: classified.kind === 'engine_error' ? classified.body : undefined,
+    };
+  }
+
+  // For accepted webhooks, poll the Activity Log for a terminal entry on
+  // the seed task. HTTP 200 only means the engine accepted the webhook;
+  // the actual cascade may still be running (5s debounce + processing).
+  // Without this poll, the script can't tell whether cascades actually
+  // landed in Notion before moving on to the next component.
+  if (pollImpl) {
+    try {
+      const terminal = await pollImpl({
+        studyPageId,
+        sourceTaskId: seedTaskId,
+        timeoutMs: pollTimeoutMs,
+        intervalMs: pollIntervalMs,
+      });
+      return {
+        seedTaskId,
+        seedTaskName,
+        studyPageId,
+        studyName,
+        outcome: terminal.status === 'success' || terminal.status === 'no_shifts' || terminal.status === 'no_action'
+          ? 'applied'
+          : 'cascade_failed',
+        httpStatus: resp.status,
+        terminalStatus: terminal.status,
+        terminalSummary: terminal.summary,
+      };
+    } catch (err) {
+      // Poll timeout or fetch error — webhook was accepted but we can't
+      // confirm the cascade finished. Report as transient so the operator
+      // can re-run diagnose and decide.
+      return {
+        seedTaskId,
+        seedTaskName,
+        studyPageId,
+        studyName,
+        outcome: 'poll_timeout',
+        httpStatus: resp.status,
+        body: String(err?.message || err).slice(0, 200),
+      };
+    }
+  }
+
+  // No pollImpl provided (e.g., tests with mocked fetch) — return applied
+  // based on the HTTP 200 alone. The runbook + Coverage will flag that
+  // operator verification via Railway logs is required when polling is
+  // skipped.
   return {
     seedTaskId,
     seedTaskName,
@@ -337,8 +403,61 @@ export async function applyComponentReplay({
     studyName,
     outcome: classified.kind,
     httpStatus: resp.status,
-    body: classified.kind === 'engine_error' ? classified.body : undefined,
   };
+}
+
+/**
+ * Polls Notion's Activity Log for a terminal entry from the seed task's
+ * cascade. The engine writes one Activity Log entry per cascade run, with
+ * Source Task ID set to the seed task and Status set to the terminal
+ * outcome (success, no_shifts, no_action, failed). We filter by both
+ * fields and wait until at least one entry exists.
+ *
+ * Returns the most recent matching entry's status + summary on success.
+ * Throws on timeout — caller decides how to report.
+ */
+export async function pollActivityLog({
+  client,
+  activityLogDbId,
+  studyPageId,
+  sourceTaskId,
+  startedAt,
+  timeoutMs = DEFAULT_POLL_TIMEOUT_MS,
+  intervalMs = DEFAULT_POLL_INTERVAL_MS,
+  sleepImpl = sleep,
+}) {
+  const deadline = Date.now() + timeoutMs;
+  const startedAtIso = startedAt || new Date().toISOString();
+
+  while (Date.now() < deadline) {
+    const entries = await client.queryDatabase(activityLogDbId, {
+      and: [
+        { property: 'Workflow', select: { equals: 'Date Cascade' } },
+        { property: 'Source Task ID', rich_text: { equals: sourceTaskId } },
+        { timestamp: 'created_time', created_time: { on_or_after: startedAtIso } },
+      ],
+    });
+    if (entries && entries.length > 0) {
+      // Take the most recent entry (queryDatabase returns newest-first by default
+      // for Activity Log; if not, sort by created_time descending).
+      const latest = entries.sort((a, b) =>
+        (b.created_time || '').localeCompare(a.created_time || ''),
+      )[0];
+      const statusProp = latest.properties?.['Status']?.status?.name
+        || latest.properties?.['Status']?.select?.name
+        || 'unknown';
+      const summaryProp = latest.properties?.['Summary']?.rich_text?.[0]?.plain_text || '';
+      return {
+        status: statusProp.toLowerCase().replace(/\s+/g, '_'),
+        summary: summaryProp,
+      };
+    }
+    await sleepImpl(intervalMs);
+  }
+
+  const err = new Error(`Activity Log poll timed out after ${Math.round(timeoutMs / 1000)}s for source task ${sourceTaskId}`);
+  err.code = 'poll_timeout';
+  throw err;
 }
 
 // ─── Main entry: run() / runMain pattern ────────────────────────────────────
@@ -347,18 +466,25 @@ export async function run({
   apply = false,
   confirmNotified = false,
   studyFilter = null,
-  json = false,
   env = process.env,
   clientFactory,
   fetchImpl = fetch,
   studyTasksDbId,
   studiesDbId,
+  activityLogDbId = null,
 } = {}) {
   // Pre-flight: env vars are validated BEFORE any Notion reads so a
   // missing-secret abort is cheap and obvious.
   const webhookSecret = env.WEBHOOK_SECRET;
   const actorUserId = env.BACKFILL_ACTOR_USER_ID;
   const engineUrl = env.ENGINE_URL || DEFAULT_ENGINE_URL;
+
+  // --study=true means the operator passed `--study` with no value (getArg
+  // returns true for bare flags). Treat as a usage error rather than letting
+  // it propagate as a filter into Notion.
+  if (studyFilter === true) {
+    return { ok: false, exitCode: 3, error: { code: 'invalid_study_filter', message: '--study requires a value (Notion page id)' } };
+  }
 
   if (apply && !webhookSecret) {
     return { ok: false, exitCode: 3, error: { code: 'missing_webhook_secret', message: 'WEBHOOK_SECRET env var required for --apply' } };
@@ -372,6 +498,7 @@ export async function run({
 
   const client = await clientFactory();
   const replayId = randomUUID();
+  const applyStartedAt = new Date().toISOString();
 
   // Collect studies to diagnose. If --study is given, just that one;
   // otherwise iterate all studies in the Studies DB.
@@ -408,32 +535,48 @@ export async function run({
       // Re-fetch the seed task to get fresh properties before synthesizing.
       // The diagnose snapshot may be seconds stale; we want the latest dates.
       const seedTask = component.seedTaskId
-        ? await client.getPage(component.seedTaskId)
+        ? await safeNotionRead(() => client.getPage(component.seedTaskId))
         : null;
-      const componentWithTask = { ...component, seedTask, studyPageId: study.studyPageId, studyName: study.studyName };
+
+      const pollImpl = activityLogDbId
+        ? ({ sourceTaskId, timeoutMs, intervalMs }) => pollActivityLog({
+            client,
+            activityLogDbId,
+            studyPageId: study.studyPageId,
+            sourceTaskId,
+            startedAt: applyStartedAt,
+            timeoutMs,
+            intervalMs,
+          })
+        : null;
 
       const result = await applyComponentReplay({
-        component: componentWithTask,
+        component,
+        seedTask,
         studyPageId: study.studyPageId,
         studyName: study.studyName,
         engineUrl,
         webhookSecret,
         actorUserId,
         fetchImpl,
+        pollImpl,
       });
       applyReports.push(result);
 
       if (result.outcome === 'auth_error') {
-        // Abort the whole run — secret is wrong, every subsequent POST will fail too.
+        // Abort the whole run — secret is wrong, every subsequent POST will
+        // fail too. Exit 3 (usage/config) per the documented exit code table;
+        // operator should fix WEBHOOK_SECRET before re-running.
         return {
           ok: false,
-          exitCode: 1,
+          exitCode: 3,
           state: 'auth_error',
           replayId,
+          error: { code: 'webhook_auth_failed', message: 'Engine returned 401/403 — fix WEBHOOK_SECRET before re-running' },
           completedComponents: applyReports,
         };
       }
-      if (result.outcome === 'transient') anyTransient = true;
+      if (result.outcome === 'transient' || result.outcome === 'poll_timeout') anyTransient = true;
       if (result.outcome !== 'applied' && result.outcome !== 'skipped') anyFailures = true;
 
       await sleep(DEFAULT_THROTTLE_MS);
@@ -461,11 +604,69 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Wraps a Notion read so transient failures return null instead of throwing.
+ * Use for non-critical reads where a failure should skip the component rather
+ * than abort the whole run. Critical reads (e.g., listAllStudies, diagnoseStudy)
+ * still throw — those failures are surfaced at the top of run() and reported
+ * as exit code 4 (transient) so the operator can re-run.
+ */
+async function safeNotionRead(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.log(JSON.stringify({
+      event: 'replay_seed_fetch_failed',
+      error: String(err?.message || err).slice(0, 200),
+    }));
+    return null;
+  }
+}
+
 // ─── runMain — invoked when script is run directly, not imported ────────────
 
 const isMain = import.meta.url === `file://${process.argv[1]}`;
 
+const USAGE = `
+Replay cascades dropped during the 2026-05-08 → 2026-05-12 window.
+
+Usage:
+  node scripts/replay-dropped-cascades.js [--study <pageId>] [--json]
+  node scripts/replay-dropped-cascades.js --apply --confirm-notified [--study <pageId>] [--json]
+  node scripts/replay-dropped-cascades.js --help
+
+Flags:
+  --apply                 Apply replay (synthesize webhooks, POST, poll Activity Log).
+                          Default is diagnose only (read-only).
+  --confirm-notified      Required with --apply. Operator must have notified the
+                          PicnicHealth eng Slack channel before running.
+  --study <pageId>        Scope to a single study by Notion page id.
+  --json                  Emit structured JSON envelope to stdout (compact, single-line).
+  --help                  Print this message and exit.
+
+Required env vars (--apply only):
+  WEBHOOK_SECRET             Engine auth header.
+  BACKFILL_ACTOR_USER_ID     Real Notion person user id for synthesized last_edited_by.
+                             SENSITIVE — same hygiene as WEBHOOK_SECRET.
+  NOTION_TOKEN_1, ...        Notion integration token(s) for diagnose reads.
+  ENGINE_URL                 (Optional) Override engine URL. Defaults to production.
+
+Exit codes:
+  0 = success (diagnose printed; or apply completed with no failures)
+  1 = some replays failed
+  2 = nothing to replay (no divergent studies found)
+  3 = usage / config error (missing env vars, bad args, auth failure)
+  4 = transient (Notion 5xx, timeout, poll exhaustion) — operator may retry
+
+See docs/runbooks/replay-dropped-cascades.md for the operator runbook.
+`;
+
 export async function runMain() {
+  if (getFlag('help') || getFlag('h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
   const apply = getFlag('apply');
   const confirmNotified = getFlag('confirm-notified');
   const studyFilter = getArg('study');
@@ -476,18 +677,38 @@ export async function runMain() {
   const { NotionClient } = await import('../src/notion/client.js');
   const { config } = await import('../src/config.js');
 
-  const result = await run({
-    apply,
-    confirmNotified,
-    studyFilter,
-    json,
-    clientFactory: async () => new NotionClient({ tokens: config.notion.tokens }),
-    studyTasksDbId: config.notion.studyTasksDbId,
-    studiesDbId: config.notion.studiesDbId,
-  });
+  let result;
+  try {
+    result = await run({
+      apply,
+      confirmNotified,
+      studyFilter,
+      clientFactory: async () => new NotionClient({ tokens: config.notion.tokens }),
+      studyTasksDbId: config.notion.studyTasksDbId,
+      studiesDbId: config.notion.studiesDbId,
+      activityLogDbId: config.notion.activityLogDbId || null,
+    });
+  } catch (err) {
+    // Notion read errors during listAllStudies or diagnoseStudy bubble up
+    // here — emit as transient (exit 4) so operators can retry rather than
+    // confusing exit 1 (partial apply failure) with infrastructure outage.
+    const errorEnvelope = {
+      ok: false,
+      exitCode: 4,
+      state: 'transient',
+      error: { code: 'notion_read_failed', message: String(err?.message || err).slice(0, 200) },
+    };
+    if (json) {
+      console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, ...errorEnvelope }));
+    } else {
+      console.error(`[replay-dropped-cascades] transient failure (exit 4): ${errorEnvelope.error.message}`);
+    }
+    process.exit(4);
+  }
 
   if (json) {
-    console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, ...result }, null, 2));
+    // Compact single-line JSON for shell $() capture + jq parsing.
+    console.log(JSON.stringify({ schemaVersion: SCHEMA_VERSION, ...result }));
   } else {
     console.log(formatHumanReport(result));
   }

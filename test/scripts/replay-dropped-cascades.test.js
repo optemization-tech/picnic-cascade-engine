@@ -395,8 +395,12 @@ describe('run() apply mode', () => {
         text: async () => 'Unauthorized',
       }),
     });
-    expect(result.exitCode).toBe(1);
+    // Auth failure is exit 3 (usage/config) per the documented exit code
+    // table — operator must fix WEBHOOK_SECRET before re-running. Distinct
+    // from exit 1 (partial apply failure) so agents can route differently.
+    expect(result.exitCode).toBe(3);
     expect(result.state).toBe('auth_error');
+    expect(result.error.code).toBe('webhook_auth_failed');
   });
 
   it('reports partial state when some replays fail (non-auth error)', async () => {
