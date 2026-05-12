@@ -386,7 +386,7 @@ describe('run() apply mode', () => {
       env: { WEBHOOK_SECRET: 'bad-secret', BACKFILL_ACTOR_USER_ID: 'actor-id' },
       clientFactory: async () => ({
         queryDatabase: vi.fn().mockResolvedValue([divergentTask]),
-        fetchPage: vi.fn().mockResolvedValue(divergentTask),
+        getPage: vi.fn().mockResolvedValue(divergentTask),
       }),
       studyFilter: 'study-1',
       fetchImpl: vi.fn().mockResolvedValue({
@@ -407,7 +407,7 @@ describe('run() apply mode', () => {
       env: { WEBHOOK_SECRET: 'secret', BACKFILL_ACTOR_USER_ID: 'actor-id' },
       clientFactory: async () => ({
         queryDatabase: vi.fn().mockResolvedValue([divergentTask]),
-        fetchPage: vi.fn().mockResolvedValue(divergentTask),
+        getPage: vi.fn().mockResolvedValue(divergentTask),
       }),
       studyFilter: 'study-1',
       fetchImpl: vi.fn().mockResolvedValue({
@@ -428,7 +428,7 @@ describe('run() apply mode', () => {
       env: { WEBHOOK_SECRET: 'secret', BACKFILL_ACTOR_USER_ID: 'actor-id' },
       clientFactory: async () => ({
         queryDatabase: vi.fn().mockResolvedValue([divergentTask]),
-        fetchPage: vi.fn().mockResolvedValue(divergentTask),
+        getPage: vi.fn().mockResolvedValue(divergentTask),
       }),
       studyFilter: 'study-1',
       fetchImpl: vi.fn().mockResolvedValue({

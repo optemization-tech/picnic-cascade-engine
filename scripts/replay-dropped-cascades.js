@@ -54,7 +54,7 @@
 
 import { config as dotenvConfig } from 'dotenv';
 import { randomUUID } from 'node:crypto';
-import { STUDY_TASKS_PROPS, findById } from '../src/notion/property-names.js';
+import { STUDY_TASKS_PROPS, STUDIES_PROPS, findById } from '../src/notion/property-names.js';
 
 dotenvConfig();
 
@@ -408,7 +408,7 @@ export async function run({
       // Re-fetch the seed task to get fresh properties before synthesizing.
       // The diagnose snapshot may be seconds stale; we want the latest dates.
       const seedTask = component.seedTaskId
-        ? await client.fetchPage(component.seedTaskId)
+        ? await client.getPage(component.seedTaskId)
         : null;
       const componentWithTask = { ...component, seedTask, studyPageId: study.studyPageId, studyName: study.studyName };
 
@@ -434,7 +434,7 @@ export async function run({
         };
       }
       if (result.outcome === 'transient') anyTransient = true;
-      if (result.outcome !== 'applied') anyFailures = true;
+      if (result.outcome !== 'applied' && result.outcome !== 'skipped') anyFailures = true;
 
       await sleep(DEFAULT_THROTTLE_MS);
     }
@@ -453,7 +453,7 @@ async function listAllStudies({ client, studiesDbId }) {
   const studies = await client.queryDatabase(studiesDbId);
   return studies.map((s) => ({
     id: s.id,
-    name: s.properties?.['Study Name (Internal)']?.title?.[0]?.plain_text || '(no name)',
+    name: findById(s, STUDIES_PROPS.STUDY_NAME)?.title?.[0]?.plain_text || '(no name)',
   }));
 }
 
