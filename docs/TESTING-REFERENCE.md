@@ -21,7 +21,7 @@ Notion automation → Cloudflare tunnel → Local Express server (port 3000) →
 ### Setup Commands
 ```bash
 # Terminal 1: engine server
-cd ~/Documents/Claude/clients/picnic-health/engine && npm run dev
+cd ~/optemization-tech/optemization-os/clients/picnic-health/engine && npm run dev
 
 # Terminal 2: tunnel (generates new URL each restart)
 cloudflared tunnel --url http://localhost:3000 --no-autoupdate

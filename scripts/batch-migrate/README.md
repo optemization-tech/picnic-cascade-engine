@@ -84,7 +84,7 @@ Group B and Group C transforms (Sanofi, Ionis, Pfizer Heme 002, Ipsen) ship in f
 
 ## Why move-page beats read-then-create
 
-The single most useful insight here: Notion's `POST /v1/pages/move` endpoint relocates a page atomically while preserving the page id, body blocks, comments, and any property whose name + type matches the destination schema (per `~/Documents/Claude/memory/notion-api-guide.md` §Page Moves). For consolidation, that beats reading source → POSTing new dest rows + archiving the source on every dimension that matters: page id stability (relations from elsewhere keep working), schema mapping (Notion does it), atomicity (one call vs two), idempotency (a moved page is a no-op on retry), source cleanup (handled).
+The single most useful insight here: Notion's `POST /v1/pages/move` endpoint relocates a page atomically while preserving the page id, body blocks, comments, and any property whose name + type matches the destination schema (per `~/optemization-tech/optemization-os/memory/notion-api-guide.md` §Page Moves). For consolidation, that beats reading source → POSTing new dest rows + archiving the source on every dimension that matters: page id stability (relations from elsewhere keep working), schema mapping (Notion does it), atomicity (one call vs two), idempotency (a moved page is a no-op on retry), source cleanup (handled).
 
 The endpoint requires `Notion-Version: 2025-09-03` and accepts a `data_source_id` (not `database_id`). The orchestrator resolves the destination data source id at start by calling `GET /v1/databases/{id}` with the new API version.
 
