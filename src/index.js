@@ -27,12 +27,17 @@ const server = app.listen(config.port, () => {
   (async () => {
     // Resolve bot user IDs for all token pools so classifyWebhookActor can
     // fall back to the KNOWN_BOT_IDS allowlist when source.type is absent.
-    await registerBotIds([...new Set([
-      ...config.notion.tokens,
-      ...config.notion.provisionTokens,
-      ...config.notion.deletionTokens,
-      ...config.notion.commentTokens,
-    ])]);
+    // Pass mentionUserIds so any permanent registration failure surfaces an
+    // alert payload that log-aggregators can render @-mentions from.
+    await registerBotIds(
+      [...new Set([
+        ...config.notion.tokens,
+        ...config.notion.provisionTokens,
+        ...config.notion.deletionTokens,
+        ...config.notion.commentTokens,
+      ])],
+      { mentionUserIds: config.comment.errorMentionIds },
+    );
 
     // Clear stuck Import Mode from studies left ON by prior crashes/OOM/SIGKILL.
     const sweepTokens = config.notion.provisionTokens.length > 0

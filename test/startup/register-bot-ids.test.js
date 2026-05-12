@@ -19,6 +19,14 @@ function makeErrorResponse(status) {
   return { ok: false, status };
 }
 
+// Existing tests pass maxAttempts: 1 to skip retry behavior — those tests
+// verify the orchestration shape, not the retry-with-backoff logic. The
+// retry-specific tests below cover that path explicitly.
+const NO_RETRY = { maxAttempts: 1 };
+// Tests that DO exercise the retry path use these zero-delay opts so the
+// suite doesn't sit waiting for backoff sleeps.
+const FAST_RETRY = { maxAttempts: 3, retryDelaysMs: [0, 0, 0] };
+
 describe('registerBotIds', () => {
   let fetchMock;
 
@@ -26,6 +34,7 @@ describe('registerBotIds', () => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -39,9 +48,9 @@ describe('registerBotIds', () => {
       .mockResolvedValueOnce(makeOkResponse('bot-1'))
       .mockResolvedValueOnce(makeOkResponse('bot-2'));
 
-    const result = await registerBotIds(['token-a', 'token-b']);
+    const result = await registerBotIds(['token-a', 'token-b'], NO_RETRY);
 
-    expect(result).toEqual({ registered: 2, failed: 0 });
+    expect(result).toMatchObject({ registered: 2, failed: 0, permanentFailures: [] });
     expect(registerBotId).toHaveBeenCalledTimes(2);
     expect(registerBotId).toHaveBeenCalledWith('bot-1');
     expect(registerBotId).toHaveBeenCalledWith('bot-2');
@@ -59,9 +68,9 @@ describe('registerBotIds', () => {
       .mockResolvedValueOnce(makeErrorResponse(401))
       .mockResolvedValueOnce(makeOkResponse('bot-3'));
 
-    const result = await registerBotIds(['token-a', 'token-b', 'token-c']);
+    const result = await registerBotIds(['token-a', 'token-b', 'token-c'], NO_RETRY);
 
-    expect(result).toEqual({ registered: 2, failed: 1 });
+    expect(result).toMatchObject({ registered: 2, failed: 1, permanentFailures: [1] });
     expect(registerBotId).toHaveBeenCalledTimes(2);
     expect(registerBotId).toHaveBeenCalledWith('bot-1');
     expect(registerBotId).toHaveBeenCalledWith('bot-3');
@@ -70,9 +79,9 @@ describe('registerBotIds', () => {
   it('resolves without throwing when all tokens fail', async () => {
     fetchMock.mockResolvedValue(makeErrorResponse(500));
 
-    const result = await registerBotIds(['token-a', 'token-b', 'token-c']);
+    const result = await registerBotIds(['token-a', 'token-b', 'token-c'], NO_RETRY);
 
-    expect(result).toEqual({ registered: 0, failed: 3 });
+    expect(result).toMatchObject({ registered: 0, failed: 3, permanentFailures: [0, 1, 2] });
     expect(registerBotId).not.toHaveBeenCalled();
 
     const logCall = console.log.mock.calls.find(
@@ -84,7 +93,7 @@ describe('registerBotIds', () => {
   it('returns immediately with no fetch calls when token array is empty', async () => {
     const result = await registerBotIds([]);
 
-    expect(result).toEqual({ registered: 0, failed: 0 });
+    expect(result).toMatchObject({ registered: 0, failed: 0 });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(registerBotId).not.toHaveBeenCalled();
 
@@ -100,9 +109,9 @@ describe('registerBotIds', () => {
       .mockRejectedValueOnce(timeoutError)
       .mockResolvedValueOnce(makeOkResponse('bot-2'));
 
-    const result = await registerBotIds(['token-a', 'token-b']);
+    const result = await registerBotIds(['token-a', 'token-b'], NO_RETRY);
 
-    expect(result).toEqual({ registered: 1, failed: 1 });
+    expect(result).toMatchObject({ registered: 1, failed: 1 });
     expect(registerBotId).toHaveBeenCalledWith('bot-2');
   });
 
@@ -112,9 +121,9 @@ describe('registerBotIds', () => {
       json: async () => ({ type: 'bot' }),
     });
 
-    const result = await registerBotIds(['token-a']);
+    const result = await registerBotIds(['token-a'], NO_RETRY);
 
-    expect(result).toEqual({ registered: 0, failed: 1 });
+    expect(result).toMatchObject({ registered: 0, failed: 1 });
     expect(registerBotId).not.toHaveBeenCalled();
   });
 
@@ -123,12 +132,66 @@ describe('registerBotIds', () => {
       .mockResolvedValueOnce(makeOkResponse('same-bot'))
       .mockResolvedValueOnce(makeOkResponse('same-bot'));
 
-    const result = await registerBotIds(['token-a', 'token-b']);
+    const result = await registerBotIds(['token-a', 'token-b'], NO_RETRY);
 
-    // Both calls succeeded — registered count reflects API call results
-    expect(result).toEqual({ registered: 2, failed: 0 });
-    // registerBotId called twice; the Set in actor-classifier deduplicates
+    expect(result).toMatchObject({ registered: 2, failed: 0 });
     expect(registerBotId).toHaveBeenCalledTimes(2);
     expect(registerBotId).toHaveBeenCalledWith('same-bot');
+  });
+
+  // ─── Retry-with-backoff ─────────────────────────────────────────────────
+
+  describe('retry-with-backoff', () => {
+    it('retries a transient failure and succeeds on attempt 2', async () => {
+      fetchMock
+        .mockResolvedValueOnce(makeErrorResponse(500))
+        .mockResolvedValueOnce(makeOkResponse('bot-1'));
+
+      const result = await registerBotIds(['token-a'], FAST_RETRY);
+      expect(result).toMatchObject({ registered: 1, failed: 0 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(registerBotId).toHaveBeenCalledWith('bot-1');
+    });
+
+    it('exhausts all 3 attempts on persistent failure and reports permanent failure', async () => {
+      fetchMock.mockResolvedValue(makeErrorResponse(500));
+
+      const result = await registerBotIds(['token-a'], FAST_RETRY);
+      expect(result).toMatchObject({ registered: 0, failed: 1, permanentFailures: [0] });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('emits bot_ids_registration_permanent_failure with mention user ids on permanent failure', async () => {
+      fetchMock.mockResolvedValue(makeErrorResponse(401));
+
+      await registerBotIds(['bad-token'], {
+        ...FAST_RETRY,
+        mentionUserIds: ['meg-user-id', 'seb-user-id', 'tem-user-id'],
+      });
+
+      const errorCall = console.error.mock.calls.find(
+        (c) => typeof c[0] === 'string' && c[0].includes('bot_ids_registration_permanent_failure'),
+      );
+      expect(errorCall).toBeTruthy();
+      const payload = JSON.parse(errorCall[0]);
+      expect(payload).toMatchObject({
+        event: 'bot_ids_registration_permanent_failure',
+        failedTokenIndices: [0],
+        attemptsExhausted: 3,
+        mentionUserIds: ['meg-user-id', 'seb-user-id', 'tem-user-id'],
+        severity: 'high',
+      });
+    });
+
+    it('does NOT emit the permanent-failure alert when all tokens succeed (no false alarms)', async () => {
+      fetchMock.mockResolvedValueOnce(makeOkResponse('bot-1'));
+
+      await registerBotIds(['token-a'], { ...FAST_RETRY, mentionUserIds: ['meg-user-id'] });
+
+      const errorCall = console.error.mock.calls.find(
+        (c) => typeof c[0] === 'string' && c[0].includes('bot_ids_registration_permanent_failure'),
+      );
+      expect(errorCall).toBeFalsy();
+    });
   });
 });

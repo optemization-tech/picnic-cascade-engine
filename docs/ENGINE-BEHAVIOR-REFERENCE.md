@@ -429,6 +429,35 @@ For every behavior change:
 
 ## Changelog
 
+### 2026-05-12 — classifyWebhookActor edit-first KNOWN_BOT_IDS fallback + cold-boot guard + telemetry
+
+Plan: `docs/plans/2026-05-12-001-fix-classify-webhook-actor-edit-first-knownbots-fallback-plan.md`.
+
+Before this change, all property-change cascades had been silently dropping in production since PR #104 deployed on 2026-05-08. Notion's automation builder does not expose `last_edited_by.type` as a body field — operators can include the user reference itself but not its `type` subfield. The post-PR-#104 classifier treated every missing-type payload as `unknown` → `editedByBot=true` → cascade-queue front-door gate drop. Webhooks fired, the engine returned 200, no cascade ran.
+
+The fix replaces the conservative-unknown stance with positive bot identification via `KNOWN_BOT_IDS` (populated at boot by PR #108's `registerBotIds`). The edit-first branch of `classifyWebhookActor` (`src/notion/actor-classifier.js`) now:
+- Uses `candidate.type` when explicitly present (preserves PR #104's integration-type protection).
+- When type is missing: consults `knownBotIds.has(userId)` — returns `'bot'` if in allowlist, `'person'` otherwise.
+- Cold-boot guard (R7): when `knownBotIds.size === 0` (between `app.listen` and `registerBotIds` completing — typically 1-10s on Railway redeploy), returns `'unknown'` so engine echoes during the registration race still drop. Self-healing: once the allowlist populates, subsequent webhooks classify normally.
+- Empty-string id guard: mirrors button-first's `length > 0` check so `{id: ''}` produces `userId=null` and `mentionable=false`.
+
+`last_edited_by` lookup is now path-tolerant — reads from `body.data.last_edited_by` OR `body.last_edited_by` (matching `parseWebhookPayload`'s existing fallback chain). `source` lookup deliberately stays at `body.source` — Notion's button payloads put source at body level by design, and moving it would silently break every button automation.
+
+Three new telemetry events surface actor-classification observability:
+- `webhook_dropped_cold_boot` — emitted when the cold-boot guard drops a webhook. Bounded by the registration window; lets ops correlate post-deploy "edit didn't propagate" reports with the actual race window.
+- `webhook_actor_unrecognized` — first-seen-only via an in-memory Set. Emits once per unique user id per engine boot for actors not in `KNOWN_BOT_IDS`. Surfaces new third-party actors (Notion AI, Zapier, future workspace integrations) without per-edit noise. The seen-set resets on process restart by design.
+- `webhook_actor_missing_last_edited_by` — emits when both `source.user_id` and `last_edited_by` are absent in an edit-first payload (true structural misconfiguration). No rate limiting; rare in steady state.
+
+The legacy `webhook_actor_misclassified` event (PR #104) is retained for button-first path mismatches between the legacy Pattern A heuristic and the new classification — distinct purpose, kept as-is.
+
+**Posture shift (third-party bots):** PR #101 dropped ALL bot writes including legitimate third-party. This change drops only engine-known bots via positive ID match. Third-party bot writers not in `KNOWN_BOT_IDS` (Notion AI editing dates, Zapier zaps, future workspace integrations) will now be classified as `'person'` and trigger cascades. The trade-off is deliberate — Meg's Notion AI date-edit workflow needs cascades to fire — and ops observability is provided by `webhook_actor_unrecognized` telemetry.
+
+**`registerBotIds` reliability hardening:** per-token retry-with-backoff (3 attempts, 1s/2s/4s) handles transient Notion 5xx. On permanent failure (3 attempts exhausted), `bot_ids_registration_permanent_failure` emits with the configured `mentionUserIds` (sourced from `COMMENT_ERROR_MENTION_IDS`) so log-aggregator alerting can render @-mentions for Meg/Seb/Tem — same pattern as failed-inception alerts. Engine echoes from un-registered tokens would misclassify as user edits once the cold-boot guard releases; the alert tells operators to fix the affected tokens and restart.
+
+**Bonus fix:** `src/services/cascade-queue.js:37` corrected from `sourcePriority: 'edit-first'` to `'button-first'` in the parse-error bypass path. The line previously contradicted the surrounding comment block (which explicitly described button-first intent); a legitimate button-click undo press whose parser threw would have been dropped as a bot echo, leaving Import Mode stuck on the study. Locked in by the pre-existing test at `test/services/cascade-queue.test.js:441`.
+
+**Section 7 (Webhook Authentication) and Section 11 (Manual Task Support)** retain the existing prose. The auth boundary and `Fill Refs` automation are unchanged; only the actor-classification layer downstream of auth has been updated. Tags: `BEH-CLASSIFIER-EDIT-FIRST-KNOWN-BOT-IDS`, `BEH-CLASSIFIER-COLD-BOOT-GUARD`, `BEH-CLASSIFIER-EMPTY-ID-GUARD`, `BEH-WEBHOOK-DROPPED-COLD-BOOT`, `BEH-WEBHOOK-ACTOR-UNRECOGNIZED`, `BEH-WEBHOOK-ACTOR-MISSING-LAST-EDITED-BY`.
+
 ### 2026-05-07 — Human-seed no-op cascade feedback
 
 Plan: `docs/plans/2026-05-07-001-fix-human-noop-cascade-feedback-plan.md`.

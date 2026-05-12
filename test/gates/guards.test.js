@@ -1,6 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { parseWebhookPayload, isImportMode, isFrozen } from '../../src/gates/guards.js';
 import { STUDY_TASKS_PROPS as ST } from '../../src/notion/property-names.js';
+import { registerBotId } from '../../src/notion/actor-classifier.js';
+
+// parseWebhookPayload calls classifyWebhookActor with the module-level
+// KNOWN_BOT_IDS (no injection). Register a single bot id once so the steady-state
+// branch (allowlist populated) is exercised rather than the cold-boot guard.
+// Tests that need the cold-boot path call classifyWebhookActor directly with an
+// empty injected knownBotIds option (covered in test/notion/actor-classifier.test.js).
+beforeAll(() => {
+  registerBotId('bot-fixture-for-guards-tests');
+});
 
 function buildPayload(overrides = {}) {
   return {
@@ -103,19 +113,37 @@ describe('guards parseWebhookPayload', () => {
   });
 
   // @behavior BEH-DEBOUNCE-ECHO
-  it('sets editedByBot true when last_edited_by is missing (conservative unknown → non-person)', () => {
-    // R6 behavior-change: old Pattern B returned false (bug).
-    // New: missing last_edited_by → userType='unknown' → editedByBot=true, prevents bot-on-bot loops.
+  it('sets editedByBot FALSE when last_edited_by is missing AND allowlist populated', () => {
+    // Post-2026-05-12 (this plan's R3): with KNOWN_BOT_IDS populated at boot,
+    // a missing last_edited_by defaults to person and mentionable=false (userId=null).
+    // The cold-boot path that returns editedByBot=true is tested directly on
+    // classifyWebhookActor in test/notion/actor-classifier.test.js.
     const payload = buildPayload();
     delete payload.body.data.last_edited_by;
-    expect(parseWebhookPayload(payload).editedByBot).toBe(true);
+    const parsed = parseWebhookPayload(payload);
+    expect(parsed.editedByBot).toBe(false);
+    expect(parsed.mentionable).toBe(false);
+    expect(parsed.userId).toBe(null);
   });
 
   // @behavior BEH-DEBOUNCE-ECHO
-  it('sets editedByBot true when last_edited_by.id present but type missing', () => {
-    // R6 behavior-change: missing type field → userType='unknown' → editedByBot=true.
+  it('sets editedByBot FALSE when last_edited_by.id present but type missing AND id not in KNOWN_BOT_IDS', () => {
+    // Post-2026-05-12 (this plan's R3): Notion's automation builder doesn't
+    // expose `type` as a body field, so production webhooks arrive with `id`
+    // only. With the bot fixture registered above, an unknown id (not in the
+    // allowlist) falls through to person and the cascade proceeds.
     const payload = buildPayload();
     payload.body.data.last_edited_by = { id: 'ambiguous-id' };
+    const parsed = parseWebhookPayload(payload);
+    expect(parsed.editedByBot).toBe(false);
+    expect(parsed.mentionable).toBe(true);
+  });
+
+  // @behavior BEH-DEBOUNCE-ECHO
+  it('sets editedByBot TRUE when last_edited_by.id is in KNOWN_BOT_IDS (positive bot identification)', () => {
+    // Engine echoes whose bot ids are registered at boot still drop via id-match.
+    const payload = buildPayload();
+    payload.body.data.last_edited_by = { id: 'bot-fixture-for-guards-tests' };
     expect(parseWebhookPayload(payload).editedByBot).toBe(true);
   });
 
