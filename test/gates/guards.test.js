@@ -153,6 +153,23 @@ describe('guards parseWebhookPayload', () => {
     payload.body.data.last_edited_by = { id: 'bot-integration-id', type: 'integration' };
     expect(parseWebhookPayload(payload).editedByBot).toBe(true);
   });
+
+  it('passes through _replayTrustRef=true from body', () => {
+    const payload = buildPayload();
+    payload.body._replayTrustRef = true;
+    expect(parseWebhookPayload(payload)._replayTrustRef).toBe(true);
+  });
+
+  it('defaults _replayTrustRef to false when absent', () => {
+    const payload = buildPayload();
+    expect(parseWebhookPayload(payload)._replayTrustRef).toBe(false);
+  });
+
+  it('coerces non-boolean truthy _replayTrustRef to true', () => {
+    const payload = buildPayload();
+    payload.body._replayTrustRef = 'yes';
+    expect(parseWebhookPayload(payload)._replayTrustRef).toBe(true);
+  });
 });
 
 describe('guards predicates', () => {

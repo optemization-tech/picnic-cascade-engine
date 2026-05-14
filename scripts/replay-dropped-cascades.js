@@ -217,6 +217,7 @@ function computeDelta(task) {
 export function synthesizeWebhookPayload(seedTask, actorUserId) {
   return {
     body: {
+      _replayTrustRef: true,
       data: {
         id: seedTask.id,
         properties: seedTask.properties,

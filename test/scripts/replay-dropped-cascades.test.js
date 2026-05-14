@@ -211,6 +211,19 @@ describe('synthesizeWebhookPayload', () => {
     const payload = synthesizeWebhookPayload(task, 'actor-id-123');
     expect(payload.body.data.last_edited_by).toEqual({ id: 'actor-id-123', type: 'person' });
   });
+
+  it('sets _replayTrustRef=true on the body', () => {
+    const task = makeTask({ id: 'task-1' });
+    const payload = synthesizeWebhookPayload(task, 'actor-id-123');
+    expect(payload.body._replayTrustRef).toBe(true);
+  });
+
+  it('round-trips _replayTrustRef through parseWebhookPayload', () => {
+    const task = makeTask({ id: 'task-1', refStart: '2026-04-01', refEnd: '2026-04-05', datesStart: '2026-04-01', datesEnd: '2026-04-10' });
+    const payload = synthesizeWebhookPayload(task, 'real-actor-uuid');
+    const parsed = parseWebhookPayload(payload);
+    expect(parsed._replayTrustRef).toBe(true);
+  });
 });
 
 // ─── classifyWebhookResponse ────────────────────────────────────────────────

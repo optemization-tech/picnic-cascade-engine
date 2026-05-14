@@ -363,4 +363,134 @@ describe('classify', () => {
     expect(result.endDelta).toBe(2);
     expect(result.cascadeMode).toBe('drag-right');
   });
+
+  // ─── trustWebhookRef bypass ────────────────────────────────────────────────
+
+  it('skips stale-ref correction when trustWebhookRef is true and DB refs differ', () => {
+    const result = classify(
+      {
+        taskId: 'task-a',
+        taskName: 'Task A',
+        newStart: '2026-04-02',
+        newEnd: '2026-04-03',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-02',
+        hasParent: false,
+      },
+      [
+        {
+          id: 'task-a',
+          refStart: '2026-03-31',
+          refEnd: '2026-04-01',
+        },
+      ],
+      1,
+      1,
+      { trustWebhookRef: true },
+    );
+
+    expect(result.staleRefCorrected).toBe(false);
+    expect(result.refStart).toBe('2026-04-01');
+    expect(result.refEnd).toBe('2026-04-02');
+    expect(result.startDelta).toBe(1);
+    expect(result.endDelta).toBe(1);
+    expect(result.cascadeMode).toBe('drag-right');
+  });
+
+  it('preserves non-zero delta when trustWebhookRef bypasses correction that would zero it (core race scenario)', () => {
+    // Fill Refs clobbered DB Reference = Dates. Without trustWebhookRef, stale-ref
+    // correction adopts DB refs and recomputes delta=0 → cascadeMode=null.
+    const result = classify(
+      {
+        taskId: 'task-a',
+        taskName: 'Task A',
+        newStart: '2026-04-01',
+        newEnd: '2026-04-10',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-05',
+        hasParent: false,
+      },
+      [
+        {
+          id: 'task-a',
+          refStart: '2026-04-01',
+          refEnd: '2026-04-10', // DB ref clobbered by Fill Refs (matches Dates)
+        },
+      ],
+      0,
+      5,
+      { trustWebhookRef: true },
+    );
+
+    expect(result.staleRefCorrected).toBe(false);
+    expect(result.endDelta).toBe(5);
+    expect(result.cascadeMode).toBe('push-right');
+  });
+
+  it('behaves normally when trustWebhookRef is true but DB refs match webhook refs', () => {
+    const result = classify(
+      {
+        taskId: 'task-a',
+        taskName: 'Task A',
+        newStart: '2026-04-02',
+        newEnd: '2026-04-03',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-02',
+        hasParent: false,
+      },
+      [
+        {
+          id: 'task-a',
+          refStart: '2026-04-01',
+          refEnd: '2026-04-02',
+        },
+      ],
+      1,
+      1,
+      { trustWebhookRef: true },
+    );
+
+    expect(result.staleRefCorrected).toBe(false);
+    expect(result.cascadeMode).toBe('drag-right');
+  });
+
+  it('emits stale_ref_bypass_replay telemetry when trustWebhookRef skips correction', () => {
+    const logs = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(' '));
+    try {
+      classify(
+        {
+          taskId: 'task-a',
+          taskName: 'Task A',
+          newStart: '2026-04-02',
+          newEnd: '2026-04-03',
+          refStart: '2026-04-01',
+          refEnd: '2026-04-02',
+          hasParent: false,
+        },
+        [
+          {
+            id: 'task-a',
+            refStart: '2026-03-31',
+            refEnd: '2026-04-01',
+          },
+        ],
+        1,
+        1,
+        { trustWebhookRef: true },
+      );
+    } finally {
+      console.log = origLog;
+    }
+
+    expect(logs).toHaveLength(1);
+    const event = JSON.parse(logs[0]);
+    expect(event.event).toBe('stale_ref_bypass_replay');
+    expect(event.taskId).toBe('task-a');
+    expect(event.webhookRefStart).toBe('2026-04-01');
+    expect(event.webhookRefEnd).toBe('2026-04-02');
+    expect(event.dbRefStart).toBe('2026-03-31');
+    expect(event.dbRefEnd).toBe('2026-04-01');
+  });
 });

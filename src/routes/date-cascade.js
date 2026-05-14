@@ -360,7 +360,7 @@ async function processDateCascade(payload) {
     });
 
     tracer.startPhase('classify');
-    const classified = classify(parsed, allTasks, parsed.startDelta, parsed.endDelta);
+    const classified = classify(parsed, allTasks, parsed.startDelta, parsed.endDelta, { trustWebhookRef: Boolean(parsed._replayTrustRef) });
     tracer.endPhase('classify');
     tracer.set('cascade_mode', classified.cascadeMode);
 
