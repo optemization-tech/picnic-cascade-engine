@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { parseWebhookPayload, isImportMode, isFrozen } from '../gates/guards.js';
-import { classify } from '../engine/classify.js';
+import { classify, ERROR_1_REASON } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { buildReportingText } from '../utils/reporting.js';
@@ -187,10 +187,23 @@ async function applyError1SideEffects({ studyId, sourceTaskId, refStart, refEnd,
  * Skip rules (caller's responsibility):
  *  - Skip when the cascade reverts Reference via Error 1 — that path
  *    intentionally writes Reference to refStart/refEnd, not newStart/newEnd.
- *  - Skip when the seed is frozen — frozen tasks should not get cascade
- *    writes (preserves the long-standing engine invariant).
+ *    Enforced at the no_cascade_mode call site via the
+ *    `classified.reason === ERROR_1_REASON` discriminator.
  *  - Skip when the seed payload lacks dates (defensive — already gated
  *    by the `parsed.hasDates` check upstream).
+ *
+ * Note on frozen seeds: the route flow gates frozen tasks AFTER classify
+ * (line 444, `isFrozen` check inside the cascade-mode-present branch), so
+ * the no_cascade_mode terminal can technically be reached by a frozen seed
+ * if classify returns `cascadeMode: null` via stale-ref-correction zeroing
+ * the deltas. In that narrow case, this helper does write Reference on a
+ * frozen task — consistent with applyError1SideEffects, which also writes
+ * Reference on frozen parents on the Error 1 path. The long-standing
+ * engine invariant is "frozen tasks cannot be MOVED by a cascade
+ * (downstream-shift writes are gated)", not "frozen tasks never get any
+ * write" — Reference acks and Error 1 reverts are both acceptable under
+ * that invariant. If stronger isolation is ever needed, move the
+ * `isFrozen` check before the no_cascade_mode branch at the call site.
  */
 async function writeSeedReferenceAck({ sourceTaskId, newStart, newEnd, tracer }) {
   if (!sourceTaskId || !newStart) return;
@@ -397,7 +410,14 @@ async function processDateCascade(payload) {
     tracer.set('cascade_mode', classified.cascadeMode);
 
     if (classified.skip || !classified.cascadeMode) {
-      if (classified.reason?.includes('Direct parent edit blocked')) {
+      // Exact-match comparison against the exported constant (not substring)
+      // because this discriminator routes between Error 1 revert (which has
+      // its own Reference write via applyError1SideEffects) and the new
+      // no_cascade_mode ack writeback. A future rename of the reason string
+      // in classify.js automatically rebinds via the shared constant; a
+      // stale substring check would silently route Error 1 through the
+      // ack path and bypass the revert guardrail + red banner.
+      if (classified.reason === ERROR_1_REASON) {
         await applyError1SideEffects({
           studyId: parsed.studyId,
           sourceTaskId: classified.sourceTaskId || parsed.taskId,

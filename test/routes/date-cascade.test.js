@@ -49,7 +49,14 @@ vi.mock('../../src/gates/guards.js', () => ({
   isFrozen: mocks.isFrozen,
 }));
 
-vi.mock('../../src/engine/classify.js', () => ({ classify: mocks.classify }));
+// importActual preserves the real ERROR_1_REASON constant (imported below at
+// line ~74) while still letting tests inject a mocked classify() function.
+// Without this, a flat `() => ({ classify: ... })` factory would shadow the
+// constant export and leave ERROR_1_REASON undefined in test scope.
+vi.mock('../../src/engine/classify.js', async () => {
+  const actual = await vi.importActual('../../src/engine/classify.js');
+  return { ...actual, classify: mocks.classify };
+});
 vi.mock('../../src/engine/cascade.js', () => ({ runCascade: mocks.runCascade }));
 vi.mock('../../src/engine/parent-subtask.js', () => ({ runParentSubtask: mocks.runParentSubtask }));
 vi.mock('../../src/notion/queries.js', () => ({ queryStudyTasks: mocks.queryStudyTasks }));
@@ -71,6 +78,7 @@ vi.mock('../../src/services/cascade-queue.js', () => ({
 }));
 
 import { handleDateCascade } from '../../src/routes/date-cascade.js';
+import { ERROR_1_REASON } from '../../src/engine/classify.js';
 import {
   STUDY_TASKS_PROPS as ST,
   STUDIES_PROPS as S,
@@ -648,7 +656,7 @@ describe('date-cascade route safety', () => {
     mocks.queryStudyTasks.mockResolvedValue([{ id: 'parent-1' }, { id: 'child-1' }]);
     mocks.classify.mockReturnValue({
       skip: true,
-      reason: 'Direct parent edit blocked - edit subtasks directly',
+      reason: ERROR_1_REASON,
       cascadeMode: null,
       sourceTaskId: 'parent-1',
       refStart: '2026-05-06',
@@ -709,7 +717,7 @@ describe('date-cascade route safety', () => {
     mocks.queryStudyTasks.mockResolvedValue([{ id: 'source' }, { id: 'child-1' }]);
     mocks.classify.mockReturnValue({
       skip: true,
-      reason: 'Direct parent edit blocked - edit subtasks directly',
+      reason: ERROR_1_REASON,
       cascadeMode: null,
       sourceTaskId: 'source',
       refStart: '2026-04-01',
@@ -1141,6 +1149,69 @@ describe('date-cascade route safety', () => {
     expect(refAckCall[1][ST.AUTOMATION_REPORTING.id]).toBeUndefined();
   });
 
+  it('absorbs writeSeedReferenceAck failure in inner try/catch on no_cascade_mode — terminal logs once, no failed-entry leak', async () => {
+    // Regression-lock the try/catch swallow at src/routes/date-cascade.js:417-426.
+    // The ack write is non-fatal: if patchPage throws (e.g., Notion 429 / 5xx),
+    // the no_action terminal log MUST still fire and the outer cascade catch
+    // MUST NOT escalate to a `failed` Activity Log entry. Mirrors the precedent
+    // pattern at the zero_delta test above (line ~222).
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      newStart: '2026-05-04',
+      newEnd: '2026-05-08',
+      refStart: '2026-05-04',
+      refEnd: '2026-05-15',
+      startDelta: 0,
+      endDelta: -5,
+      mentionable: true,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'source' }]);
+    mocks.classify.mockReturnValue({
+      skip: true,
+      cascadeMode: null,
+      reason: 'No cascade mode determined',
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source',
+    });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    // patchPage is only called from the ack helper on this path — fail it.
+    mocks.mockClient.patchPage.mockRejectedValue(new Error('Notion 429'));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    // Terminal log fires exactly once — outer catch must not escalate to failed.
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledTimes(1);
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'no_action' }),
+    );
+    // No `failed` Activity Log entry leaked from the outer catch.
+    expect(mocks.activityLogService.logTerminalEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed' }),
+    );
+    // The swallow path emits a warning so ops have a signal (even if string-only today).
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[date-cascade] no_cascade_mode reference ack write failed:'),
+      expect.any(String),
+    );
+    // The cascade-failed reportStatus must NOT fire — the path is not an error path.
+    const reportStatusCalls = mocks.mockClient.reportStatus.mock.calls;
+    const failureReportCalls = reportStatusCalls.filter(
+      (args) => args[1] === 'error' || (typeof args[2] === 'string' && args[2].includes('Cascade failed')),
+    );
+    expect(failureReportCalls).toHaveLength(0);
+    warnSpy.mockRestore();
+  });
+
   it('does NOT write Reference ack on Error 1 (Direct parent edit blocked) — applyError1SideEffects reverts instead', async () => {
     mocks.parseWebhookPayload.mockReturnValue({
       skip: false,
@@ -1162,7 +1233,7 @@ describe('date-cascade route safety', () => {
     mocks.classify.mockReturnValue({
       skip: true,
       cascadeMode: null,
-      reason: 'Direct parent edit blocked - edit subtasks directly',
+      reason: ERROR_1_REASON,
       sourceTaskId: 'parent',
       sourceTaskName: 'Parent',
       refStart: '2026-05-01',

@@ -6,6 +6,20 @@ import {
   addBusinessDays,
 } from '../utils/business-days.js';
 
+/**
+ * The exact `reason` string returned by classify() for the Error 1 path
+ * (top-level parent task date edit, which must be reverted).
+ *
+ * Exported so consumers can compare against this constant rather than
+ * substring-matching the message. The route at src/routes/date-cascade.js
+ * uses this to distinguish Error 1 (revert via applyError1SideEffects)
+ * from other no_cascade_mode reasons (writeSeedReferenceAck ack writeback).
+ * A rename here automatically rebinds every consumer; a stale substring
+ * match would silently route Error 1 through the ack-writeback path and
+ * bypass the revert guardrail.
+ */
+export const ERROR_1_REASON = 'Direct parent edit blocked - edit subtasks directly';
+
 function computeCascadeMode(startDelta, endDelta) {
   if (startDelta === 0 && endDelta > 0) return 'push-right';
   if (startDelta === 0 && endDelta < 0) return 'pull-left';
@@ -66,7 +80,7 @@ export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
   if (hasSubtasksFromGraph && !hasParent && (startDelta !== 0 || endDelta !== 0)) {
     return {
       skip: true,
-      reason: 'Direct parent edit blocked - edit subtasks directly',
+      reason: ERROR_1_REASON,
       sourceTaskId,
       sourceTaskName,
       newStart,
