@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { parseWebhookPayload, isImportMode, isFrozen } from '../gates/guards.js';
-import { classify } from '../engine/classify.js';
+import { classify, ERROR_1_REASON } from '../engine/classify.js';
 import { runCascade } from '../engine/cascade.js';
 import { runParentSubtask } from '../engine/parent-subtask.js';
 import { buildReportingText } from '../utils/reporting.js';
@@ -166,6 +166,51 @@ async function applyError1SideEffects({ studyId, sourceTaskId, refStart, refEnd,
 
   if (ops.length === 0) return;
   await Promise.all(ops);
+}
+
+/**
+ * Writes `Reference Start/End = Dates` on the seed task when the cascade
+ * accepted the webhook and processed it but produced no downstream shifts.
+ *
+ * Without this, the replay-dropped-cascades script's idempotency query
+ * (Reference != Dates → "this cascade was never processed") perpetually
+ * re-flags accepted-but-no-shifts edits as divergent on every diagnose run.
+ * Calling this on the no_cascade_mode and zero_updates terminals closes
+ * that cosmetic-residue gap without affecting downstream alignment, which
+ * is unchanged (there was nothing to shift).
+ *
+ * Deliberately does NOT touch AUTOMATION_REPORTING — the calling terminal
+ * already writes a user-visible reportStatus message describing the
+ * outcome (warning for no_cascade_mode, info for zero_updates). Avoiding
+ * the field here keeps that operator-facing context intact.
+ *
+ * Skip rules (caller's responsibility):
+ *  - Skip when the cascade reverts Reference via Error 1 — that path
+ *    intentionally writes Reference to refStart/refEnd, not newStart/newEnd.
+ *    Enforced at the no_cascade_mode call site via the
+ *    `classified.reason === ERROR_1_REASON` discriminator.
+ *  - Skip when the seed payload lacks dates (defensive — already gated
+ *    by the `parsed.hasDates` check upstream).
+ *
+ * Note on frozen seeds: the route flow gates frozen tasks AFTER classify
+ * (line 444, `isFrozen` check inside the cascade-mode-present branch), so
+ * the no_cascade_mode terminal can technically be reached by a frozen seed
+ * if classify returns `cascadeMode: null` via stale-ref-correction zeroing
+ * the deltas. In that narrow case, this helper does write Reference on a
+ * frozen task — consistent with applyError1SideEffects, which also writes
+ * Reference on frozen parents on the Error 1 path. The long-standing
+ * engine invariant is "frozen tasks cannot be MOVED by a cascade
+ * (downstream-shift writes are gated)", not "frozen tasks never get any
+ * write" — Reference acks and Error 1 reverts are both acceptable under
+ * that invariant. If stronger isolation is ever needed, move the
+ * `isFrozen` check before the no_cascade_mode branch at the call site.
+ */
+async function writeSeedReferenceAck({ sourceTaskId, newStart, newEnd, tracer }) {
+  if (!sourceTaskId || !newStart) return;
+  await notionClient.patchPage(sourceTaskId, {
+    [STUDY_TASKS_PROPS.REF_START.id]: { date: { start: newStart } },
+    [STUDY_TASKS_PROPS.REF_END.id]: { date: { start: newEnd || newStart } },
+  }, { tracer });
 }
 
 function buildUpdateProperties(update, sourceTaskName, cascadeMode) {
@@ -365,7 +410,14 @@ async function processDateCascade(payload) {
     tracer.set('cascade_mode', classified.cascadeMode);
 
     if (classified.skip || !classified.cascadeMode) {
-      if (classified.reason?.includes('Direct parent edit blocked')) {
+      // Exact-match comparison against the exported constant (not substring)
+      // because this discriminator routes between Error 1 revert (which has
+      // its own Reference write via applyError1SideEffects) and the new
+      // no_cascade_mode ack writeback. A future rename of the reason string
+      // in classify.js automatically rebinds via the shared constant; a
+      // stale substring check would silently route Error 1 through the
+      // ack path and bypass the revert guardrail + red banner.
+      if (classified.reason === ERROR_1_REASON) {
         await applyError1SideEffects({
           studyId: parsed.studyId,
           sourceTaskId: classified.sourceTaskId || parsed.taskId,
@@ -375,6 +427,23 @@ async function processDateCascade(payload) {
         });
       } else {
         await notionClient.reportStatus(parsed.taskId, 'warning', classified.reason || 'No cascade mode determined', { tracer });
+        // Write Reference = Dates on the seed so the replay-dropped-cascades
+        // diagnose query stops re-flagging this seed every run. The cascade
+        // accepted the edit and concluded there was no work to do — we
+        // record that acknowledgment. Failure here is non-fatal: the
+        // no_action terminal log is the source of truth for "we processed
+        // this webhook," and a transient PATCH miss just means the next
+        // legitimate edit will fix Reference for us.
+        try {
+          await writeSeedReferenceAck({
+            sourceTaskId: parsed.taskId,
+            newStart: parsed.newStart,
+            newEnd: parsed.newEnd,
+            tracer,
+          });
+        } catch (ackErr) {
+          console.warn('[date-cascade] no_cascade_mode reference ack write failed:', ackErr?.message);
+        }
       }
       console.log(tracer.toConsoleLog());
       await logTerminalEvent({
@@ -472,6 +541,14 @@ async function processDateCascade(payload) {
     tracer.endPhase('merge');
 
     if (updates.length === 0) {
+      // NOTE: this terminal is currently unreachable because
+      // updatesByTaskId.set(classified.sourceTaskId, ...) above always adds
+      // the source entry, so updates.length is at least 1 by the time we
+      // reach here. Left intact as a defensive safety net in case future
+      // refactoring (e.g., guarding the source auto-add) makes it
+      // reachable. If a future change makes this path live, add a
+      // writeSeedReferenceAck call here matching the no_cascade_mode
+      // terminal pattern above.
       tracer.set('update_count', 0);
       console.log(tracer.toConsoleLog());
       await Promise.all([
