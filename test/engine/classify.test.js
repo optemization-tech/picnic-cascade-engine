@@ -269,6 +269,69 @@ describe('classify', () => {
     expect(result.cascadeMode).toBe('push-right'); // end-only right
   });
 
+  it('preserves drag-left when stale refs collapse endDelta to zero', () => {
+    // Simulates the Sanofi round-trip bug: user does drag-right +5, then
+    // immediately drag-left -5. Notion returns partially stale refs — RefEnd
+    // still has the pre-cascade value, making endDelta collapse to 0.
+    // Without the fix, classify downgrades drag-left → start-left,
+    // which runs tightenDownstreamFromSeed and collapses gaps.
+    const result = classify(
+      {
+        taskId: 'task-a',
+        taskName: 'TLF Delivery',
+        newStart: '2026-04-01', // restoring to original
+        newEnd: '2026-04-02',   // restoring to original
+        refStart: '2026-04-08', // webhook ref (post-drag-right position)
+        refEnd: '2026-04-09',   // webhook ref (post-drag-right position)
+        hasParent: false,
+      },
+      [
+        {
+          id: 'task-a',
+          refStart: '2026-04-08', // DB ref: correctly updated
+          refEnd: '2026-04-02',   // DB ref: STALE (pre-drag-right value)
+        },
+      ],
+      -5, // startDelta: drag-left
+      -5, // endDelta: drag-left
+    );
+
+    expect(result.staleRefCorrected).toBe(true);
+    expect(result.cascadeMode).toBe('drag-left');
+    expect(result.startDelta).toBe(-5);
+    expect(result.endDelta).toBe(-5);
+  });
+
+  it('preserves drag-right when stale refs collapse startDelta to zero', () => {
+    // Mirror case: stale RefStart makes startDelta collapse to 0,
+    // would downgrade drag-right → push-right.
+    const result = classify(
+      {
+        taskId: 'task-a',
+        taskName: 'Task A',
+        newStart: '2026-04-08',
+        newEnd: '2026-04-09',
+        refStart: '2026-04-01',
+        refEnd: '2026-04-02',
+        hasParent: false,
+      },
+      [
+        {
+          id: 'task-a',
+          refStart: '2026-04-08', // STALE: matches newStart
+          refEnd: '2026-04-02',   // correctly reflects pre-edit
+        },
+      ],
+      5,
+      5,
+    );
+
+    expect(result.staleRefCorrected).toBe(true);
+    expect(result.cascadeMode).toBe('drag-right');
+    expect(result.startDelta).toBe(5);
+    expect(result.endDelta).toBe(5);
+  });
+
   it('corrects stale reference dates from DB snapshot', () => {
     const result = classify(
       {
