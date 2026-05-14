@@ -300,6 +300,8 @@ describe('classify', () => {
     expect(result.cascadeMode).toBe('drag-left');
     expect(result.startDelta).toBe(-5);
     expect(result.endDelta).toBe(-5);
+    expect(result.refStart).toBe('2026-04-08');
+    expect(result.refEnd).toBe('2026-04-09');
   });
 
   it('preserves drag-right when stale refs collapse startDelta to zero', () => {

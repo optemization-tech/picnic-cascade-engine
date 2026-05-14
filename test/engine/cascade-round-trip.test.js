@@ -194,7 +194,7 @@ describe('cascade round-trip property', () => {
     }
   });
 
-  it('drag-right then drag-left with stale refs (classify misclassification)', () => {
+  it('start-left (misclassified drag) collapses gaps — characterization of pre-fix failure', () => {
     const delta = 12;
     const tasks = gappedDownstreamChain();
     const original = snapshotDates(tasks);
@@ -251,8 +251,9 @@ describe('cascade round-trip property', () => {
     const fOriginal = original.f;
     const fRestored = restored.f;
 
-    // Tasks A-D should be close to original (upstream pull may restore them)
-    // but E and F should be WRONG — tightened against D instead of gap-preserved
+    // INTENTIONAL .not.toBe(): this test documents the BROKEN outcome when
+    // classify misclassifies drag-left as start-left (the bug the guard fixes).
+    // The fix is verified in classify.test.js; this characterizes the damage.
     expect(eRestored.start).not.toBe(eOriginal.start);
     expect(fRestored.start).not.toBe(fOriginal.start);
   });
