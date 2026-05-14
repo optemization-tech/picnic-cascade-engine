@@ -458,6 +458,15 @@ describe('pollActivityLog', () => {
   // property NAME in the `properties` object (Notion's response shape), even
   // when the filter is sent by .id. That's why our makeEntry helper keys by
   // AL.STATUS.name / AL.SUMMARY.name, matching what the script reads back.
+  //
+  // The Status property is configured as a Notion `select` column in
+  // production today — the engine's writer at src/services/activity-log.js:165
+  // PATCHes `{ select: { name: ... } }`. The default fixture here matches
+  // production so the primary tests exercise the live read path
+  // (`latest.properties?.[STATUS.name]?.select?.name`). The forward-compat
+  // test below explicitly overrides to a `status`-typed property to lock in
+  // the alternate branch of the script's fallback chain — in case the
+  // column is ever migrated to a Notion `status`-type column.
   function makeEntry({
     id = 'log-1',
     status = 'Success',
@@ -468,7 +477,7 @@ describe('pollActivityLog', () => {
       id,
       created_time: createdTime,
       properties: {
-        [AL.STATUS.name]: { id: AL.STATUS.id, type: 'status', status: { name: status } },
+        [AL.STATUS.name]: { id: AL.STATUS.id, type: 'select', select: { name: status } },
         [AL.SUMMARY.name]: { id: AL.SUMMARY.id, type: 'rich_text', rich_text: [{ plain_text: summary }] },
       },
     };
@@ -529,12 +538,16 @@ describe('pollActivityLog', () => {
     expect(result).toEqual({ status: 'success', summary: 'new' });
   });
 
-  it('falls back to select.name when Status is a select (legacy schema variant)', async () => {
-    // The engine writes Status as a `status`-type property today, but
-    // pollActivityLog accepts both `status` and `select` shapes for
-    // forward/back compatibility. Lock that fallback in.
+  it('reads status.name when Status is a status-type property (forward-compat path)', async () => {
+    // The engine writes Status as a `select` today (see makeEntry default and
+    // src/services/activity-log.js:165). pollActivityLog also accepts a
+    // `status`-typed response shape so the script keeps working if the
+    // column is ever migrated to a Notion `status`-type column. This test
+    // overrides to the `status`-typed shape to lock in that fallback branch
+    // — the primary production read path is the default select-typed fixture
+    // exercised by the other tests in this block.
     const entry = makeEntry();
-    entry.properties[AL.STATUS.name] = { type: 'select', select: { name: 'Success' } };
+    entry.properties[AL.STATUS.name] = { id: AL.STATUS.id, type: 'status', status: { name: 'Success' } };
     const result = await pollActivityLog({
       client: { queryDatabase: vi.fn().mockResolvedValue([entry]) },
       activityLogDbId: 'log-db',
