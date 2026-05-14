@@ -120,6 +120,20 @@ export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
     }
 
     cascadeMode = computeCascadeMode(startDelta, endDelta);
+
+    const webhookMode = computeCascadeMode(webhookStartDelta, webhookEndDelta);
+    if (
+      (webhookMode === 'drag-left' || webhookMode === 'drag-right') &&
+      cascadeMode !== webhookMode
+    ) {
+      startDelta = webhookStartDelta;
+      endDelta = webhookEndDelta;
+      refStart = task.refStart;
+      refEnd = task.refEnd;
+      newEnd = task.newEnd;
+      cascadeMode = webhookMode;
+    }
+
     staleRefCorrected = true;
   }
 

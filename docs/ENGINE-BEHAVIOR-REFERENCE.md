@@ -429,6 +429,25 @@ For every behavior change:
 
 ## Changelog
 
+### 2026-05-14 — Stale-ref correction drag-mode preservation guard
+
+Plan: N/A (hotfix — Sanofi Pre-T1D Tepli-QUEST round-trip failure, study `34423867-60c2-8087-9da5-e5480d044695`).
+
+Before this change, the stale-reference correction in `classify()` (`src/engine/classify.js:88-124`) could downgrade a `drag-left` (or `drag-right`) into a `start-left` (or `push-right`) when Notion's database query returned partially stale Reference dates for the source task. The failure sequence:
+
+1. PM drags a task right +N BD. Engine cascades 56 tasks, patches Reference Start/End to new positions.
+2. PM immediately drags the same task left -N BD (correction). Webhook correctly reports `startDelta=-N, endDelta=-N` → `drag-left`.
+3. Engine queries the DB for the source task's Reference dates. Notion returns `RefStart` updated (from step 1's patch) but `RefEnd` still stale (pre-step-1 value) — partial eventual consistency.
+4. Stale-ref correction recalculates: `endDelta = signedBDDelta(staleRefEnd, newEnd) = 0` while `startDelta` stays `-N`.
+5. `computeCascadeMode(-N, 0) = 'start-left'` — mode downgraded from `drag-left`.
+6. `start-left` runs `tightenDownstreamFromSeed`, which tight-schedules downstream tasks against blocker ends. Tasks in a tight chain restore correctly (tightening = shift for tight chains), but tasks after a large gap (e.g., 50 BD gap between Repeat Abstraction and Repeat QC) are pulled forward to be adjacent to their blockers, **collapsing the gap** and leaving them hundreds of business days from their original positions.
+
+The fix adds a drag-mode preservation guard after the stale-ref correction block: when the webhook's original classification was a drag (`drag-left` or `drag-right`) but the stale-ref-corrected classification is not, the guard reverts to the webhook's original deltas, reference dates, newEnd, and cascade mode. The webhook's drag classification is authoritative because the user's UI interaction definitively indicates a uniform translation — stale refs cannot override that intent.
+
+The guard does NOT fire when both the original and corrected modes agree (including when both are drags with different magnitudes) — non-drag stale-ref corrections are preserved unchanged.
+
+**Test coverage:** `test/engine/classify.test.js` adds two cases (stale RefEnd collapsing drag-left → start-left; stale RefStart collapsing drag-right → push-right). `test/engine/cascade-round-trip.test.js` adds four round-trip property tests including a 200-task full-study-graph fixture and a stale-ref misclassification scenario. Tag: `BEH-CLASSIFY-DRAG-MODE-PRESERVATION`.
+
 ### 2026-05-12 — classifyWebhookActor edit-first KNOWN_BOT_IDS fallback + cold-boot guard + telemetry
 
 Plan: `docs/plans/2026-05-12-001-fix-classify-webhook-actor-edit-first-knownbots-fallback-plan.md`.
