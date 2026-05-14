@@ -7,9 +7,13 @@ import {
   synthesizeWebhookPayload,
   classifyWebhookResponse,
   diagnoseStudy,
+  pollActivityLog,
   run,
 } from '../../scripts/replay-dropped-cascades.js';
-import { STUDY_TASKS_PROPS as ST } from '../../src/notion/property-names.js';
+import {
+  STUDY_TASKS_PROPS as ST,
+  ACTIVITY_LOG_PROPS as AL,
+} from '../../src/notion/property-names.js';
 import { parseWebhookPayload } from '../../src/gates/guards.js';
 
 // ─── Fixture builders ───────────────────────────────────────────────────────
@@ -445,4 +449,113 @@ describe('run() apply mode', () => {
     expect(result.state).toBe('success');
     expect(result.components[0].outcome).toBe('applied');
   }, 10_000);
+});
+
+// ─── pollActivityLog ────────────────────────────────────────────────────────
+
+describe('pollActivityLog', () => {
+  // Activity Log entries returned by Notion's queryDatabase are keyed by
+  // property NAME in the `properties` object (Notion's response shape), even
+  // when the filter is sent by .id. That's why our makeEntry helper keys by
+  // AL.STATUS.name / AL.SUMMARY.name, matching what the script reads back.
+  function makeEntry({
+    id = 'log-1',
+    status = 'Success',
+    summary = 'Cascade completed',
+    createdTime = '2026-05-13T21:15:30.000Z',
+  } = {}) {
+    return {
+      id,
+      created_time: createdTime,
+      properties: {
+        [AL.STATUS.name]: { id: AL.STATUS.id, type: 'status', status: { name: status } },
+        [AL.SUMMARY.name]: { id: AL.SUMMARY.id, type: 'rich_text', rich_text: [{ plain_text: summary }] },
+      },
+    };
+  }
+
+  it('queries Activity Log with the correct property + filter shapes', async () => {
+    // Regression: this filter was previously { property: 'Source Task ID',
+    // rich_text: { equals: ... } } which produced Notion 400s in production
+    // (no such property). Now keyed by ACTIVITY_LOG_PROPS.STUDY_TASKS.id
+    // with relation/contains, matching how the engine writes the same
+    // property in src/services/activity-log.js.
+    const queryMock = vi.fn().mockResolvedValue([makeEntry()]);
+    await pollActivityLog({
+      client: { queryDatabase: queryMock },
+      activityLogDbId: 'log-db',
+      studyPageId: 'study-1',
+      sourceTaskId: 'task-1',
+      startedAt: '2026-05-13T21:14:00.000Z',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(queryMock).toHaveBeenCalledWith('log-db', {
+      and: [
+        { property: AL.WORKFLOW.id, select: { equals: 'Date Cascade' } },
+        { property: AL.STUDY_TASKS.id, relation: { contains: 'task-1' } },
+        { timestamp: 'created_time', created_time: { on_or_after: '2026-05-13T21:14:00.000Z' } },
+      ],
+    });
+  });
+
+  it("returns the entry's status lowercased + snake-cased, with summary text", async () => {
+    const result = await pollActivityLog({
+      client: { queryDatabase: vi.fn().mockResolvedValue([
+        makeEntry({ status: 'No Shifts', summary: 'Nothing to shift' }),
+      ]) },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(result).toEqual({ status: 'no_shifts', summary: 'Nothing to shift' });
+  });
+
+  it('picks the most-recent entry when Notion returns matches out of order', async () => {
+    const older = makeEntry({ id: 'a', status: 'Failed', summary: 'old', createdTime: '2026-05-13T21:10:00.000Z' });
+    const newer = makeEntry({ id: 'b', status: 'Success', summary: 'new', createdTime: '2026-05-13T21:15:00.000Z' });
+    const result = await pollActivityLog({
+      client: { queryDatabase: vi.fn().mockResolvedValue([older, newer]) },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(result).toEqual({ status: 'success', summary: 'new' });
+  });
+
+  it('falls back to select.name when Status is a select (legacy schema variant)', async () => {
+    // The engine writes Status as a `status`-type property today, but
+    // pollActivityLog accepts both `status` and `select` shapes for
+    // forward/back compatibility. Lock that fallback in.
+    const entry = makeEntry();
+    entry.properties[AL.STATUS.name] = { type: 'select', select: { name: 'Success' } };
+    const result = await pollActivityLog({
+      client: { queryDatabase: vi.fn().mockResolvedValue([entry]) },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(result.status).toBe('success');
+  });
+
+  it('throws an error with code=poll_timeout when no entries appear before deadline', async () => {
+    const queryMock = vi.fn().mockResolvedValue([]);
+    await expect(pollActivityLog({
+      client: { queryDatabase: queryMock },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 50,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    })).rejects.toMatchObject({ code: 'poll_timeout' });
+    expect(queryMock).toHaveBeenCalled();
+  });
 });

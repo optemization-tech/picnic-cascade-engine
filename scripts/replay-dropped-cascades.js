@@ -54,7 +54,7 @@
 
 import { config as dotenvConfig } from 'dotenv';
 import { randomUUID } from 'node:crypto';
-import { STUDY_TASKS_PROPS, STUDIES_PROPS, findById } from '../src/notion/property-names.js';
+import { STUDY_TASKS_PROPS, STUDIES_PROPS, ACTIVITY_LOG_PROPS, findById } from '../src/notion/property-names.js';
 
 dotenvConfig();
 
@@ -408,10 +408,15 @@ export async function applyComponentReplay({
 
 /**
  * Polls Notion's Activity Log for a terminal entry from the seed task's
- * cascade. The engine writes one Activity Log entry per cascade run, with
- * Source Task ID set to the seed task and Status set to the terminal
- * outcome (success, no_shifts, no_action, failed). We filter by both
- * fields and wait until at least one entry exists.
+ * cascade. The engine writes one Activity Log entry per cascade run with
+ * `Study Tasks` (relation) pointing to the seed task and `Status` set to
+ * the terminal outcome (success, no_shifts, no_action, failed). We filter
+ * by both fields and wait until at least one entry exists.
+ *
+ * Filter properties are referenced by their ACTIVITY_LOG_PROPS .id so they
+ * survive any future property rename without re-deploying this script. The
+ * engine's activity-log writer (src/services/activity-log.js:172) keys the
+ * same property by id, so this stays paired.
  *
  * Returns the most recent matching entry's status + summary on success.
  * Throws on timeout — caller decides how to report.
@@ -432,8 +437,8 @@ export async function pollActivityLog({
   while (Date.now() < deadline) {
     const entries = await client.queryDatabase(activityLogDbId, {
       and: [
-        { property: 'Workflow', select: { equals: 'Date Cascade' } },
-        { property: 'Source Task ID', rich_text: { equals: sourceTaskId } },
+        { property: ACTIVITY_LOG_PROPS.WORKFLOW.id, select: { equals: 'Date Cascade' } },
+        { property: ACTIVITY_LOG_PROPS.STUDY_TASKS.id, relation: { contains: sourceTaskId } },
         { timestamp: 'created_time', created_time: { on_or_after: startedAtIso } },
       ],
     });
@@ -443,10 +448,10 @@ export async function pollActivityLog({
       const latest = entries.sort((a, b) =>
         (b.created_time || '').localeCompare(a.created_time || ''),
       )[0];
-      const statusProp = latest.properties?.['Status']?.status?.name
-        || latest.properties?.['Status']?.select?.name
+      const statusProp = latest.properties?.[ACTIVITY_LOG_PROPS.STATUS.name]?.status?.name
+        || latest.properties?.[ACTIVITY_LOG_PROPS.STATUS.name]?.select?.name
         || 'unknown';
-      const summaryProp = latest.properties?.['Summary']?.rich_text?.[0]?.plain_text || '';
+      const summaryProp = latest.properties?.[ACTIVITY_LOG_PROPS.SUMMARY.name]?.rich_text?.[0]?.plain_text || '';
       return {
         status: statusProp.toLowerCase().replace(/\s+/g, '_'),
         summary: summaryProp,
