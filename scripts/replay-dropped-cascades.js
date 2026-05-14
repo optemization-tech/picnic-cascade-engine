@@ -433,7 +433,7 @@ export async function pollActivityLog({
     const entries = await client.queryDatabase(activityLogDbId, {
       and: [
         { property: 'Workflow', select: { equals: 'Date Cascade' } },
-        { property: 'Source Task ID', rich_text: { equals: sourceTaskId } },
+        { property: 'Source Task ID', formula: { string: { equals: sourceTaskId } } },
         { timestamp: 'created_time', created_time: { on_or_after: startedAtIso } },
       ],
     });
@@ -718,7 +718,9 @@ export async function runMain() {
 
 function formatHumanReport(result) {
   const lines = [];
-  if (result.state === 'no_divergence') {
+  if (result.error) {
+    lines.push(`Error (exit ${result.exitCode}): ${result.error.message}`);
+  } else if (result.state === 'no_divergence') {
     lines.push('No divergent studies found. Nothing to replay.');
   } else if (result.state === 'diagnose_only') {
     lines.push(`Diagnose: ${result.studies.length} studies affected (replay id ${result.replayId})`);
@@ -734,14 +736,15 @@ function formatHumanReport(result) {
     lines.push('To apply: re-run with --apply --confirm-notified');
   } else {
     lines.push(`Apply complete (replay id ${result.replayId}, state: ${result.state})`);
-    const byOutcome = result.components.reduce((acc, c) => {
+    const components = result.components || result.completedComponents || [];
+    const byOutcome = components.reduce((acc, c) => {
       acc[c.outcome] = (acc[c.outcome] || 0) + 1;
       return acc;
     }, {});
     for (const [outcome, count] of Object.entries(byOutcome)) {
       lines.push(`  ${outcome}: ${count}`);
     }
-    const failures = result.components.filter((c) => c.outcome !== 'applied' && c.outcome !== 'skipped');
+    const failures = components.filter((c) => c.outcome !== 'applied' && c.outcome !== 'skipped');
     if (failures.length > 0) {
       lines.push('');
       lines.push('Failures:');
