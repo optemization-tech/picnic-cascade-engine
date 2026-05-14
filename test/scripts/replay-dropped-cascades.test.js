@@ -7,6 +7,7 @@ import {
   synthesizeWebhookPayload,
   classifyWebhookResponse,
   diagnoseStudy,
+  pollActivityLog,
   run,
 } from '../../scripts/replay-dropped-cascades.js';
 import { STUDY_TASKS_PROPS as ST } from '../../src/notion/property-names.js';
@@ -445,4 +446,128 @@ describe('run() apply mode', () => {
     expect(result.state).toBe('success');
     expect(result.components[0].outcome).toBe('applied');
   }, 10_000);
+});
+
+// ─── pollActivityLog ────────────────────────────────────────────────────────
+//
+// Lock in the Activity Log poll behavior. The function had ZERO direct test
+// coverage before this PR — that's how the original `rich_text/equals` bug
+// shipped (fixed in PR #112 by switching to `formula: { string: { equals } }`).
+// These tests pin the post-fix filter shape, the status normalization, the
+// sort-by-most-recent contract, the forward-compat fallback for a status-typed
+// Status property, and the poll_timeout deadline. The fixture's Status uses
+// the `select`-typed shape because that's what the engine writer at
+// src/services/activity-log.js:165 PATCHes today; the forward-compat test
+// overrides to `status`-typed to lock in the alternate branch of the
+// `latest.properties?.['Status']?.status?.name || latest.properties?.['Status']?.select?.name`
+// fallback chain in pollActivityLog.
+
+describe('pollActivityLog', () => {
+  function makeEntry({
+    id = 'log-1',
+    status = 'Success',
+    summary = 'Cascade completed',
+    createdTime = '2026-05-14T18:30:00.000Z',
+  } = {}) {
+    return {
+      id,
+      created_time: createdTime,
+      properties: {
+        // `select`-typed Status — matches the engine writer at
+        // src/services/activity-log.js:165 which PATCHes `{ select: { name } }`.
+        Status: { type: 'select', select: { name: status } },
+        Summary: { type: 'rich_text', rich_text: [{ plain_text: summary }] },
+      },
+    };
+  }
+
+  it('queries Activity Log with the formula.string filter shape (regression for the original rich_text/equals bug)', async () => {
+    // Regression-lock for PR #112: the original filter was
+    //   { property: 'Source Task ID', rich_text: { equals: sourceTaskId } }
+    // which produced Notion 400s in production because `Source Task ID` is a
+    // formula property, not rich_text. The fix switched to
+    //   { property: 'Source Task ID', formula: { string: { equals: ... } } }
+    // — same property name, correct filter type. This test asserts that
+    // exact filter shape so a future refactor that drops `formula.string`
+    // (or reverts to `rich_text`) fails the suite immediately.
+    const queryMock = vi.fn().mockResolvedValue([makeEntry()]);
+    await pollActivityLog({
+      client: { queryDatabase: queryMock },
+      activityLogDbId: 'log-db',
+      studyPageId: 'study-1',
+      sourceTaskId: 'task-1',
+      startedAt: '2026-05-14T18:29:00.000Z',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(queryMock).toHaveBeenCalledWith('log-db', {
+      and: [
+        { property: 'Workflow', select: { equals: 'Date Cascade' } },
+        { property: 'Source Task ID', formula: { string: { equals: 'task-1' } } },
+        { timestamp: 'created_time', created_time: { on_or_after: '2026-05-14T18:29:00.000Z' } },
+      ],
+    });
+  });
+
+  it("returns the entry's status lowercased + snake-cased, with summary text", async () => {
+    const result = await pollActivityLog({
+      client: { queryDatabase: vi.fn().mockResolvedValue([
+        makeEntry({ status: 'No Shifts', summary: 'Nothing to shift' }),
+      ]) },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(result).toEqual({ status: 'no_shifts', summary: 'Nothing to shift' });
+  });
+
+  it('picks the most-recent entry when Notion returns matches out of order', async () => {
+    const older = makeEntry({ id: 'a', status: 'Failed', summary: 'old', createdTime: '2026-05-14T18:10:00.000Z' });
+    const newer = makeEntry({ id: 'b', status: 'Success', summary: 'new', createdTime: '2026-05-14T18:30:00.000Z' });
+    const result = await pollActivityLog({
+      client: { queryDatabase: vi.fn().mockResolvedValue([older, newer]) },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(result).toEqual({ status: 'success', summary: 'new' });
+  });
+
+  it('reads status.name when Status is a status-type property (forward-compat path)', async () => {
+    // The engine writes Status as a `select` today (matched by makeEntry's
+    // default). pollActivityLog ALSO accepts a `status`-typed response shape
+    // so the script keeps working if the column is ever migrated to a Notion
+    // `status`-type column. This test overrides to the `status`-typed shape
+    // to lock in that fallback branch.
+    const entry = makeEntry();
+    entry.properties.Status = { type: 'status', status: { name: 'Success' } };
+    const result = await pollActivityLog({
+      client: { queryDatabase: vi.fn().mockResolvedValue([entry]) },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 1000,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    });
+    expect(result.status).toBe('success');
+  });
+
+  it('throws an error with code=poll_timeout when no entries appear before deadline', async () => {
+    const queryMock = vi.fn().mockResolvedValue([]);
+    await expect(pollActivityLog({
+      client: { queryDatabase: queryMock },
+      activityLogDbId: 'log-db',
+      sourceTaskId: 'task-1',
+      timeoutMs: 50,
+      intervalMs: 10,
+      sleepImpl: async () => {},
+    })).rejects.toMatchObject({ code: 'poll_timeout' });
+    expect(queryMock).toHaveBeenCalled();
+  });
 });
