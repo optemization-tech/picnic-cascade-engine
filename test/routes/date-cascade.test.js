@@ -1066,4 +1066,255 @@ describe('date-cascade route safety', () => {
       summary: expect.stringContaining('cascade failed'),
     }));
   });
+
+  // ─── Seed Reference writeback on no-shifts terminals ────────────────────
+  //
+  // Closes the cosmetic-residue gap discovered during the 2026-05-13 U6
+  // backfill (PR #109 / pulse-log/05.13/001). When the cascade processes a
+  // webhook and concludes there are no downstream shifts to make
+  // (no_cascade_mode or zero_updates terminals), the seed's Reference now
+  // gets written back to match Dates so the replay-dropped-cascades script's
+  // divergence diagnose stops flagging the seed on every subsequent run.
+  // Frozen seeds, Error 1 reverts, and the success path are explicitly
+  // unaffected.
+
+  it('writes Reference=Dates on seed for no_cascade_mode terminal (non-Error-1)', async () => {
+    // Inputs use business-day dates so normalizeWeekendSourceDates doesn't
+    // snap them — the assertion below is on the *post-snap* parsed.newStart/
+    // newEnd, which equal the inputs when the inputs are already business days.
+    // (Saturday inputs would snap forward and confuse the assertion.)
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      newStart: '2026-05-04',
+      newEnd: '2026-05-08',
+      refStart: '2026-05-04',
+      refEnd: '2026-05-15',
+      startDelta: 0,
+      endDelta: -5,
+      mentionable: true,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'source' }]);
+    // skip:true + reason that does NOT match 'Direct parent edit blocked'
+    // → non-Error-1 sub-case → writeback should fire.
+    mocks.classify.mockReturnValue({
+      skip: true,
+      cascadeMode: null,
+      reason: 'No cascade mode determined',
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source',
+    });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.patchPage.mockResolvedValue({});
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    // No real cascade work
+    expect(mocks.runCascade).not.toHaveBeenCalled();
+    expect(mocks.mockClient.patchPages).not.toHaveBeenCalled();
+    // The terminal still logs as no_action
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      details: expect.objectContaining({ noActionReason: expect.stringContaining('No cascade mode') }),
+    }));
+    // The new behavior: Reference is written back to Dates on the seed.
+    // Find the patchPage call that writes REF_START/REF_END (helper writes only those
+    // two properties, distinguishing it from Error 1's bigger revert patch).
+    const refAckCall = mocks.mockClient.patchPage.mock.calls.find(([, props]) =>
+      props[ST.REF_START.id] && props[ST.REF_END.id] && !props[ST.DATES.id],
+    );
+    expect(refAckCall).toBeDefined();
+    expect(refAckCall[0]).toBe('source');
+    expect(refAckCall[1][ST.REF_START.id]).toEqual({ date: { start: '2026-05-04' } });
+    expect(refAckCall[1][ST.REF_END.id]).toEqual({ date: { start: '2026-05-08' } });
+    // AUTOMATION_REPORTING is intentionally NOT touched by the ack helper —
+    // the reportStatus warning above is the user-visible message for this terminal.
+    expect(refAckCall[1][ST.AUTOMATION_REPORTING.id]).toBeUndefined();
+  });
+
+  it('does NOT write Reference ack on Error 1 (Direct parent edit blocked) — applyError1SideEffects reverts instead', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'parent',
+      taskName: 'Parent',
+      studyId: 'study-1',
+      hasDates: true,
+      newStart: '2026-05-10',
+      newEnd: '2026-05-15',
+      refStart: '2026-05-01',
+      refEnd: '2026-05-05',
+      startDelta: 7,
+      endDelta: 7,
+      mentionable: true,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'parent' }]);
+    mocks.classify.mockReturnValue({
+      skip: true,
+      cascadeMode: null,
+      reason: 'Direct parent edit blocked - edit subtasks directly',
+      sourceTaskId: 'parent',
+      sourceTaskName: 'Parent',
+      refStart: '2026-05-01',
+      refEnd: '2026-05-05',
+    });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.patchPage.mockResolvedValue({});
+    mocks.mockClient.request.mockResolvedValue({});
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    // Error 1's revert writes BOTH Dates AND Reference (back to refStart/refEnd, not newStart/newEnd).
+    const error1RevertCall = mocks.mockClient.patchPage.mock.calls.find(([, props]) =>
+      props[ST.DATES.id] && props[ST.REF_START.id] && props[ST.REF_END.id],
+    );
+    expect(error1RevertCall).toBeDefined();
+    expect(error1RevertCall[1][ST.REF_START.id]).toEqual({ date: { start: '2026-05-01' } });
+    expect(error1RevertCall[1][ST.REF_END.id]).toEqual({ date: { start: '2026-05-05' } });
+    // Our ack helper writes ONLY REF_START + REF_END (no DATES, no AUTOMATION_REPORTING).
+    // There should be no such call — Error 1 owns the Reference write on this path.
+    const refAckCall = mocks.mockClient.patchPage.mock.calls.find(([, props]) =>
+      props[ST.REF_START.id] && props[ST.REF_END.id] && !props[ST.DATES.id]
+        && !props[ST.AUTOMATION_REPORTING.id],
+    );
+    expect(refAckCall).toBeUndefined();
+  });
+
+  it('does NOT write Reference ack on frozen_status terminal (preserves engine invariant)', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'frozen-source',
+      taskName: 'Frozen Source',
+      studyId: 'study-1',
+      hasDates: true,
+      newStart: '2026-04-10',
+      newEnd: '2026-04-15',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-05',
+      startDelta: 9,
+      endDelta: 10,
+      mentionable: true,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(true);
+    mocks.queryStudyTasks.mockResolvedValue([{ id: 'frozen-source' }]);
+    mocks.classify.mockReturnValue({
+      skip: false,
+      cascadeMode: 'push-right',
+      sourceTaskId: 'frozen-source',
+      sourceTaskName: 'Frozen Source',
+      newStart: '2026-04-10',
+      newEnd: '2026-04-15',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-05',
+      startDelta: 9,
+      endDelta: 10,
+      parentTaskId: null,
+      parentMode: null,
+    });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.patchPage.mockResolvedValue({});
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'no_action',
+      details: expect.objectContaining({ noActionReason: 'frozen_status' }),
+    }));
+    // No patchPage write that matches the ack signature (REF_START + REF_END only).
+    const refAckCall = mocks.mockClient.patchPage.mock.calls.find(([, props]) =>
+      props[ST.REF_START.id] && props[ST.REF_END.id] && !props[ST.DATES.id]
+        && !props[ST.AUTOMATION_REPORTING.id],
+    );
+    expect(refAckCall).toBeUndefined();
+  });
+
+  it('success path still writes Reference via buildUpdateProperties (no behavior change)', async () => {
+    mocks.parseWebhookPayload.mockReturnValue({
+      skip: false,
+      taskId: 'source',
+      taskName: 'Source',
+      studyId: 'study-1',
+      hasDates: true,
+      newStart: '2026-04-10',
+      newEnd: '2026-04-15',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-05',
+      startDelta: 9,
+      endDelta: 10,
+      mentionable: true,
+    });
+    mocks.isImportMode.mockReturnValue(false);
+    mocks.isFrozen.mockReturnValue(false);
+    mocks.queryStudyTasks.mockResolvedValue([
+      { id: 'source' },
+      { id: 'downstream' },
+    ]);
+    mocks.classify.mockReturnValue({
+      skip: false,
+      cascadeMode: 'push-right',
+      sourceTaskId: 'source',
+      sourceTaskName: 'Source',
+      newStart: '2026-04-10',
+      newEnd: '2026-04-15',
+      refStart: '2026-04-01',
+      refEnd: '2026-04-05',
+      startDelta: 9,
+      endDelta: 10,
+      parentTaskId: null,
+      parentMode: null,
+    });
+    // Cascade produces a downstream shift.
+    mocks.runCascade.mockReturnValue({
+      updates: [{
+        taskId: 'downstream',
+        taskName: 'Downstream',
+        newStart: '2026-04-20',
+        newEnd: '2026-04-25',
+        newReferenceStartDate: '2026-04-20',
+        newReferenceEndDate: '2026-04-25',
+      }],
+      movedTaskIds: ['downstream'],
+      movedTaskMap: new Map([['downstream', { newStart: '2026-04-20', newEnd: '2026-04-25' }]]),
+      diagnostics: {},
+    });
+    mocks.runParentSubtask.mockReturnValue({ updates: [] });
+    mocks.mockClient.reportStatus.mockResolvedValue({});
+    mocks.mockClient.patchPages.mockResolvedValue({ updatedCount: 2, taskIds: ['source', 'downstream'] });
+
+    const { req, res } = makeReqRes({ payload: true });
+    await handleDateCascade(req, res);
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    // Success path: patchPages handles all updates (seed + downstream).
+    expect(mocks.mockClient.patchPages).toHaveBeenCalled();
+    // Confirm the success terminal fired (not no_action).
+    expect(mocks.activityLogService.logTerminalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'success',
+    }));
+    // The ack helper should NOT have fired on the success path — buildUpdateProperties
+    // already covers Reference writes via patchPages.
+    const refAckCall = mocks.mockClient.patchPage.mock.calls.find(([, props]) =>
+      props[ST.REF_START.id] && props[ST.REF_END.id] && !props[ST.DATES.id]
+        && !props[ST.AUTOMATION_REPORTING.id],
+    );
+    expect(refAckCall).toBeUndefined();
+  });
 });
