@@ -498,7 +498,6 @@ export async function run({
 
   const client = await clientFactory();
   const replayId = randomUUID();
-  const applyStartedAt = new Date().toISOString();
 
   // Collect studies to diagnose. If --study is given, just that one;
   // otherwise iterate all studies in the Studies DB.
@@ -538,13 +537,27 @@ export async function run({
         ? await safeNotionRead(() => client.getPage(component.seedTaskId))
         : null;
 
+      // Capture the Activity Log poll's `created_time >= startedAt` window
+      // per-component, immediately before postWebhook fires. The diagnose
+      // phase can take minutes for a full-scope backfill (one queryDatabase
+      // per study × Notion's 3 req/s limit), and the seed task is by
+      // definition the most-recently-edited divergent task — exactly the
+      // population most likely to receive concurrent PM edits during a long
+      // diagnose. A run-wide startedAt captured at run() entry would let
+      // background cascades into the poll window and let sort-by-most-recent
+      // pick the wrong entry, producing a false `cascade_failed` verdict.
+      // Per-component scoping closes that race window to the ~100ms gap
+      // between this capture and the postWebhook call inside
+      // applyComponentReplay.
+      const componentStartedAt = new Date().toISOString();
+
       const pollImpl = activityLogDbId
         ? ({ sourceTaskId, timeoutMs, intervalMs }) => pollActivityLog({
             client,
             activityLogDbId,
             studyPageId: study.studyPageId,
             sourceTaskId,
-            startedAt: applyStartedAt,
+            startedAt: componentStartedAt,
             timeoutMs,
             intervalMs,
           })
