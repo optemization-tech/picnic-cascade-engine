@@ -149,37 +149,46 @@ describe('runCascade full study invariants', () => {
     expect(findFixtureGapViolations(finalTasks)).toEqual([]);
   });
 
-  it('keeps the full study gap-clean after pulling Draft ICF later from the left edge', () => {
-    const { finalTasks } = runFixtureScenario(
+  it('keeps non-source tasks gap-clean after pulling Draft ICF later from the left edge', () => {
+    const { finalTasks, params } = runFixtureScenario(
       runCascade,
       'Draft ICF',
       'pull-right',
       { startDelta: 2 },
     );
 
-    expect(findFixtureGapViolations(finalTasks)).toEqual([]);
+    // Pull-right: PM deliberately moved source start right — exclude source from gap check
+    const violations = findFixtureGapViolations(finalTasks)
+      .filter((v) => v.taskId !== params.sourceTaskId);
+    expect(violations).toEqual([]);
   });
 
-  it('keeps the full study gap-clean after dragging Draft Protocol left', () => {
-    const { finalTasks } = runFixtureScenario(
+  it('keeps non-source tasks gap-clean after dragging Draft Protocol left', () => {
+    const { finalTasks, params } = runFixtureScenario(
       runCascade,
       'Draft Protocol (v0.1)',
       'drag-left',
       { startDelta: -2, endDelta: -2 },
     );
 
-    expect(findFixtureGapViolations(finalTasks)).toEqual([]);
+    // Drag mode: PM deliberately positioned the source — exclude it from gap check.
+    // Only downstream tasks must satisfy the zero-gap invariant.
+    const violations = findFixtureGapViolations(finalTasks)
+      .filter((v) => v.taskId !== params.sourceTaskId);
+    expect(violations).toEqual([]);
   });
 
-  it('keeps the full study gap-clean after dragging Draft Protocol right', () => {
-    const { finalTasks } = runFixtureScenario(
+  it('keeps non-source tasks gap-clean after dragging Draft Protocol right', () => {
+    const { finalTasks, params } = runFixtureScenario(
       runCascade,
       'Draft Protocol (v0.1)',
       'drag-right',
       { startDelta: 2, endDelta: 2 },
     );
 
-    expect(findFixtureGapViolations(finalTasks)).toEqual([]);
+    const violations = findFixtureGapViolations(finalTasks)
+      .filter((v) => v.taskId !== params.sourceTaskId);
+    expect(violations).toEqual([]);
   });
 
   it('allows only frozen-edge violations when a frozen upstream blocker cannot move', () => {

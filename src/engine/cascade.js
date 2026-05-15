@@ -424,8 +424,8 @@ function tightenDownstreamFromSeed(seedTaskIds, updatesMap, taskById) {
     if (!effectiveBlockerEnd) continue;
 
     const newStart = nextBusinessDay(effectiveBlockerEnd);
-    // Duration preserved from pre-cascade task state (same pattern as
-    // gapPreservingDownstream:346). Do NOT read duration from updatesMap.
+    if (newStart.getTime() === task.start.getTime()) continue;
+
     const duration = countBDInclusive(task.start, task.end);
     const newEnd = addBusinessDays(newStart, duration - 1);
 
@@ -721,21 +721,21 @@ export function runCascade({
     }
 
     case 'pull-left': {
-      mergeCycleDiagnostics(gapPreservingDownstream(sourceTaskId, refEnd, newEnd, updatesMap, taskById));
+      const seedIds = new Set([sourceTaskId]);
+      mergeCycleDiagnostics(tightenDownstreamFromSeed(seedIds, updatesMap, taskById));
       break;
     }
 
     case 'pull-right': {
-      pullRightUpstream(sourceTaskId, refStart, startDelta, updatesMap, taskById);
-      // Upstream blockers can fan out into sibling downstream branches.
-      // Retighten those branches so pull-right does not leave fresh overlaps.
-      mergeCycleDiagnostics(conflictOnlyDownstream(new Set([sourceTaskId, ...Object.keys(updatesMap)]), updatesMap, taskById));
+      const seedIds = new Set([sourceTaskId]);
+      mergeCycleDiagnostics(tightenDownstreamFromSeed(seedIds, updatesMap, taskById));
       break;
     }
 
     case 'drag-left':
     case 'drag-right': {
-      shiftConnectedComponent(sourceTaskId, startDelta, updatesMap, taskById, [sourceTaskId]);
+      const seedIds = new Set([sourceTaskId]);
+      mergeCycleDiagnostics(tightenDownstreamFromSeed(seedIds, updatesMap, taskById));
       break;
     }
 
@@ -754,6 +754,45 @@ export function runCascade({
   const summary = updates.length === 0
     ? `No tasks needed updating (${cascadeMode})`
     : `${cascadeMode} cascade: ${updates.length} task(s) shifted (triggered by ${sourceTaskName})`;
+
+  // Post-cascade verification: check zero-gap invariant on moved tasks.
+  // Source task is excluded — its position is PM-authoritative.
+  const violations = [];
+  for (const taskId of movedTaskIds) {
+    if (taskId === sourceTaskId) continue;
+    const task = taskById[taskId];
+    if (!task) continue;
+    if (isFrozen(task)) continue;
+
+    const effectiveStart = updatesMap[taskId]
+      ? parseDate(updatesMap[taskId].newStart) : task.start;
+    if (!effectiveStart) continue;
+
+    let latestBlockerEnd = null;
+    for (const blockerId of (task.blockedByIds || [])) {
+      const blocker = taskById[blockerId];
+      if (!blocker) continue;
+      if (isFrozen(blocker)) continue;
+      const blockerEnd = updatesMap[blockerId]
+        ? parseDate(updatesMap[blockerId].newEnd) : blocker.end;
+      if (!blockerEnd) continue;
+      if (!latestBlockerEnd || blockerEnd > latestBlockerEnd) latestBlockerEnd = blockerEnd;
+    }
+
+    if (!latestBlockerEnd) continue;
+    const expectedStart = nextBusinessDay(latestBlockerEnd);
+    if (effectiveStart.getTime() !== expectedStart.getTime()) {
+      violations.push({
+        taskId,
+        taskName: task.name,
+        actualStart: formatDate(effectiveStart),
+        expectedStart: formatDate(expectedStart),
+      });
+    }
+  }
+
+  diagnostics.postCascadeViolations = violations;
+  diagnostics.postCascadeViolationCount = violations.length;
 
   return { updates, movedTaskMap, movedTaskIds, summary, diagnostics };
 }
