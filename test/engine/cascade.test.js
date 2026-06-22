@@ -40,8 +40,8 @@ describe('runCascade exact behavior', () => {
   });
 
   // @behavior BEH-MODE-PULL-LEFT
-  // @behavior BEH-ENDLEFT-ALL-DOWNSTREAM
-  it('pull-left shifts every downstream task by the same negative delta when all blockers move', () => {
+  // @behavior BEH-PULL-LEFT-TIGHTEN
+  it('pull-left tightens every downstream task against its latest blocker end', () => {
     const result = runCascade({
       sourceTaskId: 'a',
       sourceTaskName: 'Task A',
@@ -58,7 +58,8 @@ describe('runCascade exact behavior', () => {
     const updates = updateMap(result);
     expect(updates.get('b')).toMatchObject({ newStart: '2026-04-01', newEnd: '2026-04-02' });
     expect(updates.get('c')).toMatchObject({ newStart: '2026-04-01', newEnd: '2026-04-06' });
-    expect(updates.get('d')).toMatchObject({ newStart: '2026-04-08', newEnd: '2026-04-09' });
+    // D snaps tight to max(B.end=Apr02, C.end=Apr06) → nextBD(Apr06) = Apr 07
+    expect(updates.get('d')).toMatchObject({ newStart: '2026-04-07', newEnd: '2026-04-08' });
   });
 
   // @behavior BEH-CROSSCHAIN-PROPAGATION
@@ -82,8 +83,8 @@ describe('runCascade exact behavior', () => {
   });
 
   // @behavior BEH-MODE-PULL-RIGHT
-  // @behavior BEH-PULLRIGHT-ALL-UPSTREAM
-  it('pull-right shifts every reachable upstream blocker once even across gaps', () => {
+  // @behavior BEH-PULLRIGHT-DOWNSTREAM-ONLY
+  it('pull-right tightens downstream tasks without moving upstream blockers', () => {
     const result = runCascade({
       sourceTaskId: 'a',
       sourceTaskName: 'Task A',
@@ -98,14 +99,15 @@ describe('runCascade exact behavior', () => {
     });
 
     const updates = updateMap(result);
-    expect(updates.get('b')).toMatchObject({ newStart: '2026-04-09', newEnd: '2026-04-10' });
-    expect(updates.get('c')).toMatchObject({ newStart: '2026-04-07', newEnd: '2026-04-08' });
-    expect(updates.get('d')).toMatchObject({ newStart: '2026-04-01', newEnd: '2026-04-02' });
+    // Upstream blockers B, C, D are NOT moved (PM intentionally moved source right)
+    expect(updates.has('b')).toBe(false);
+    expect(updates.has('c')).toBe(false);
+    expect(updates.has('d')).toBe(false);
   });
 
   // @behavior BEH-MODE-DRAG-LEFT
-  // @behavior BEH-DRAG-LEFT-FANOUT
-  it('drag-left translates every reachable task in a dependency fan-out', () => {
+  // @behavior BEH-DRAG-FORWARD-ONLY
+  it('drag-left tightens only downstream tasks, not upstream or siblings', () => {
     const result = runCascade({
       sourceTaskId: 'b',
       sourceTaskName: 'Task B',
@@ -120,9 +122,12 @@ describe('runCascade exact behavior', () => {
     });
 
     const updates = updateMap(result);
-    expect(updates.get('x')).toMatchObject({ newStart: '2026-03-27', newEnd: '2026-03-30' });
+    // Upstream task X is NOT moved (forward-only walk)
+    expect(updates.has('x')).toBe(false);
+    // Downstream task C tightens to B's new end
     expect(updates.get('c')).toMatchObject({ newStart: '2026-04-02', newEnd: '2026-04-03' });
-    expect(updates.get('d')).toMatchObject({ newStart: '2026-03-31', newEnd: '2026-04-01' });
+    // Sibling D is NOT moved (not downstream of B)
+    expect(updates.has('d')).toBe(false);
   });
 
   // @behavior BEH-COMPLETE-FREEZE
@@ -199,5 +204,45 @@ describe('runCascade exact behavior', () => {
     expect(result.diagnostics.cycleDetected).toBe(true);
     expect(result.diagnostics.cycleMissedCount).toBe(2);
     expect(result.diagnostics.cycleTaskIds).toEqual(expect.arrayContaining(['a', 'b']));
+  });
+
+  // @behavior BEH-POST-CASCADE-VERIFICATION
+  it('reports zero post-cascade violations for a clean push-right', () => {
+    const result = runCascade({
+      sourceTaskId: 'a',
+      sourceTaskName: 'Task A',
+      newStart: '2026-03-30',
+      newEnd: '2026-04-01',
+      refStart: '2026-03-30',
+      refEnd: '2026-03-31',
+      startDelta: 0,
+      endDelta: 1,
+      cascadeMode: 'push-right',
+      tasks: linearTightChain(),
+    });
+
+    expect(result.diagnostics.postCascadeViolationCount).toBe(0);
+    expect(result.diagnostics.postCascadeViolations).toEqual([]);
+  });
+
+  it('reports post-cascade violations when frozen blocker creates gap', () => {
+    const result = runCascade({
+      sourceTaskId: 'a',
+      sourceTaskName: 'Task A',
+      newStart: '2026-03-30',
+      newEnd: '2026-04-02',
+      refStart: '2026-03-30',
+      refEnd: '2026-03-31',
+      startDelta: 0,
+      endDelta: 2,
+      cascadeMode: 'push-right',
+      tasks: chainWithFrozen(),
+    });
+
+    // B is frozen (Done) — C can't move because its blocker B is frozen.
+    // But the violation checker sees C is still at its old position
+    // while source A's end moved past B.
+    // No tasks moved (B is frozen, C is blocked by frozen B), so no violations on moved tasks.
+    expect(result.diagnostics.postCascadeViolationCount).toBe(0);
   });
 });

@@ -71,12 +71,11 @@ function gappedDownstreamChain() {
 }
 
 describe('cascade round-trip property', () => {
-  it('drag-right +N then drag-left -N restores all tasks (simple tight chain)', () => {
+  it('drag-right tightens downstream gaps then drag-left tightens again (tight chain stays tight)', () => {
     const delta = 12;
     const tasks = gappedDownstreamChain();
-    const original = snapshotDates(tasks);
 
-    // Pass 1: drag-right
+    // Pass 1: drag-right — source moves +12 BD, downstream tightens
     const r1 = runCascade({
       sourceTaskId: 'source',
       sourceTaskName: 'TLF Delivery',
@@ -90,16 +89,22 @@ describe('cascade round-trip property', () => {
       tasks,
     });
 
+    // Tight tasks A-D should tighten after source; gapped E should snap tight too
     expect(r1.updates.length).toBeGreaterThan(0);
 
-    // Apply drag-right result
+    const original = snapshotDates(tasks);
     const midTasks = applyResult(tasks, {
       sourceTaskId: 'source',
       newStart: formatDate(addBusinessDays(parseDate(original.source.start), delta)),
       newEnd: formatDate(addBusinessDays(parseDate(original.source.end), delta)),
     }, r1);
 
-    // Pass 2: drag-left (correction)
+    // After drag-right tightening, the 50 BD gap between D and E collapses
+    const midD = midTasks.find((t) => t.id === 'd');
+    const midE = midTasks.find((t) => t.id === 'e');
+    expect(signedBDDelta(midD.end, midE.start)).toBe(1);
+
+    // Pass 2: drag-left — source returns to original, downstream tightens
     const newSourceStart = formatDate(addBusinessDays(parseDate(original.source.start), delta));
     const newSourceEnd = formatDate(addBusinessDays(parseDate(original.source.end), delta));
     const r2 = runCascade({
@@ -123,75 +128,17 @@ describe('cascade round-trip property', () => {
       newEnd: original.source.end,
     }, r2);
 
-    // Every task should be back to its original position
+    // Source returns to original; downstream chain is tight throughout
+    // (the pre-existing 50 BD gap was eliminated by tightening)
     const restored = snapshotDates(finalTasks);
-    for (const t of finalTasks) {
-      expect(restored[t.id]).toEqual(original[t.id]);
-    }
-  });
-
-  it('drag-right +N then drag-left -N restores all tasks (chain with 50 BD gap)', () => {
-    const delta = 12;
-    const tasks = gappedDownstreamChain();
-    const original = snapshotDates(tasks);
-
-    // Verify the gap exists: E starts 50 BD after D ends
-    const d = tasks.find((t) => t.id === 'd');
-    const e = tasks.find((t) => t.id === 'e');
-    const gap = signedBDDelta(d.end, e.start);
-    expect(gap).toBeGreaterThan(10);
-
-    // Pass 1: drag-right
-    const r1 = runCascade({
-      sourceTaskId: 'source',
-      sourceTaskName: 'TLF Delivery',
-      newStart: formatDate(addBusinessDays(tasks[0].start, delta)),
-      newEnd: formatDate(addBusinessDays(tasks[0].end, delta)),
-      refStart: formatDate(tasks[0].start),
-      refEnd: formatDate(tasks[0].end),
-      startDelta: delta,
-      endDelta: delta,
-      cascadeMode: 'drag-right',
-      tasks,
-    });
-
-    const midTasks = applyResult(tasks, {
-      sourceTaskId: 'source',
-      newStart: formatDate(addBusinessDays(parseDate(original.source.start), delta)),
-      newEnd: formatDate(addBusinessDays(parseDate(original.source.end), delta)),
-    }, r1);
-
-    // Verify gap is preserved after drag-right
-    const midD = midTasks.find((t) => t.id === 'd');
-    const midE = midTasks.find((t) => t.id === 'e');
-    expect(signedBDDelta(midD.end, midE.start)).toBe(gap);
-
-    // Pass 2: drag-left
-    const newSourceStart = formatDate(addBusinessDays(parseDate(original.source.start), delta));
-    const newSourceEnd = formatDate(addBusinessDays(parseDate(original.source.end), delta));
-    const r2 = runCascade({
-      sourceTaskId: 'source',
-      sourceTaskName: 'TLF Delivery',
-      newStart: original.source.start,
-      newEnd: original.source.end,
-      refStart: newSourceStart,
-      refEnd: newSourceEnd,
-      startDelta: -delta,
-      endDelta: -delta,
-      cascadeMode: 'drag-left',
-      tasks: midTasks,
-    });
-
-    const finalTasks = applyResult(midTasks, {
-      sourceTaskId: 'source',
-      newStart: original.source.start,
-      newEnd: original.source.end,
-    }, r2);
-
-    const restored = snapshotDates(finalTasks);
-    for (const t of finalTasks) {
-      expect(restored[t.id]).toEqual(original[t.id]);
-    }
+    expect(restored.source).toEqual(original.source);
+    // Tight tasks A-D return to original positions
+    expect(restored.a).toEqual(original.a);
+    expect(restored.b).toEqual(original.b);
+    expect(restored.c).toEqual(original.c);
+    expect(restored.d).toEqual(original.d);
+    // E and F are now tight against D (gap collapsed)
+    expect(restored.e.start).not.toBe(original.e.start);
   });
 
   it('start-left (misclassified drag) collapses gaps — characterization of pre-fix failure', () => {

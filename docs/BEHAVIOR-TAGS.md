@@ -8,17 +8,18 @@ For the behavior contract itself (governance matrix, cross-chain algorithm, chan
 
 - `BEH-MODE-PUSH-RIGHT`: End-only-right (`startDelta == 0`, `endDelta > 0`) pushes downstream dependents right only when their current start violates `nextBusinessDay(latest blocker end)`. Upstream tasks do not move.
 - `BEH-MODE-START-LEFT`: Start-only-left (`startDelta < 0`, `endDelta == 0`) pulls upstream blockers left only on conflict. Downstream tasks do not move.
-- `BEH-MODE-PULL-LEFT`: End-only-left (`startDelta == 0`, `endDelta < 0`) pulls downstream dependents left by the source's negative business-day delta, clamped against the latest non-frozen blocker. It does not move unrelated blocker chains.
-- `BEH-MODE-PULL-RIGHT`: Start-only-right (`startDelta > 0`, `endDelta == 0`) pulls upstream blockers right by the same business-day delta, preserving upstream slack.
-- `BEH-MODE-DRAG-LEFT`: Drag-left (`startDelta < 0`, `endDelta < 0`) shifts the whole dependency-connected graph left by the same business-day delta, excluding frozen tasks and stripped parent-level dependency edges.
-- `BEH-MODE-DRAG-RIGHT`: Drag-right (`startDelta > 0`, `endDelta > 0`) shifts the whole dependency-connected graph right by the same business-day delta, with the same exclusions.
+- `BEH-MODE-PULL-LEFT`: End-only-left (`startDelta == 0`, `endDelta < 0`) tightens downstream dependents to `nextBusinessDay(latest non-frozen blocker end)`. It collapses pre-existing gaps inside the reachable downstream chain and does not move unrelated blocker chains.
+- `BEH-MODE-PULL-RIGHT`: Start-only-right (`startDelta > 0`, `endDelta == 0`) treats the source task's new position as PM-authored and tightens downstream dependents only. Upstream blockers do not move.
+- `BEH-MODE-DRAG-LEFT`: Drag-left (`startDelta < 0`, `endDelta < 0`) treats the source task's new position as PM-authored and tightens reachable downstream dependents only. Upstream blockers and sibling branches do not move.
+- `BEH-MODE-DRAG-RIGHT`: Drag-right (`startDelta > 0`, `endDelta > 0`) treats the source task's new position as PM-authored and tightens reachable downstream dependents only. Upstream blockers and sibling branches do not move.
 
 ## 2) Cascade Graph Rules
 
-- `BEH-ENDLEFT-ALL-DOWNSTREAM`: End-only-left can move multiple downstream tasks in one pass; each reachable downstream task moves left by up to the source delta and is clamped by its latest blocker.
-- `BEH-PULLRIGHT-ALL-UPSTREAM`: Start-only-right shifts all reachable upstream blockers by the same business-day delta, even when there were gaps.
-- `BEH-DRAG-LEFT-FANOUT`: Drag-left translates every reachable branch in a dependency fan-out by the same delta.
-- `BEH-CROSSCHAIN-PROPAGATION`: Stationary cross-chain blockers clamp end-only-left movement; drag modes move the connected cross-chain graph instead of using a separate blocker-moving heuristic.
+- `BEH-PULL-LEFT-TIGHTEN`: End-only-left can move multiple downstream tasks in one pass; each reachable downstream task tightens to `nextBusinessDay(latest non-frozen blocker end)` rather than preserving source-delta gaps.
+- `BEH-PULLRIGHT-DOWNSTREAM-ONLY`: Start-only-right does not shift reachable upstream blockers. The source task's rightward move is PM-authored, and only downstream dependents tighten.
+- `BEH-DRAG-FORWARD-ONLY`: Drag modes walk the graph forward through `blockingIds` only. Upstream blockers and sibling branches are left untouched; reachable downstream dependents tighten against their latest non-frozen blockers.
+- `BEH-POST-CASCADE-VERIFICATION`: After a cascade, each moved non-source task is checked against the zero-gap invariant. Violations are included in route diagnostics and Activity Log details.
+- `BEH-CROSSCHAIN-PROPAGATION`: Stationary cross-chain blockers clamp downstream tightening; drag modes tighten reachable downstream chains instead of translating the whole connected graph.
 - `BEH-CROSSCHAIN-FIXEDPOINT`: A single cascade execution should converge to the mode-specific fixed point for the edited graph, or report unresolved residue after the safety cap.
 - `BEH-SAFETY-CAP`: The iterative upstream pull for `start-left` has a hard safety cap.
 - `BEH-RESIDUE-REPORTING`: If the safety cap is hit, unresolved residue is surfaced in diagnostics.

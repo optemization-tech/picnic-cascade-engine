@@ -84,6 +84,10 @@ function buildActivityDetails({ parsed, classified, patched, sourceFinal, cascad
         : [],
       clampedEdges: Array.isArray(diagnostics.clampedEdges) ? diagnostics.clampedEdges : [],
     },
+    verification: {
+      postCascadeViolationCount: diagnostics?.postCascadeViolationCount ?? null,
+      postCascadeViolations: (diagnostics?.postCascadeViolations || []).slice(0, 10),
+    },
     error: error
       ? {
         errorCode: error.code || null,
@@ -582,7 +586,18 @@ async function processDateCascade(payload) {
       ? cascadeResult.diagnostics.unresolvedResidue.length
       : 0;
 
+    const violationCount = cascadeResult?.diagnostics?.postCascadeViolationCount ?? 0;
     tracer.set('update_count', patched.updatedCount);
+    tracer.set('post_cascade_violations', violationCount);
+    if (violationCount > 0) {
+      console.log(JSON.stringify({
+        event: 'post_cascade_violations',
+        cascadeId: tracer.cascadeId,
+        taskName: parsed.taskName,
+        violationCount,
+        violations: (cascadeResult.diagnostics.postCascadeViolations || []).slice(0, 5),
+      }));
+    }
     console.log(tracer.toConsoleLog());
 
     tracer.startPhase('reportComplete');
