@@ -2,7 +2,7 @@
 // Cascade Engine — Directional Date Cascade
 // Ported from WF-D: Resolve Cascade (n8n Code node)
 // Handles: push-right, pull-left, start-left, pull-right, drag-left, drag-right
-// v8 2026-04-08: split leftward edit modes and treat drags as whole-graph translation
+// v9 2026-05-15: drags/pull-right/pull-left tighten downstream from the edited task.
 // ============================================================
 
 import {
@@ -271,7 +271,7 @@ function pullLeftUpstream(sourceId, newStart, updatesMap, taskById) {
 // Computes a single negative BD delta from the source end
 // change and shifts ALL downstream tasks by that same delta,
 // clamped to blocker constraints.
-// Used by: pull-left
+// Legacy helper retained for comparison with the current tighten-downstream behavior.
 // -----------------------------------------------------------
 function gapPreservingDownstream(sourceId, sourceOldEnd, newEnd, updatesMap, taskById) {
   const sourceTask = taskById[sourceId];
@@ -446,7 +446,7 @@ function tightenDownstreamFromSeed(seedTaskIds, updatesMap, taskById) {
 // When a task's start moves right, shift ALL upstream blockers
 // right by the same delta unconditionally (gap-preserving).
 // Meg-confirmed 2026-03-31: no adjacency check, no gap absorption.
-// Used by: pull-right, drag-right (Pass 1)
+// Legacy helper retained for comparison with the current downstream-only pull-right behavior.
 // -----------------------------------------------------------
 function pullRightUpstream(sourceId, refStart, deltaBD, updatesMap, taskById) {
   const queue = [sourceId];
