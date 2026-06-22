@@ -411,9 +411,27 @@ PMs can wire or rewire a task's `Blocked by` relation manually. When they do, th
 | Condition | Symptom | Resolution |
 |---|---|---|
 | Automation disabled or `Fill Refs` view missing/misfiltered | Reference stays empty on manual tasks; first edit yields `delta = 0`; cascade silently no-ops | Re-enable the automation; verify the view still matches manually-added pages |
-| Automation overwrites already-populated Reference | Every subsequent manual-task edit yields `delta = 0` after stale-ref correction; cascades silently no-op | Tighten the view filter (`[Do Not Edit] Reference Start Date is empty`) or guard the action formulas with an `if Reference is empty` conditional |
+| Automation overwrites already-populated Reference | Every subsequent manual-task edit yields `delta = 0` after stale-ref correction; cascades silently no-op. **Confirmed 2026-05-14** on Sanofi Pre-T1D study — all leaf tasks showed Reference = Dates. | Tighten the view filter: `[Do Not Edit] Reference Start Date is empty` AND `[Do Not Edit] Reference End Date is empty` (both must be empty). Code-level mitigation: replay script sets `_replayTrustRef` flag to bypass stale-ref correction when DB Reference is unreliable (see `_replayTrustRef` bypass below). |
 | `Fill Refs` view includes bot-created tasks | Engine's Reference writes during cascade re-trigger the automation; race with the post-cascade Reference PATCH | Add `Created by != <integration bot user(s)>` to the view filter |
 | Manual task created without Dates | No cascade expected; Reference remains empty until Dates is set | On first Dates set, the automation bootstraps Reference and the lifecycle proceeds normally |
+
+#### `_replayTrustRef` bypass (defense-in-depth)
+
+When `_replayTrustRef: true` is set on the webhook body, `classify()` skips the stale-reference correction block entirely, trusting the webhook's Reference values over the DB snapshot. This flag is set exclusively by the `replay-dropped-cascades` script to handle the case where the Fill Refs automation has clobbered DB Reference values (Reference = Dates on all tasks).
+
+The flag travels: `body._replayTrustRef` → `parseWebhookPayload` → `parsed._replayTrustRef` → `processDateCascade` → `classify(parsed, allTasks, startDelta, endDelta, { trustWebhookRef: true })`.
+
+When the bypass activates and DB refs differ from webhook refs (i.e., a correction would have fired), a `stale_ref_bypass_replay` telemetry event is emitted to Railway logs for operator correlation.
+
+No additional auth gating is applied — the webhook endpoint already requires `x-webhook-secret` header authentication (Section 7).
+
+#### Notion Fill Refs filter verification
+
+To verify or fix the Fill Refs automation filter in the Notion UI:
+
+1. Open Study Tasks database → Views → "Fill Refs"
+2. Verify filter includes: `[Do Not Edit] Reference Start Date is empty` AND `[Do Not Edit] Reference End Date is empty`
+3. If missing, add the condition — the automation should only bootstrap Reference on new tasks where neither Reference date has been set
 
 #### L1 source
 
@@ -428,6 +446,18 @@ For every behavior change:
 5. Record decision in pulse log
 
 ## Changelog
+
+### 2026-05-14 — Fill Refs race condition fix and `_replayTrustRef` bypass
+
+Plan: `docs/plans/2026-05-14-001-fix-fill-refs-race-replay-resilience-plan.md`
+
+The Notion "Fill Refs" automation was confirmed misconfigured — its view filter did not restrict to tasks where Reference is empty, causing it to overwrite already-populated Reference values on every Dates edit. This eliminated the Reference ≠ Dates divergence signal that `classify()`'s stale-reference correction relies on, making the `replay-dropped-cascades` script produce `delta = 0` / `cascadeMode = null` on every attempt.
+
+**Code fix:** Added `_replayTrustRef` flag that travels through the webhook payload → `parseWebhookPayload` → `processDateCascade` → `classify()`. When set, `classify()` skips the stale-reference correction block and trusts the webhook's Reference values. The replay script now sets this flag on all synthesized payloads. A `stale_ref_bypass_replay` telemetry event is emitted when the bypass skips an actual correction.
+
+**Notion fix (manual):** The Fill Refs view filter must include `[Do Not Edit] Reference Start Date is empty` AND `[Do Not Edit] Reference End Date is empty`. Instructions documented in Section 11.
+
+Files: `src/gates/guards.js`, `src/engine/classify.js`, `src/routes/date-cascade.js`, `scripts/replay-dropped-cascades.js`. Tags: `BEH-FILL-REFS-RACE`, `BEH-REPLAY-TRUST-REF`.
 
 ### 2026-05-14 — Stale-ref correction drag-mode preservation guard
 

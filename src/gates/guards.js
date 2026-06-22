@@ -96,6 +96,7 @@ export function parseWebhookPayload(payload) {
     hasSubtasks: subtaskRel.length > 0,
     ...classifyWebhookActor(payload, { sourcePriority: 'edit-first', route: 'guards' }),
     executionId,
+    _replayTrustRef: Boolean(body._replayTrustRef),
     rawProperties: props,
   };
 }

@@ -55,7 +55,7 @@ function computeCascadeMode(startDelta, endDelta) {
  *   staleRefCorrected: boolean
  * }}
  */
-export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
+export function classify(task, allTasks = [], startDeltaInput, endDeltaInput, { trustWebhookRef = false } = {}) {
   const sourceTaskId = task.taskId || task.id;
   const sourceTaskName = task.taskName || task.name || sourceTaskId;
   const newStart = task.newStart;
@@ -109,7 +109,7 @@ export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
     dbRefEnd = dbSourceTask.refEnd || null;
   }
 
-  if (dbRefStart && dbRefEnd && (dbRefStart !== refStart || dbRefEnd !== refEnd)) {
+  if (!trustWebhookRef && dbRefStart && dbRefEnd && (dbRefStart !== refStart || dbRefEnd !== refEnd)) {
     const webhookStartDelta = startDelta;
     const webhookEndDelta = endDelta;
     refStart = dbRefStart;
@@ -149,6 +149,15 @@ export function classify(task, allTasks = [], startDeltaInput, endDeltaInput) {
     }
 
     staleRefCorrected = true;
+  } else if (trustWebhookRef && dbRefStart && dbRefEnd && (dbRefStart !== refStart || dbRefEnd !== refEnd)) {
+    console.log(JSON.stringify({
+      event: 'stale_ref_bypass_replay',
+      taskId: sourceTaskId,
+      webhookRefStart: refStart,
+      webhookRefEnd: refEnd,
+      dbRefStart,
+      dbRefEnd,
+    }));
   }
 
   return {
